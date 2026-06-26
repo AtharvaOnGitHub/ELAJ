@@ -1,0 +1,21 @@
+optimizer:
+  name: AdamW
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  betas: [0.9, 0.999]
+
+scheduler:
+  name: CosineAnnealingLR
+  T_max: 100           # matches max_epochs
+
+batch_size: 256
+max_epochs: 100
+grad_clip_norm: 1.0
+early_stop_patience: 10
+val_check_interval: 1
+
+kl_annealing:
+  beta_max: 1.0
+  warmup_fraction: 0.20    # KL weight ramps 0 → beta_max over first 20% of steps
+
+resume_from_checkpoint: null    # path to a checkpoint; null = train from scratch

@@ -1,0 +1,14 @@
+name: full_model
+description: "Full ELAJ architecture. CCE off by default; toggle with model.cce.enabled override."
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/full_model/
+seed: 24
+
+overrides: {}
+# Example — enable CCE without touching any YAML file:
+#   overrides:
+#     model.cce.enabled: true

@@ -1,0 +1,37 @@
+name: ELAJ_small
+
+# Latent geometry
+# d_z = d_gauss + 2*n_vMF = 32 + 16 = 48  (each vMF dim stored as cos/sin pair)
+# d_gene_rep = d_token + d_agg = 32 + 64 = 96
+d_token: 32
+d_agg: 64
+d_gauss: 32
+n_vMF: 8
+d_dec: 64
+n_groups: null      # populated from vocabulary.json at runtime
+n_studies: null     # populated from data config at runtime
+
+group_encoder:
+  n_layers: 2
+  n_heads: 4         # 32 / 4 = 8 dims per head
+  dropout: 0.1
+
+aggregation_encoder:
+  n_layers: 2
+  n_heads: 4         # 64 / 4 = 16 dims per head
+  dropout: 0.1
+
+decoder:
+  linear_only: true
+
+# CCE: Contrastive Cell Embeddings
+# enabled is the on/off switch; all other params live here.
+cce:
+  enabled: false
+  temperature: 0.07
+  lambda_cce: 0.1
+
+# DAB: Domain Adversarial Batch correction
+dab:
+  lambda_dab: 1.0
+  hidden_dim: 64

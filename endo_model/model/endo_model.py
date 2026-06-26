@@ -176,8 +176,11 @@ class EndoFoundationModel(nn.Module):
 
         gene_reps = torch.zeros(B, G_meas, d_gene_rep, device=device)
 
-        # Track position in the measured sequence for each gene group
-        measured_set = set(measured_global_idxs.tolist())
+        # O(G_meas) dict: global_idx → position in measured_global_idxs.
+        # Replaces the O(G_k × G_meas) per-gene tensor scan in the inner loop.
+        global_to_meas_pos: dict[int, int] = {
+            int(g): pos for pos, g in enumerate(measured_global_idxs.tolist())
+        }
 
         for group_name in self.vocabulary.group_names:
             global_idxs_all = self._group_global_idxs[group_name]  # list[int]
@@ -188,13 +191,9 @@ class EndoFoundationModel(nn.Module):
             positions_in_meas: list[int] = []
 
             for within_i, global_i in enumerate(global_idxs_all):
-                if global_i in measured_set:
-                    # Position of this global_i in measured_global_idxs
-                    pos = (measured_global_idxs == global_i).nonzero(
-                        as_tuple=True
-                    )[0].item()
+                if global_i in global_to_meas_pos:
                     within_idxs_sel.append(within_i)
-                    positions_in_meas.append(int(pos))
+                    positions_in_meas.append(global_to_meas_pos[global_i])
 
             if not within_idxs_sel:
                 continue

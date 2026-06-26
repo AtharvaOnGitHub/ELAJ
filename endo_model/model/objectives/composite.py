@@ -1,8 +1,10 @@
 """CompositeLoss: weighted sum of all training objectives.
 
 Weights are schedule-aware:
-  - lambda_dab linearly ramps from 0 → lambda_dab_max over the first half of
-    training (to avoid premature adversarial disruption of feature learning).
+  - beta_kl linearly ramps from 0 → 1 over the first 20 % of training steps
+    (avoids posterior collapse before reconstruction is established).
+  - lambda_dab linearly ramps from 0 → lambda_dab_max over the first 50 % of
+    training (avoids premature adversarial disruption of feature learning).
   - All other weights are fixed throughout training.
 
 Call signature is designed for the Trainer; includes optional cce_output2 for
@@ -48,7 +50,7 @@ class CompositeLoss(nn.Module):
         w_cce: float = 0.0,
         lambda_dab_max: float = 1.0,
         cce_temperature: float = 0.1,
-        dab_hidden_dim: int = 128,
+        dab_hidden_dim: int = 64,
         dab_dropout: float = 0.1,
     ) -> None:
         super().__init__()
@@ -95,11 +97,13 @@ class CompositeLoss(nn.Module):
         x_meas = x_meas.float()
         nb = self.nb_loss(x_meas, model_output["mu_hat"], model_output["theta"])
 
-        # KL divergences
+        # KL divergences — beta annealing: ramp 0 → 1 over first 20 % of steps
+        # to prevent posterior collapse before reconstruction is established.
+        beta_kl = min(1.0, current_step / max(0.20 * total_steps, 1))
         kl_gauss = self.gauss_kl(model_output["mu_gauss"], model_output["logvar"])
         kl_vmf = self.vmf_kl(model_output["kappa"])
 
-        # DAB with linearly ramped lambda
+        # DAB with linearly ramped lambda (0 → max over first 50 % of steps)
         ramp = min(1.0, 2.0 * current_step / max(total_steps, 1))
         lambda_dab = self.lambda_dab_max * ramp
         dab_logits = self.dab(
@@ -107,15 +111,18 @@ class CompositeLoss(nn.Module):
         )
         dab_loss = F.cross_entropy(dab_logits, batch["study_id"])
 
-        # CCE (optional)
+        # CCE — contrastive loss over concat(mu_gauss, mu_angle) so circular
+        # latent dims are included in the alignment objective.
         cce_loss = torch.tensor(0.0, device=nb.device)
         if self.cce is not None and model_output2 is not None:
-            cce_loss = self.cce(model_output["mu_gauss"], model_output2["mu_gauss"])
+            emb1 = torch.cat([model_output["mu_gauss"], model_output["mu_angle"]], dim=-1)
+            emb2 = torch.cat([model_output2["mu_gauss"], model_output2["mu_angle"]], dim=-1)
+            cce_loss = self.cce(emb1, emb2)
 
         total = (
             self.w_nb * nb
-            + self.w_kl_gauss * kl_gauss
-            + self.w_kl_vmf * kl_vmf
+            + beta_kl * self.w_kl_gauss * kl_gauss
+            + beta_kl * self.w_kl_vmf * kl_vmf
             + self.w_dab * dab_loss
             + self.w_cce * cce_loss
         )
@@ -124,6 +131,7 @@ class CompositeLoss(nn.Module):
             "nb": nb,
             "kl_gauss": kl_gauss,
             "kl_vmf": kl_vmf,
+            "beta_kl": torch.tensor(beta_kl),
             "dab": dab_loss,
             "cce": cce_loss,
             "total": total,

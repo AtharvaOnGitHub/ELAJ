@@ -6,14 +6,14 @@ Each of the n_vMF directional variables is a unit circle angle represented as
 The von Mises distribution is parameterised by mu_angle (the mean direction)
 and kappa (the concentration).  Higher kappa = more peaked distribution.
 
-During sampling, θ is drawn via the rejection-sampling approximation of Best &
-Fisher (1979) wrapped in the von Mises distribution.  At eval time, mu_angle
-is used directly.
+Sampling uses torch.distributions.VonMises.rsample() — a reparameterised
+sample from the true von Mises distribution, consistent with VonMisesKLLoss.
 """
 
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.distributions import VonMises
 
 
 class VonMisesBranch(nn.Module):
@@ -41,6 +41,7 @@ class VonMisesBranch(nn.Module):
                 mu_angle: (B, n_vMF) — mean angles in [-π, π].
                 kappa:    (B, n_vMF) — concentration, strictly > 0.
                 z_vmf:    (B, 2*n_vMF) — sampled angles as (cos, sin) pairs.
+                          Layout: [cos_0, cos_1, ..., cos_{n-1}, sin_0, ..., sin_{n-1}].
         """
         mu_angle = self.mu_head(cell_cls)              # (B, n_vMF)
         kappa = torch.nn.functional.softplus(
@@ -48,7 +49,9 @@ class VonMisesBranch(nn.Module):
         ) + 1e-4                                       # (B, n_vMF) > 0
 
         if self.training:
-            theta = self._sample_von_mises(mu_angle, kappa)   # (B, n_vMF)
+            # rsample() gives reparameterised gradients from the true vMF,
+            # consistent with VonMisesKLLoss which uses the vMF KL formula.
+            theta = VonMises(loc=mu_angle, concentration=kappa).rsample()
         else:
             theta = mu_angle
 
@@ -57,21 +60,3 @@ class VonMisesBranch(nn.Module):
         z_vmf = torch.cat([cos_theta, sin_theta], dim=-1)  # (B, 2*n_vMF)
 
         return mu_angle, kappa, z_vmf
-
-    @staticmethod
-    def _sample_von_mises(mu: Tensor, kappa: Tensor) -> Tensor:
-        """Approximate von Mises sampling via wrapped normal approximation.
-
-        The wrapped normal approximation N(mu, 1/kappa) is used; it closely
-        tracks the true vMF for kappa > 1 and is differentiable.
-
-        Args:
-            mu:    (B, n_vMF) mean angles.
-            kappa: (B, n_vMF) concentration values.
-
-        Returns:
-            (B, n_vMF) sampled angles.
-        """
-        std = (1.0 / (kappa + 1e-4)).sqrt()
-        eps = torch.randn_like(mu)
-        return mu + eps * std

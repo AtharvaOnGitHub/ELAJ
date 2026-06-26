@@ -35,8 +35,8 @@ class GaussianBranch(nn.Module):
                 z:      (B, d_gauss) — reparameterised sample
                         (identical to mu during eval/when training=False).
         """
-        mu = self.mu_head(cell_cls)        # (B, d_gauss)
-        logvar = self.logvar_head(cell_cls)  # (B, d_gauss)
+        mu = self.mu_head(cell_cls)                          # (B, d_gauss)
+        logvar = self.logvar_head(cell_cls).clamp(-10.0, 10.0)  # (B, d_gauss)
 
         if self.training:
             std = torch.exp(0.5 * logvar)

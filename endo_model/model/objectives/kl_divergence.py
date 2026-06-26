@@ -4,8 +4,9 @@ GaussianKLLoss:
     KL(N(mu, sigma^2) || N(0, I)) = 0.5 * sum(mu^2 + sigma^2 - log(sigma^2) - 1)
 
 VonMisesKLLoss:
-    KL(vMF(mu, kappa) || Uniform) ≈ log(I_0(kappa)) - kappa * A(kappa)
+    KL(vMF(mu, kappa) || Uniform) = kappa * A(kappa) - log(I_0(kappa))
     where A(kappa) = I_1(kappa) / I_0(kappa) is the mean resultant length.
+    This is always ≥ 0; minimising it pushes kappa → 0 (towards uniform prior).
 """
 
 import torch
@@ -49,5 +50,5 @@ class VonMisesKLLoss(nn.Module):
         i0 = torch.special.i0(kappa)                  # (B, n_vMF)
         i1 = torch.special.i1(kappa)                  # (B, n_vMF)
         A = i1 / (i0 + eps)                            # mean resultant length
-        kl = torch.log(i0 + eps) - kappa * A          # (B, n_vMF)
+        kl = kappa * A - torch.log(i0 + eps)          # (B, n_vMF) ≥ 0
         return kl.mean()

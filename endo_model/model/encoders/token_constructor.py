@@ -82,11 +82,16 @@ class TokenConstructor(nn.Module):
             identity = self.group_embedding(group_name, within_idxs)   # (B, G_k, D)
             value_enc = self.value_encoder(counts_safe)                 # (B, G_k, D)
 
-            tokens = identity + value_enc              # (B, G_k, D)
-
-            # Replace DNS positions with the learned DNS embedding
-            dns_expanded = self.dns_embedding.unsqueeze(0).unsqueeze(0).expand_as(tokens)
-            tokens[dns_mask] = dns_expanded[dns_mask]
+            # DNS genes: identity + dns_embedding (preserves gene identity).
+            # Measured genes: identity + value_encoder(count).
+            # torch.where avoids in-place modification of autograd nodes.
+            dns_emb = self.dns_embedding.view(1, 1, -1).expand(B, G_k, -1)  # (B, G_k, D)
+            value_or_dns = torch.where(
+                dns_mask.unsqueeze(-1),   # (B, G_k, 1)
+                dns_emb,
+                value_enc,
+            )
+            tokens = identity + value_or_dns          # (B, G_k, D)
 
             # Apply DSBN (study-level affine correction)
             tokens = self.dsbn(tokens, study_id)       # (B, G_k, D)

@@ -19,8 +19,8 @@ env/
 .ipynb_checkpoints/
 *.ipynb
 
-# Data (never commit raw or processed data)
-data/
+# Data (never commit raw or processed data — top-level only, not endo_model/data/)
+/data/
 outputs/
 
 # Checkpoints

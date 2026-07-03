@@ -1,0 +1,34 @@
+name: ELAJ_medium
+
+# Latent geometry
+# d_z = d_gauss + 2*n_vMF = 32 + 16 = 48  (same as small; circular dims unchanged)
+# d_gene_rep = d_token + d_agg = 64 + 128 = 192
+d_token: 64
+d_agg: 128
+d_gauss: 32
+n_vMF: 8
+d_dec: 64
+n_groups: null
+n_studies: null
+
+group_encoder:
+  n_layers: 2
+  n_heads: 4         # 64 / 4 = 16 dims per head
+  dropout: 0.1
+
+aggregation_encoder:
+  n_layers: 2
+  n_heads: 4         # 128 / 4 = 32 dims per head
+  dropout: 0.1
+
+decoder:
+  linear_only: true
+
+cce:
+  enabled: false
+  temperature: 0.07
+  lambda_cce: 0.1
+
+dab:
+  lambda_dab: 1.0
+  hidden_dim: 64

@@ -1,0 +1,11 @@
+name: baseline_pca
+description: "PCA baseline for scIB comparison against ELAJ."
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/baseline_pca/
+seed: 24
+
+overrides: {}

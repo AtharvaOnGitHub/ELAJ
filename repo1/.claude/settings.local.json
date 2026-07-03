@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import endo_model; from endo_model.configs import load_experiment; from endo_model.utils import set_seed, DeviceManager, get_logger; print\\('imports OK'\\)\")",
+      "Bash(python3 -m pytest tests/test_configs/ -v)",
+      "Bash(python3 -m pytest tests/test_utils/ --collect-only)",
+      "Bash(python3 -m pytest tests/ -v)"
+    ]
+  }
+}

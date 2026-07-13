@@ -1,0 +1,19 @@
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  gene_aliases: configs/gene_aliases.yaml
+  patient_id_map: data/processed/patient_id_map.csv
+  gene_mapping_issues: data/processed/gene_mapping_issues.csv
+  studies_csv: data/processed/studies.csv
+  pipeline_log: data/processed/pipeline.log
+
+qc:
+  min_umi: 200
+  min_genes: 100
+  max_mt_fraction: 0.25
+  min_cells_per_gene: 3
+  run_scrublet: true
+  scrublet_threshold: null   # null = auto-detect per dataset
+
+logging:
+  level: INFO

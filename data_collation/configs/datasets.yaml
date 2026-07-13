@@ -1,0 +1,110 @@
+datasets:
+
+  # ── GEO datasets with per-sample .h5 files ─────────────────────────────────
+
+  - study_name: shih_2022
+    source: geo
+    accession: GSE203191
+    loader: h5_per_sample
+    supplementary_metadata: GSE203191_metadata.xlsx
+    tissue_types: [eutopic, control]
+    has_cycle_phase: false
+
+  - study_name: tan_2022
+    source: geo
+    accession: GSE179640
+    loader: h5_per_sample
+    tissue_types: [eutopic, ectopic, control]
+    has_cycle_phase: false
+
+  # ── GEO datasets with per-sample MTX files ──────────────────────────────────
+
+  - study_name: ferrero_2024
+    source: geo
+    accession: GSE247695
+    loader: mtx_per_sample
+    tissue_types: [eutopic, ectopic]
+    has_cycle_phase: false
+
+  - study_name: lin_2023
+    source: geo
+    accession: GSE214411
+    loader: mtx_per_sample
+    tissue_types: [eutopic, control]
+    has_cycle_phase: true
+
+  - study_name: wang_2022
+    source: geo
+    accession: GSE218044
+    loader: mtx_per_sample
+    tissue_types: [other]        # adenomyosis — no eutopic/ectopic classification
+    has_cycle_phase: true
+
+  - study_name: zhang_2022
+    source: geo
+    accession: GSE174399
+    loader: mtx_per_sample
+    tissue_types: [other]        # decidua / placenta
+    has_cycle_phase: false
+
+  - study_name: fonseca_2023
+    source: geo
+    accession: GSE213216
+    loader: mtx_per_sample
+    tissue_types: [eutopic, ectopic]
+    has_cycle_phase: false
+
+  # ── GEO dataset — Seurat .rds (requires R conversion step) ─────────────────
+
+  - study_name: duempelmann_2026
+    source: geo
+    accession: GSE266265
+    loader: rds
+    rds_file: GSE266265_EndoAtlas.rds    # 38.9 GB — downloaded separately
+    tissue_types: [eutopic, control]
+    has_cycle_phase: true
+
+  # ── CNGBdb / Figshare — requires manual download ────────────────────────────
+  # Raw scRNA data: CNGBdb CNP0006183 (scRNA) and CNP0006170 (Stereo-seq).
+  # Figshare (8f61bbe2395ae0df0e63) contains PROCESSED files only — not raw counts.
+  # Place the raw h5ad (or h5) from CNGBdb at data/raw/GSE276193/ before running.
+
+  - study_name: li_2025
+    source: manual          # signals the pipeline to skip download and look for pre-placed files
+    accession: GSE276193
+    loader: h5ad
+    tissue_types: [ectopic, other]
+    has_cycle_phase: false
+    note: "Raw data on CNGBdb CNP0006183 (scRNA) / CNP0006170 (Stereo-seq). Must be downloaded manually."
+
+  # ── Reproductive Cell Atlas (E-MTAB-14039) ──────────────────────────────────
+
+  - study_name: marecko_2024
+    source: reproductive_atlas
+    accession: E-MTAB-14039
+    loader: h5ad
+    tissue_types: [eutopic, ectopic, control]
+    has_cycle_phase: true
+
+  # ── CELLxGENE datasets (Garcia-Alonso et al. 2021, Nat Genetics) ────────────
+
+  - study_name: garcia_alonso_2021_a
+    source: cellxgene
+    dataset_id: 9ddea8d9-cc4c-420a-90f6-880996f808d4
+    loader: h5ad
+    tissue_types: [eutopic, control]
+    has_cycle_phase: true
+
+  - study_name: garcia_alonso_2021_b
+    source: cellxgene
+    dataset_id: 968885c5-b652-48d9-9006-c34b5fc1c07a
+    loader: h5ad
+    tissue_types: [eutopic, control]
+    has_cycle_phase: true
+
+  - study_name: garcia_alonso_2021_c
+    source: cellxgene
+    dataset_id: 76150f40-1989-4977-9e23-696e72d59d9e
+    loader: h5ad
+    tissue_types: [eutopic, control]
+    has_cycle_phase: true

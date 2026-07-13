@@ -9,7 +9,7 @@ from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_ATLAS_BASE = "https://cellgeni.cog.sanger.ac.uk/endometrium-atlas-v2"
+_ATLAS_BASE = "https://cellgeni.cog.sanger.ac.uk/vento/reproductivecellatlas"
 
 _ATLAS_FILES = [
     "endometriumAtlasV2_cells_with_counts.h5ad",

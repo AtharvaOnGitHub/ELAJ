@@ -59,8 +59,8 @@ class GEODownloader(AbstractDownloader):
         if out_path.exists():
             logger.info("%s %s already present, skipping", accession, filename)
             return
-        encoded = requests.utils.quote(filename.replace("_", "%5F").replace(".", "%2E"), safe="")
-        url = f"{_GEO_DOWNLOAD_URL}?acc={accession}&format=file&file={encoded}"
+        # GEO accepts plain filenames in the query string — no percent-encoding needed
+        url = f"{_GEO_DOWNLOAD_URL}?acc={accession}&format=file&file={filename}"
         logger.info("Downloading %s / %s ...", accession, filename)
         _http_get(url, out_path)
 
@@ -69,10 +69,16 @@ class GEODownloader(AbstractDownloader):
         if out_path.exists():
             logger.info("%s series matrix already present, skipping", accession)
             return
-        stub = accession[:-(len(accession) - 3)] + "nnn"  # e.g. GSE203nnn
+        # e.g. GSE179640 → GSE179nnn  (all but last 3 digits of the numeric part)
+        stub = "GSE" + accession[3:-3] + "nnn"
         url = _GEO_SERIES_MATRIX_URL.format(stub=stub, acc=accession)
         logger.info("Downloading %s series matrix ...", accession)
-        _http_get(url, out_path)
+        try:
+            _http_get(url, out_path)
+        except Exception as exc:
+            logger.warning(
+                "%s series matrix download failed (%s) — metadata will be limited", accession, exc
+            )
 
 
 def _http_get(url: str, dest: Path) -> None:

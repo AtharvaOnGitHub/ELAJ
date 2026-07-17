@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gc
+
 import anndata as ad
 import numpy as np
 import scanpy as sc
@@ -71,6 +73,7 @@ class QCFilter:
             & (adata.obs["pct_counts_mt"] <= self._cfg.max_mt_fraction * 100)
         )
         adata = adata[keep].copy()
+        gc.collect()
         logger.info(
             "%s: %d → %d cells after count/gene/MT filters",
             study_name,

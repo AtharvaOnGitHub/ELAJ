@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import re
 from pathlib import Path
 from typing import Dict, Optional
@@ -326,6 +327,7 @@ class MetadataAttacher:
             n_excluded = int((~mask).sum())
             if n_excluded > 0:
                 adata = adata[mask].copy()
+                gc.collect()
                 logger.info(
                     "%s: excluded %d cells with tissue_ontology_term_id in %s",
                     dataset.study_name, n_excluded, terms,
@@ -342,6 +344,7 @@ class MetadataAttacher:
             n_excluded = int((~mask).sum())
             if n_excluded > 0:
                 adata = adata[mask].copy()
+                gc.collect()
                 logger.info(
                     "%s: excluded %d cells where obs['%s'] in %s",
                     dataset.study_name, n_excluded, col, values,

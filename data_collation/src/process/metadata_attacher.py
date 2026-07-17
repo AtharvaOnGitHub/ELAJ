@@ -319,20 +319,34 @@ class MetadataAttacher:
     def _apply_cell_exclusions(
         self, adata: ad.AnnData, dataset: DatasetConfig
     ) -> ad.AnnData:
-        """Drop cells whose tissue_ontology_term_id is in the exclusion list."""
+        """Drop cells by tissue_ontology_term_id or arbitrary obs column values."""
         terms = dataset.exclude_tissue_ontology_terms
-        if not terms:
-            return adata
-        mask = ~adata.obs["tissue_ontology_term_id"].isin(terms)
-        n_excluded = int((~mask).sum())
-        if n_excluded > 0:
-            adata = adata[mask].copy()
-            logger.info(
-                "%s: excluded %d cells with tissue_ontology_term_id in %s",
-                dataset.study_name,
-                n_excluded,
-                terms,
-            )
+        if terms:
+            mask = ~adata.obs["tissue_ontology_term_id"].isin(terms)
+            n_excluded = int((~mask).sum())
+            if n_excluded > 0:
+                adata = adata[mask].copy()
+                logger.info(
+                    "%s: excluded %d cells with tissue_ontology_term_id in %s",
+                    dataset.study_name, n_excluded, terms,
+                )
+
+        for col, values in dataset.exclude_obs_column_values.items():
+            if col not in adata.obs.columns:
+                logger.warning(
+                    "%s: exclude_obs_column_values column '%s' not found in obs — skipping",
+                    dataset.study_name, col,
+                )
+                continue
+            mask = ~adata.obs[col].astype(str).isin([str(v) for v in values])
+            n_excluded = int((~mask).sum())
+            if n_excluded > 0:
+                adata = adata[mask].copy()
+                logger.info(
+                    "%s: excluded %d cells where obs['%s'] in %s",
+                    dataset.study_name, n_excluded, col, values,
+                )
+
         return adata
 
     # ── ontology resolution ────────────────────────────────────────────────────

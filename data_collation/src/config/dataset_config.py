@@ -86,6 +86,10 @@ class DatasetConfig:
     # Cells whose tissue_ontology_term_id is in this list are dropped post-metadata
     exclude_tissue_ontology_terms: List[str] = field(default_factory=list)
 
+    # Cells where obs[column] is in the value list are dropped post-metadata.
+    # Key = obs column name, value = list of values to exclude.
+    exclude_obs_column_values: Dict[str, List[str]] = field(default_factory=dict)
+
     @classmethod
     def from_dict(cls, d: dict) -> "DatasetConfig":
         def _ont(key: str) -> Optional[OntologyConfig]:
@@ -108,6 +112,10 @@ class DatasetConfig:
             disease_ontology=_ont("disease_ontology"),
             status_config=_ont("status_config"),
             exclude_tissue_ontology_terms=list(d.get("exclude_tissue_ontology_terms") or []),
+            exclude_obs_column_values={
+                col: list(vals)
+                for col, vals in (d.get("exclude_obs_column_values") or {}).items()
+            },
         )
 
 

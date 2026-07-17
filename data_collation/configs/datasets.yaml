@@ -244,6 +244,10 @@ datasets:
         "Ctrl_whole_uterus": "control"
         "Endo_Superficial": "eutopic"
       default: "other"
+    # Drop cells already present in GSE179640 (tan_2022), GSE213216 (fonseca_2023),
+    # and GSE214411 (lin_2023) which are re-aggregated here by Marecko et al.
+    exclude_obs_column_values:
+      dataset: ["Tan", "Fonseca", "Huang"]
 
   # ── CELLxGENE datasets (Garcia-Alonso et al. 2021, Nat Genetics) ────────────
 

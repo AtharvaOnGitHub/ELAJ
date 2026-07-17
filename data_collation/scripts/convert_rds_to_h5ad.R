@@ -26,8 +26,7 @@ suppressPackageStartupMessages({
 
 obj <- readRDS(rds_path)
 
-# Extract raw counts from the RNA assay
-raw_counts <- GetAssayData(obj, assay = "RNA", slot = "counts")
+raw_counts <- GetAssayData(obj, assay = "RNA", layer = "counts")
 message("Raw counts matrix: ", nrow(raw_counts), " genes × ", ncol(raw_counts), " cells")
 
 # Build a minimal SingleCellExperiment with raw counts only

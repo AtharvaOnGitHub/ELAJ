@@ -216,9 +216,23 @@ datasets:
     accession: GSE276193
     loader: rds
     rds_file: processed_seurat.rds
-    tissue_types: [ectopic, other]
+    tissue_types: [eutopic, control]
     has_cycle_phase: false
     note: "Raw data on CNGBdb CNP0006183 (scRNA) / CNP0006170 (Stereo-seq). Must be downloaded manually."
+    tissue_ontology:
+      default: "UBERON:0001295"   # eutopic endometrium
+    disease_ontology:
+      column: "group"
+      value_map:
+        "EMS": "MONDO:0005133"
+        "CON": "PATO:0000461"
+      default: "MONDO:0005133"
+    status_config:
+      column: "group"
+      value_map:
+        "EMS": "eutopic"
+        "CON": "control"
+      default: "other"
 
   # ── Reproductive Cell Atlas (E-MTAB-14039) ──────────────────────────────────
 

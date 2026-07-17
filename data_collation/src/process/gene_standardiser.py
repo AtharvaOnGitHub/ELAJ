@@ -8,6 +8,7 @@ import anndata as ad
 import mygene
 import yaml
 
+from src.process.hgnc_table import HGNCTable
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,17 +19,24 @@ class GeneStandardiser:
 
     Resolution order for each gene name:
       1. Manual alias config (configs/gene_aliases.yaml) — highest priority
-      2. mygene.info lookup (symbol / alias fields, human only)
-      3. Identity — if the name already looks like a valid HGNC symbol
-      4. Flag for manual review and drop from this study
+      2. HGNC complete set — approved symbols pass through; aliases and
+         previous symbols are mapped to the current approved symbol; Ensembl
+         IDs are resolved where unambiguous
+      3. mygene.info API — network fallback for names not in the HGNC table
+      4. Drop and log — unresolvable genes are written to gene_mapping_issues.csv
 
     Genes mapped to None in the alias config are intentionally dropped.
-    Unresolvable genes are written to gene_mapping_issues.csv.
     """
 
-    def __init__(self, aliases_path: str, issues_csv_path: str) -> None:
+    def __init__(
+        self,
+        aliases_path: str,
+        issues_csv_path: str,
+        hgnc_table_path: str,
+    ) -> None:
         self._aliases: Dict[str, Optional[str]] = self._load_aliases(aliases_path)
         self._issues_path = Path(issues_csv_path)
+        self._hgnc = HGNCTable(hgnc_table_path)
         self._mg = mygene.MyGeneInfo()
 
     def standardise(self, adata: ad.AnnData, study_name: str) -> ad.AnnData:
@@ -57,23 +65,30 @@ class GeneStandardiser:
         self, raw_names: List[str], study_name: str
     ) -> Dict[str, Optional[str]]:
         mapping: Dict[str, Optional[str]] = {}
-        needs_lookup: List[str] = []
+        needs_api: List[str] = []
 
         for name in raw_names:
+            # Step 1: manual overrides
             if name in self._aliases:
                 mapping[name] = self._aliases[name]
-            else:
-                needs_lookup.append(name)
+                continue
 
-        if needs_lookup:
-            resolved = self._mygene_lookup(needs_lookup)
+            # Step 2: HGNC table (approved symbol, alias, prev_symbol, Ensembl ID)
+            hgnc = self._hgnc.lookup(name)
+            if hgnc is not None:
+                mapping[name] = hgnc
+                continue
+
+            # Step 3: mygene.info (network, for anything not in the HGNC table)
+            needs_api.append(name)
+
+        if needs_api:
+            resolved = self._mygene_lookup(needs_api)
             issues: List[str] = []
-            for name in needs_lookup:
+            for name in needs_api:
                 hgnc = resolved.get(name)
                 if hgnc is not None:
                     mapping[name] = hgnc
-                elif self._looks_like_hgnc(name):
-                    mapping[name] = name
                 else:
                     mapping[name] = None
                     issues.append(name)
@@ -105,11 +120,8 @@ class GeneStandardiser:
                 if "notfound" not in hit and "symbol" in hit:
                     result[hit["query"]] = hit["symbol"]
         except Exception as exc:
-            logger.warning("mygene.info lookup failed: %s — falling back to identity", exc)
+            logger.warning("mygene.info lookup failed: %s — falling back to drop", exc)
         return result
-
-    def _looks_like_hgnc(self, name: str) -> bool:
-        return bool(name and name[0].isupper() and not name.startswith("ENSG"))
 
     def _write_issues(self, genes: List[str], study_name: str) -> None:
         self._issues_path.parent.mkdir(parents=True, exist_ok=True)

@@ -38,6 +38,7 @@ class H5PerSampleLoader(AbstractLoader):
         for gsm_id, h5_path in sorted(h5_files):
             logger.info("Loading %s from %s", gsm_id, h5_path.name)
             adata = sc.read_10x_h5(h5_path)
+            adata.var_names_make_unique()
             adata.obs["source_sample_id"] = gsm_id
             adata.obs_names = [f"{gsm_id}_{bc}" for bc in adata.obs_names]
             adatas.append(adata)

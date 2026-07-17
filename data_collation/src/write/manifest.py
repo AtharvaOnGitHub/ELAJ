@@ -13,10 +13,11 @@ _FIELDNAMES = ["id", "name", "path", "tissue_types", "has_cycle_phase"]
 
 
 class ManifestWriter:
-    """Write (or overwrite) the studies.csv manifest consumed by ELAJ.
+    """Merge newly completed studies into the studies.csv manifest consumed by ELAJ.
 
-    IDs are assigned in the order datasets are passed, starting from 0.
-    The spec requires IDs to be contiguous — this class enforces that.
+    Reads any existing entries from out_path, replaces entries whose names appear
+    in the current completed list, appends new ones, and reassigns contiguous IDs.
+    This makes each pipeline run additive rather than destructive.
     """
 
     def write(
@@ -26,18 +27,29 @@ class ManifestWriter:
         out_path: Path,
     ) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        rows = []
-        for idx, ds in enumerate(datasets):
+
+        # Load existing entries, keyed by study name
+        existing: dict[str, dict] = {}
+        if out_path.exists():
+            with open(out_path, newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    existing[row["name"]] = row
+
+        # Build new rows for the current run, overwriting any existing entry of the same name
+        for ds in datasets:
             h5ad_path = processed_dir / f"{ds.study_name}.h5ad"
-            rows.append(
-                {
-                    "id": idx,
-                    "name": ds.study_name,
-                    "path": str(h5ad_path),
-                    "tissue_types": "|".join(ds.tissue_types),
-                    "has_cycle_phase": str(ds.has_cycle_phase).lower(),
-                }
-            )
+            existing[ds.study_name] = {
+                "name": ds.study_name,
+                "path": str(h5ad_path),
+                "tissue_types": "|".join(ds.tissue_types),
+                "has_cycle_phase": str(ds.has_cycle_phase).lower(),
+            }
+
+        # Reassign contiguous IDs in stable insertion order
+        rows = [
+            {"id": idx, **entry}
+            for idx, entry in enumerate(existing.values())
+        ]
 
         with open(out_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=_FIELDNAMES)

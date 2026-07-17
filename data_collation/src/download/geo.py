@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 import tarfile
+import time
 from pathlib import Path
 
 import requests
-from tqdm import tqdm
 
 from src.config.dataset_config import DatasetConfig
 from src.download.base import AbstractDownloader
@@ -16,7 +17,8 @@ _GEO_DOWNLOAD_URL = "https://www.ncbi.nlm.nih.gov/geo/download/"
 _GEO_SERIES_MATRIX_URL = (
     "https://ftp.ncbi.nlm.nih.gov/geo/series/{stub}/{acc}/matrix/{acc}_series_matrix.txt.gz"
 )
-_CHUNK = 1 << 20  # 1 MB
+_MAX_RETRIES = 5
+_RETRY_BACKOFF = 5  # seconds, doubles on each retry
 
 
 class GEODownloader(AbstractDownloader):
@@ -42,6 +44,10 @@ class GEODownloader(AbstractDownloader):
 
     def _download_raw_tar(self, accession: str, dest_dir: Path) -> None:
         out_path = dest_dir / "RAW.tar"
+        sentinel = dest_dir / "RAW.tar.extracted"
+        if sentinel.exists():
+            logger.info("%s RAW.tar already extracted, skipping download", accession)
+            return
         if out_path.exists():
             logger.info("%s RAW.tar already present, skipping download", accession)
         else:
@@ -51,6 +57,7 @@ class GEODownloader(AbstractDownloader):
 
         logger.info("Extracting %s RAW.tar ...", accession)
         _extract_tar(out_path, dest_dir)
+        sentinel.touch()
 
     def _download_named_suppl(
         self, accession: str, filename: str, dest_dir: Path
@@ -82,21 +89,82 @@ class GEODownloader(AbstractDownloader):
 
 
 def _http_get(url: str, dest: Path) -> None:
+    """Download url to dest using curl with resume (-C -) and retries.
+
+    curl is used instead of requests because GEO's download endpoint redirects
+    to a storage server, and requests strips the Range header on redirect.
+    curl preserves Range through the full redirect chain, enabling true resume.
+
+    If the server does not support byte-range resume (curl exit 33), the partial
+    file is discarded and the download restarts from byte 0.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with requests.get(url, stream=True, timeout=300) as resp:
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0)) or None
-        with open(tmp, "wb") as f, tqdm(
-            total=total, unit="B", unit_scale=True, desc=dest.name, leave=False
-        ) as bar:
-            for chunk in resp.iter_content(chunk_size=_CHUNK):
-                f.write(chunk)
-                bar.update(len(chunk))
-    tmp.rename(dest)
+
+    delay = _RETRY_BACKOFF
+    for attempt in range(1, _MAX_RETRIES + 1):
+        existing_mb = tmp.stat().st_size / 1e6 if tmp.exists() else 0
+        logger.info(
+            "Download attempt %d/%d for %s (offset %.1f MB)",
+            attempt, _MAX_RETRIES, dest.name, existing_mb,
+        )
+        try:
+            subprocess.run(
+                [
+                    "curl",
+                    "-L",                  # follow redirects (Range header preserved)
+                    "-C", "-",             # auto-resume from current file position
+                    "-f",                  # fail on HTTP 4xx/5xx
+                    "--no-progress-meter", # suppress per-byte progress to stderr
+                    "-o", str(tmp),
+                    url,
+                ],
+                check=True,
+                timeout=7200,  # 2-hour hard cap per attempt
+            )
+            tmp.rename(dest)
+            return
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode in (33, 56):
+                # Exit 33: server refused range request. Exit 56: recv error / expired signed URL.
+                # In both cases the partial file can't be resumed — discard it and start fresh.
+                logger.warning(
+                    "Resume not possible for %s (curl exit %d) — discarding partial and restarting",
+                    dest.name, exc.returncode,
+                )
+                if tmp.exists():
+                    tmp.unlink()
+                if attempt < _MAX_RETRIES:
+                    continue
+                raise RuntimeError(
+                    f"Download of {dest.name} failed after {_MAX_RETRIES} attempts (server refused resume)"
+                ) from exc
+            if attempt == _MAX_RETRIES:
+                raise RuntimeError(
+                    f"Download of {dest.name} failed after {_MAX_RETRIES} attempts"
+                ) from exc
+            logger.warning(
+                "Download attempt %d/%d failed (exit %d) — retrying in %ds",
+                attempt, _MAX_RETRIES, exc.returncode, delay,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, 60)
+        except subprocess.TimeoutExpired as exc:
+            if attempt == _MAX_RETRIES:
+                raise RuntimeError(
+                    f"Download of {dest.name} timed out after {_MAX_RETRIES} attempts"
+                ) from exc
+            logger.warning(
+                "Download attempt %d/%d timed out — retrying in %ds",
+                attempt, _MAX_RETRIES, delay,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, 60)
 
 
 def _extract_tar(tar_path: Path, dest_dir: Path) -> None:
     with tarfile.open(tar_path) as tf:
         tf.extractall(dest_dir)
     logger.info("Extracted %s into %s", tar_path.name, dest_dir)
+    tar_path.unlink()
+    logger.info("Deleted %s to reclaim disk space", tar_path.name)

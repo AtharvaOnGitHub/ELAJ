@@ -12,6 +12,7 @@ class PathsConfig:
     raw_dir: str = "data/raw"
     processed_dir: str = "data/processed"
     gene_aliases: str = "configs/gene_aliases.yaml"
+    hgnc_table: str = "data/hgnc_complete_set.txt"
     patient_id_map: str = "data/processed/patient_id_map.csv"
     gene_mapping_issues: str = "data/processed/gene_mapping_issues.csv"
     studies_csv: str = "data/processed/studies.csv"
@@ -58,6 +59,7 @@ class PipelineConfig:
                 raw_dir=str(r / p.raw_dir),
                 processed_dir=str(r / p.processed_dir),
                 gene_aliases=str(r / p.gene_aliases),
+                hgnc_table=str(r / p.hgnc_table),
                 patient_id_map=str(r / p.patient_id_map),
                 gene_mapping_issues=str(r / p.gene_mapping_issues),
                 studies_csv=str(r / p.studies_csv),

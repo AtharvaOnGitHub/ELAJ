@@ -25,6 +25,7 @@ class H5adLoader(AbstractLoader):
         logger.info("Loading %s from %s", dataset.study_name, h5ad_path.name)
         adata = ad.read_h5ad(h5ad_path)
         self._ensure_source_sample_id(adata, dataset)
+        self._normalize_gene_names(adata, dataset)
         logger.info("Loaded %d cells, %d genes", adata.n_obs, adata.n_vars)
         return adata
 
@@ -49,6 +50,33 @@ class H5adLoader(AbstractLoader):
                 candidates[0].name,
             )
         return candidates[0]
+
+    def _normalize_gene_names(
+        self, adata: ad.AnnData, dataset: DatasetConfig
+    ) -> None:
+        """Replace Ensembl IDs in var.index with HGNC symbols from feature_name.
+
+        CELLxGENE (and several atlas h5ad files) mandate Ensembl IDs as
+        var.index with HGNC symbols in var['feature_name'].  The downstream
+        gene standardiser works on gene symbols, so we swap here rather than
+        requiring mygene.info to resolve ~27k Ensembl IDs on every run.
+        """
+        if not adata.var_names[0].startswith("ENSG"):
+            return
+        if "feature_name" not in adata.var.columns:
+            logger.warning(
+                "%s: var.index contains Ensembl IDs but no 'feature_name' column — "
+                "gene standardisation may discard all genes",
+                dataset.study_name,
+            )
+            return
+        adata.var["ensembl_id"] = adata.var_names          # keep for reference
+        adata.var_names = adata.var["feature_name"].astype(str)
+        adata.var_names_make_unique()
+        logger.info(
+            "%s: replaced Ensembl IDs with HGNC symbols from feature_name",
+            dataset.study_name,
+        )
 
     def _ensure_source_sample_id(
         self, adata: ad.AnnData, dataset: DatasetConfig

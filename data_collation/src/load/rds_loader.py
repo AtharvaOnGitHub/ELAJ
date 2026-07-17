@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _R_SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "convert_rds_to_h5ad.R"
+_RSCRIPT_BIN = os.environ.get("RSCRIPT_PATH", "Rscript")
 
 
 class RDSLoader(AbstractLoader):
@@ -52,7 +54,7 @@ class RDSLoader(AbstractLoader):
             h5ad_path.name,
         )
         result = subprocess.run(
-            ["Rscript", str(_R_SCRIPT), str(rds_path), str(h5ad_path)],
+            [_RSCRIPT_BIN, str(_R_SCRIPT), str(rds_path), str(h5ad_path)],
             capture_output=True,
             text=True,
         )

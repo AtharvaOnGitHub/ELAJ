@@ -6,9 +6,21 @@ datasets:
     source: geo
     accession: GSE203191
     loader: h5_per_sample
-    supplementary_metadata: GSE203191_metadata.xlsx
-    tissue_types: [eutopic, control]
+    # supplementary_metadata intentionally omitted: GSE203191_metadata.xlsx is a
+    # GEO submission template with unnamed columns, not real sample metadata.
+    tissue_types: [eutopic]
     has_cycle_phase: false
+    tissue_ontology:
+      column: "tissue"
+      value_map:
+        "wholeME/Metissue": "UBERON:0001295"
+        "MEtissue": "UBERON:0001295"
+        "wholeME": "UBERON:0001295"
+      default: "UBERON:0001295"
+    disease_ontology:
+      default: "MONDO:0005133"  # all samples from endometriosis patients
+    status_config:
+      default: "eutopic"
 
   - study_name: tan_2022
     source: geo
@@ -16,6 +28,34 @@ datasets:
     loader: h5_per_sample
     tissue_types: [eutopic, ectopic, control]
     has_cycle_phase: false
+    tissue_ontology:
+      column: "tissue"
+      value_map:
+        "Endometrium": "UBERON:0001295"
+        "Peritoneum": "UBERON:0002358"
+        "Ovary": "UBERON:0000992"
+        "Patient-Derived Organoid": "UBERON:0000479"
+      default: "UBERON:0001295"
+    disease_ontology:
+      column: "condition"
+      value_map:
+        "Control": "PATO:0000461"
+        "Endometriosis": "MONDO:0005133"
+        "Endometriosis + Control": "MONDO:0005133"
+      default: "MONDO:0005133"
+    status_config:
+      column: "sample location"
+      value_map:
+        "Eutopic": "eutopic"
+        "Ectopic": "ectopic"
+        "Ectopic Ovary": "ectopic"
+        "Ectopic Adjacent": "ectopic"
+        "Mix": "other"
+      override_column: "condition"
+      override_map:
+        "Control": "control"   # Eutopic from control patient → "control"
+      default: "other"
+    exclude_tissue_ontology_terms: ["UBERON:0000479"]   # drop organoid cells
 
   # ── GEO datasets with per-sample MTX files ──────────────────────────────────
 
@@ -25,6 +65,20 @@ datasets:
     loader: mtx_per_sample
     tissue_types: [eutopic, ectopic]
     has_cycle_phase: false
+    tissue_ontology:
+      column: "tissue"
+      value_map:
+        "Eutopic endometrium": "UBERON:0001295"
+        "Ectopic endometrium": "UBERON:0002358"
+      default: "UBERON:0002358"
+    disease_ontology:
+      default: "MONDO:0005133"  # all samples from endometriosis patients
+    status_config:
+      column: "tissue"
+      value_map:
+        "Eutopic endometrium": "eutopic"
+        "Ectopic endometrium": "ectopic"
+      default: "eutopic"
 
   - study_name: lin_2023
     source: geo
@@ -32,20 +86,51 @@ datasets:
     loader: mtx_per_sample
     tissue_types: [eutopic, control]
     has_cycle_phase: true
+    # No series matrix present; metadata inferred from file names (GSM_EMS*/_N*).
+    tissue_ontology:
+      default: "UBERON:0001295"  # all eutopic endometrium
+    disease_ontology:
+      column: "source_name"      # from filename inference: "EMS" or "N"
+      value_map:
+        "EMS": "MONDO:0005133"
+        "N": "PATO:0000461"
+      default: "PATO:0000461"
+    status_config:
+      column: "source_name"
+      value_map:
+        "EMS": "eutopic"
+        "N": "control"
+      default: "control"
 
   - study_name: wang_2022
     source: geo
     accession: GSE218044
     loader: mtx_per_sample
-    tissue_types: [other]        # adenomyosis — no eutopic/ectopic classification
+    tissue_types: [other]        # adenomyosis — myometrium, no eutopic/ectopic
     has_cycle_phase: true
+    tissue_ontology:
+      default: "UBERON:0001296"  # myometrium
+    disease_ontology:
+      default: "MONDO:0010888"   # adenomyosis
+    status_config:
+      default: "other"
 
   - study_name: zhang_2022
     source: geo
     accession: GSE174399
     loader: mtx_per_sample
-    tissue_types: [other]        # decidua / placenta
+    tissue_types: [other]        # chorionic villus (decidua/placenta)
     has_cycle_phase: false
+    tissue_ontology:
+      default: "UBERON:0007106"  # chorionic villus
+    disease_ontology:
+      column: "individual"
+      value_map:
+        "endometriosis patient": "MONDO:0005133"
+        "control": "PATO:0000461"
+      default: "PATO:0000461"
+    status_config:
+      default: "other"           # decidua/villus, not endometrial tissue
 
   - study_name: fonseca_2023
     source: geo
@@ -53,6 +138,63 @@ datasets:
     loader: mtx_per_sample
     tissue_types: [eutopic, ectopic]
     has_cycle_phase: false
+    tissue_ontology:
+      # Primary: anatomic location gives the most specific tissue site.
+      # Fallback: tissue column used when anatomic location is missing or unmapped.
+      column: "anatomic location"
+      value_map:
+        "Endometrium": "UBERON:0001295"
+        "Left ovary": "UBERON:0000992"
+        "Right ovary": "UBERON:0000992"
+        "Ovary": "UBERON:0000992"
+        "Left ovarian cyst": "UBERON:0000992"
+        "Right ovarian cyst": "UBERON:0000992"
+        "Left ovarian fossa": "UBERON:0000992"
+        "Right ovarian fossa": "UBERON:0000992"
+        "Anterior cul-de-sac": "UBERON:0007111"
+        "Posterior cul-de-sac": "UBERON:0007111"
+        "Anterior cul-de-sac ": "UBERON:0007111"   # trailing space in GEO data
+        "Left uterosacral ligament": "UBERON:0007136"
+        "Right uterosacral ligament": "UBERON:0007136"
+        "Right and left uterosacral ligament": "UBERON:0007136"
+        "Bladder endometriosis": "UBERON:0001255"
+        "Rectum": "UBERON:0001052"
+        "Rectal serosa": "UBERON:0001052"
+        "Left pelvic side wall": "UBERON:8480043"
+        "Right pelvic side wall": "UBERON:8480043"
+        "Right and left pelvic side wall†": "UBERON:8480043"
+        "Anterior cul-de-sac and right pelvic side wall†": "UBERON:8480043"
+        "Right parametrium": "UBERON:0002358"
+        "Left parametrium": "UBERON:0002358"
+        "Perirectal fat": "UBERON:0002358"
+        "Posterior uterus": "UBERON:0002358"
+        "Anterior abdominal wall and cul-de-sac†": "UBERON:0002358"
+      fallback_column: "tissue"
+      fallback_value_map:
+        "Eutopic Endometrium": "UBERON:0001295"
+        "No endometriosis detected": "UBERON:0001295"
+        "Ovary": "UBERON:0000992"
+        "Endometrioma": "UBERON:0000992"
+        "Endometriosis": "UBERON:0002358"
+      default: "UBERON:0002358"  # peritoneum as generic ectopic fallback
+    disease_ontology:
+      column: "tissue"
+      value_map:
+        "No endometriosis detected": "PATO:0000461"
+        "Eutopic Endometrium": "MONDO:0005133"
+        "Endometriosis": "MONDO:0005133"
+        "Endometrioma": "MONDO:0005133"
+        "Ovary": "MONDO:0005133"
+      default: "MONDO:0005133"
+    status_config:
+      column: "tissue"
+      value_map:
+        "Eutopic Endometrium": "eutopic"
+        "No endometriosis detected": "control"
+        "Endometriosis": "ectopic"
+        "Endometrioma": "ectopic"
+        "Ovary": "ectopic"
+      default: "ectopic"
 
   # ── GEO dataset — Seurat .rds (requires R conversion step) ─────────────────
 
@@ -72,7 +214,8 @@ datasets:
   - study_name: li_2025
     source: manual          # signals the pipeline to skip download and look for pre-placed files
     accession: GSE276193
-    loader: h5ad
+    loader: rds
+    rds_file: processed_seurat.rds
     tissue_types: [ectopic, other]
     has_cycle_phase: false
     note: "Raw data on CNGBdb CNP0006183 (scRNA) / CNP0006170 (Stereo-seq). Must be downloaded manually."
@@ -83,8 +226,24 @@ datasets:
     source: reproductive_atlas
     accession: E-MTAB-14039
     loader: h5ad
-    tissue_types: [eutopic, ectopic, control]
+    tissue_types: [eutopic, control]
     has_cycle_phase: true
+    tissue_ontology:
+      default: "UBERON:0001295"   # all eutopic endometrium per Tissue_sampled column
+    disease_ontology:
+      column: "Group"             # exists in adata.obs; no series matrix for this study
+      value_map:
+        "Ctrl_Superficial": "PATO:0000461"
+        "Ctrl_whole_uterus": "PATO:0000461"
+        "Endo_Superficial": "MONDO:0005133"
+      default: "MONDO:0005133"
+    status_config:
+      column: "Group"
+      value_map:
+        "Ctrl_Superficial": "control"
+        "Ctrl_whole_uterus": "control"
+        "Endo_Superficial": "eutopic"
+      default: "other"
 
   # ── CELLxGENE datasets (Garcia-Alonso et al. 2021, Nat Genetics) ────────────
 
@@ -94,6 +253,13 @@ datasets:
     loader: h5ad
     tissue_types: [eutopic, control]
     has_cycle_phase: true
+    # tissue/disease ontology already present in h5ad; derive status from disease ontology.
+    status_config:
+      column: "disease_ontology_term_id"   # exists in adata.obs for CellxGENE files
+      value_map:
+        "PATO:0000461": "control"
+        "MONDO:0005133": "eutopic"
+      default: "other"
 
   - study_name: garcia_alonso_2021_b
     source: cellxgene
@@ -101,6 +267,13 @@ datasets:
     loader: h5ad
     tissue_types: [eutopic, control]
     has_cycle_phase: true
+    # tissue/disease ontology already present in h5ad; derive status from disease ontology.
+    status_config:
+      column: "disease_ontology_term_id"
+      value_map:
+        "PATO:0000461": "control"
+        "MONDO:0005133": "eutopic"
+      default: "other"
 
   - study_name: garcia_alonso_2021_c
     source: cellxgene
@@ -108,3 +281,10 @@ datasets:
     loader: h5ad
     tissue_types: [eutopic, control]
     has_cycle_phase: true
+    # tissue/disease ontology already present in h5ad; derive status from disease ontology.
+    status_config:
+      column: "disease_ontology_term_id"
+      value_map:
+        "PATO:0000461": "control"
+        "MONDO:0005133": "eutopic"
+      default: "other"

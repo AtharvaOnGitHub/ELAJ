@@ -52,6 +52,9 @@ class QCFilter:
         return adata
 
     def _annotate_mt(self, adata: ad.AnnData) -> ad.AnnData:
+        # "MT-" is the human mitochondrial gene prefix. Non-human data uses different
+        # prefixes (e.g. "mt-" for mouse) and would silently get 0% MT for all cells,
+        # causing the MT filter to have no effect rather than raising an error.
         mt_genes = adata.var_names.str.upper().str.startswith("MT-")
         adata.var["mt"] = mt_genes
         sc.pp.calculate_qc_metrics(

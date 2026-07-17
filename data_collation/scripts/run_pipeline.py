@@ -75,7 +75,7 @@ def run(args: argparse.Namespace) -> None:
             sys.exit(1)
 
     registry = PatientRegistry(cfg.paths.patient_id_map)
-    standardiser = GeneStandardiser(cfg.paths.gene_aliases, cfg.paths.gene_mapping_issues)
+    standardiser = GeneStandardiser(cfg.paths.gene_aliases, cfg.paths.gene_mapping_issues, cfg.paths.hgnc_table)
     attacher = MetadataAttacher(registry)
     qc_filter = QCFilter(cfg.qc)
     extractor = RawCountExtractor()

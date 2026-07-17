@@ -32,12 +32,11 @@ class RawCountExtractor:
             return adata
 
         logger.info("Replacing adata.X with raw counts (%s)", raw["source"])
-        adata = adata.copy()
         matrix = raw["matrix"]
         if not sp.issparse(matrix):
             matrix = sp.csr_matrix(matrix)
+        # Swap in-place — avoid adata.copy() which doubles peak memory on large files.
         adata.X = matrix
-
         if raw["source"] == ".raw.X":
             adata.raw = None
         else:

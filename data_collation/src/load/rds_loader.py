@@ -53,10 +53,15 @@ class RDSLoader(AbstractLoader):
             rds_path.name,
             h5ad_path.name,
         )
+        env = os.environ.copy()
+        # R on macOS caps vector memory at 16 GB by default; raise it to allow
+        # large Seurat objects to load without hitting mem.maxVSize().
+        env.setdefault("R_MAX_VSIZE", "100Gb")
         result = subprocess.run(
             [_RSCRIPT_BIN, str(_R_SCRIPT), str(rds_path), str(h5ad_path)],
             capture_output=True,
             text=True,
+            env=env,
         )
         if result.returncode != 0:
             logger.error("R conversion failed:\n%s", result.stderr)

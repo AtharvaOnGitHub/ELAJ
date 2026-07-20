@@ -53,7 +53,7 @@ class HGNCTable:
         try:
             subprocess.run(
                 [
-                    "curl", "-L", "-f", "--no-progress-meter",
+                    "curl", "-L", "-f", "-s",
                     "-o", str(self._cache), _HGNC_URL,
                 ],
                 check=True,

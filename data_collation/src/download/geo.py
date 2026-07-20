@@ -119,7 +119,7 @@ def _http_get(url: str, dest: Path) -> None:
                     "-L",                  # follow redirects (Range header preserved)
                     "-C", "-",             # auto-resume from current file position
                     "-f",                  # fail on HTTP 4xx/5xx
-                    "--no-progress-meter", # suppress per-byte progress to stderr
+                    "-s",                  # suppress per-byte progress to stderr
                     "-o", str(tmp),
                     url,
                 ],

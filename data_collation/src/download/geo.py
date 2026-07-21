@@ -14,8 +14,8 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _GEO_DOWNLOAD_URL = "https://www.ncbi.nlm.nih.gov/geo/download/"
-_GEO_FTP_SUPPL_URL = (
-    "ftp://ftp.ncbi.nlm.nih.gov/geo/series/{stub}/{acc}/suppl/{filename}"
+_GEO_SUPPL_URL = (
+    "https://ftp.ncbi.nlm.nih.gov/geo/series/{stub}/{acc}/suppl/{filename}"
 )
 _GEO_SERIES_MATRIX_URL = (
     "https://ftp.ncbi.nlm.nih.gov/geo/series/{stub}/{acc}/matrix/{acc}_series_matrix.txt.gz"
@@ -69,10 +69,9 @@ class GEODownloader(AbstractDownloader):
         if out_path.exists():
             logger.info("%s %s already present, skipping", accession, filename)
             return
-        # Use FTP — the HTTPS web endpoint drops connections on large files (>1 GB).
         stub = "GSE" + accession[3:-3] + "nnn"
-        url = _GEO_FTP_SUPPL_URL.format(stub=stub, acc=accession, filename=filename)
-        logger.info("Downloading %s / %s via FTP ...", accession, filename)
+        url = _GEO_SUPPL_URL.format(stub=stub, acc=accession, filename=filename)
+        logger.info("Downloading %s / %s ...", accession, filename)
         _http_get(url, out_path)
 
     def _download_series_matrix(self, accession: str, dest_dir: Path) -> None:

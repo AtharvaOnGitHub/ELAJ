@@ -102,6 +102,8 @@ class RDSLoader(AbstractLoader):
         barcodes = (tmp_dir / "barcodes.tsv").read_text().splitlines()
         obs = pd.read_csv(tmp_dir / "obs.csv", index_col=0)
         obs.index = barcodes  # ensure row order matches matrix columns
+        for col in obs.select_dtypes(include="object").columns:
+            obs[col] = obs[col].astype(str)
 
         return ad.AnnData(
             X=X,

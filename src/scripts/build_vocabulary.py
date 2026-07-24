@@ -1,29 +1,35 @@
 """Vocabulary builder: assigns HGNC gene symbols to biological groups.
 
-Two modes
----------
-Automated (default)
-    Downloads all 50 MSigDB Hallmark gene sets via the GSEA/MSigDB REST API.
-    Assigns each gene to the highest-priority Hallmark group it belongs to
-    (priority = order in HALLMARK_PRIORITY list below).  Genes in no Hallmark
-    set are assigned to "unassigned".
+Assignment pipeline
+-------------------
+1. MSigDB Hallmark sets (48 curated, endometriosis-relevant sets have highest
+   priority — see HALLMARK_PRIORITY below).
+2. Supplementary Enrichr libraries (e.g. Reactome_2022) cover genes not in any
+   Hallmark set.  Libraries are applied in the order given; within each library
+   only pathways with >= --min-pathway-size genes in the corpus are used.
+3. Remaining unassigned genes are collected into an "unassigned" group.
+4. All groups larger than --max-group-size are split into numbered chunks so
+   the group encoder's attention is never given an infeasible sequence length.
 
-Synthetic (--use-synthetic)
-    Generates a deterministic mock vocabulary without network access.
-    Useful for CI, unit tests, and offline development.
+Offline workflow (HPC nodes have no outbound internet)
+------------------------------------------------------
+On a login node that has internet access:
 
-Usage
------
-    # Automated from a gene list file (one HGNC symbol per line):
     python scripts/build_vocabulary.py \\
-        --gene-list data/raw/gene_list.txt \\
-        --out data/processed/vocabulary.json
+        --save-gene-sets src/data/gene_sets.json \\
+        --supplementary-libraries Reactome_2022
 
-    # Automated without a gene list (fetches genes from Hallmark sets directly):
+This downloads all gene sets and saves them to a single JSON file.
+
+On a compute node (sbatch):
+
     python scripts/build_vocabulary.py \\
-        --out data/processed/vocabulary.json
+        --gene-list /path/to/gene_list.txt \\
+        --gene-sets-file src/data/gene_sets.json \\
+        --out /path/to/vocabulary.json
 
-    # Synthetic vocabulary for tests:
+Synthetic mode (CI / offline development)
+-----------------------------------------
     python scripts/build_vocabulary.py \\
         --use-synthetic --n-genes 1000 --n-groups 10 \\
         --out data/processed/vocabulary.json
@@ -34,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 import urllib.request
@@ -100,10 +107,10 @@ HALLMARK_PRIORITY: list[tuple[str, str]] = [
     ("PANCREAS_BETA_CELLS",                 "pancreas_beta_cells"),
     ("ALLOGRAFT_REJECTION",                 "allograft_rejection"),
     ("ADIPOGENESIS",                        "adipogenesis"),
-    ("COAGULATION",                         "coagulation"),     # included in list, deduped below
+    ("COAGULATION",                         "coagulation"),     # deduplicated below
 ]
 
-# Deduplicate while preserving order (COAGULATION appears once)
+# Deduplicate while preserving order
 _seen: set[str] = set()
 HALLMARK_PRIORITY = [
     (h, g) for h, g in HALLMARK_PRIORITY
@@ -112,13 +119,12 @@ HALLMARK_PRIORITY = [
 
 # Primary source: Enrichr API (single batch request, no per-set rate limit)
 _ENRICHR_BASE = "https://maayanlab.cloud/Enrichr"
-_ENRICHR_LIBRARY = "MSigDB_Hallmark_2020"
+_ENRICHR_HALLMARK_LIBRARY = "MSigDB_Hallmark_2020"
 
-# Fallback: MSigDB per-set JSON (often unreachable from HPC / firewalled networks)
+# Fallback: MSigDB per-set JSON (often unreachable from firewalled networks)
 _MSIGDB_BASE = "https://data.gsea-msigdb.org/gsea/msigdb/human/genesets"
 
 # Mapping from HALLMARK_PRIORITY suffix → Enrichr display name.
-# Enrichr uses human-readable names that differ from the MSigDB suffix format.
 _SUFFIX_TO_ENRICHR: dict[str, str] = {
     "ESTROGEN_RESPONSE_EARLY":           "Estrogen Response Early",
     "ESTROGEN_RESPONSE_LATE":            "Estrogen Response Late",
@@ -159,7 +165,7 @@ _SUFFIX_TO_ENRICHR: dict[str, str] = {
     "XENOBIOTIC_METABOLISM":            "Xenobiotic Metabolism",
     "UNFOLDED_PROTEIN_RESPONSE":        "Unfolded Protein Response",
     "PROTEIN_SECRETION":                "Protein Secretion",
-    "PEROXISOME":                       "Pperoxisome",   # Enrichr has a typo here
+    "PEROXISOME":                       "Pperoxisome",   # Enrichr has a typo
     "HEME_METABOLISM":                  "heme Metabolism",
     "UV_RESPONSE_UP":                   "UV Response Up",
     "UV_RESPONSE_DN":                   "UV Response Dn",
@@ -174,46 +180,44 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Hallmark fetch — Enrichr (primary) with MSigDB per-set fallback
+# Network fetchers
 # ---------------------------------------------------------------------------
 
 
-def _fetch_all_from_enrichr(
+def _fetch_hallmarks_from_enrichr(
     hallmark_priority: list[tuple[str, str]],
 ) -> dict[str, list[str]]:
-    """Single-request GMT fetch from Enrichr. Returns {group_name: [genes]}."""
-    url = f"{_ENRICHR_BASE}/geneSetLibrary?mode=text&libraryName={_ENRICHR_LIBRARY}"
+    """Single-request GMT fetch of Hallmark sets from Enrichr.
+
+    Returns {group_name: [genes]} keyed by HALLMARK_PRIORITY group names.
+    """
+    url = f"{_ENRICHR_BASE}/geneSetLibrary?mode=text&libraryName={_ENRICHR_HALLMARK_LIBRARY}"
     req = urllib.request.Request(url, headers={"User-Agent": "ELAJ-vocab-builder/1.0"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         text = resp.read().decode("utf-8")
 
-    # GMT format: "DisplayName\tDescription\tGene1\tGene2\t..."
     enrichr_genes: dict[str, list[str]] = {}
     for line in text.strip().splitlines():
         parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-        enrichr_genes[parts[0].strip()] = [g.strip() for g in parts[2:] if g.strip()]
+        if len(parts) >= 2:
+            enrichr_genes[parts[0].strip()] = [g.strip() for g in parts[2:] if g.strip()]
 
-    # Map Enrichr display names → group names via HALLMARK_PRIORITY + _SUFFIX_TO_ENRICHR
     enrichr_to_group = {
         enrichr_name: group_name
         for suffix, group_name in hallmark_priority
         if (enrichr_name := _SUFFIX_TO_ENRICHR.get(suffix))
     }
 
-    result: dict[str, list[str]] = {}
-    for enrichr_name, genes in enrichr_genes.items():
-        group_name = enrichr_to_group.get(enrichr_name)
-        if group_name is not None:
-            result[group_name] = genes
-
-    return result
+    return {
+        group_name: genes
+        for enrichr_name, genes in enrichr_genes.items()
+        if (group_name := enrichr_to_group.get(enrichr_name))
+    }
 
 
-def _fetch_one_from_msigdb(hallmark_suffix: str, retry: int = 3) -> list[str]:
+def _fetch_one_hallmark_from_msigdb(suffix: str, retry: int = 3) -> list[str]:
     """Fetch a single Hallmark gene set from the MSigDB per-set JSON API."""
-    url = f"{_MSIGDB_BASE}/HALLMARK_{hallmark_suffix}.json"
+    url = f"{_MSIGDB_BASE}/HALLMARK_{suffix}.json"
     for attempt in range(retry):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "ELAJ-vocab-builder/1.0"})
@@ -224,23 +228,22 @@ def _fetch_one_from_msigdb(hallmark_suffix: str, retry: int = 3) -> list[str]:
             if attempt < retry - 1:
                 time.sleep(2 ** attempt)
             else:
-                logger.warning("Failed to fetch HALLMARK_%s: %s", hallmark_suffix, exc)
+                logger.warning("Failed to fetch HALLMARK_%s: %s", suffix, exc)
     return []
 
 
-def fetch_all_hallmarks(
+def fetch_hallmarks(
     hallmark_priority: list[tuple[str, str]],
 ) -> dict[str, list[str]]:
     """Fetch all Hallmark gene sets. Returns {group_name: [gene, ...]}.
 
-    Tries Enrichr first (single batch request). Falls back to individual
-    MSigDB calls if Enrichr is unreachable.
+    Tries Enrichr first (single batch). Falls back to MSigDB per-set calls.
     """
     try:
-        logger.info("Fetching all Hallmark sets from Enrichr (%s) …", _ENRICHR_LIBRARY)
-        result = _fetch_all_from_enrichr(hallmark_priority)
+        logger.info("Fetching Hallmark sets from Enrichr (%s) …", _ENRICHR_HALLMARK_LIBRARY)
+        result = _fetch_hallmarks_from_enrichr(hallmark_priority)
         if result:
-            logger.info("Fetched %d gene sets from Enrichr", len(result))
+            logger.info("Fetched %d Hallmark sets from Enrichr", len(result))
             return result
         logger.warning("Enrichr returned no matching sets — falling back to MSigDB")
     except Exception as exc:
@@ -248,12 +251,109 @@ def fetch_all_hallmarks(
 
     group_genes: dict[str, list[str]] = {}
     for i, (suffix, group_name) in enumerate(hallmark_priority):
-        logger.info(
-            "[%d/%d] Fetching HALLMARK_%s → %s",
-            i + 1, len(hallmark_priority), suffix, group_name,
-        )
-        group_genes[group_name] = _fetch_one_from_msigdb(suffix)
+        logger.info("[%d/%d] Fetching HALLMARK_%s", i + 1, len(hallmark_priority), suffix)
+        group_genes[group_name] = _fetch_one_hallmark_from_msigdb(suffix)
     return group_genes
+
+
+def fetch_enrichr_library(library_name: str) -> dict[str, list[str]]:
+    """Fetch any Enrichr library as {gene_set_name: [genes]}."""
+    url = f"{_ENRICHR_BASE}/geneSetLibrary?mode=text&libraryName={library_name}"
+    req = urllib.request.Request(url, headers={"User-Agent": "ELAJ-vocab-builder/1.0"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        text = resp.read().decode("utf-8")
+    result: dict[str, list[str]] = {}
+    for line in text.strip().splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            name = parts[0].strip()
+            genes = [g.strip() for g in parts[2:] if g.strip()]
+            if name and genes:
+                result[name] = genes
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Group assignment helpers
+# ---------------------------------------------------------------------------
+
+
+def _sanitize_group_name(raw: str, prefix: str) -> str:
+    """Convert a raw pathway name to a safe group name with a library prefix."""
+    safe = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    return f"{prefix}_{safe}"
+
+
+def assign_supplementary(
+    unassigned_genes: list[str],
+    library_data: dict[str, list[str]],
+    gene_universe: set[str],
+    min_pathway_size: int,
+    prefix: str,
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Assign unassigned genes to pathways from a supplementary library.
+
+    Only pathways with >= min_pathway_size genes in gene_universe are used.
+    Within each pathway, genes are assigned largest-pathway-first so each gene
+    ends up in the broadest pathway that covers it (stable, well-characterised).
+
+    Returns:
+        new_groups:       {sanitized_group_name: [genes]}
+        still_unassigned: genes not matched by any pathway
+    """
+    unassigned_set = set(unassigned_genes)
+
+    valid: list[tuple[str, list[str]]] = []
+    for name, genes in library_data.items():
+        corpus_genes = [g for g in genes if g in gene_universe]
+        if len(corpus_genes) >= min_pathway_size:
+            valid.append((name, corpus_genes))
+
+    valid.sort(key=lambda x: -len(x[1]))
+
+    gene_to_raw: dict[str, str] = {}
+    for raw_name, corpus_genes in valid:
+        for gene in corpus_genes:
+            if gene in unassigned_set and gene not in gene_to_raw:
+                gene_to_raw[gene] = raw_name
+
+    pathway_to_genes: dict[str, list[str]] = {}
+    still_unassigned: list[str] = []
+    for gene in unassigned_genes:
+        raw = gene_to_raw.get(gene)
+        if raw is not None:
+            pathway_to_genes.setdefault(raw, []).append(gene)
+        else:
+            still_unassigned.append(gene)
+
+    seen_names: dict[str, int] = {}
+    new_groups: dict[str, list[str]] = {}
+    for raw_name, genes in pathway_to_genes.items():
+        base = _sanitize_group_name(raw_name, prefix)
+        if base in seen_names:
+            seen_names[base] += 1
+            group_name = f"{base}_{seen_names[base]}"
+        else:
+            seen_names[base] = 0
+            group_name = base
+        new_groups[group_name] = genes
+
+    return new_groups, still_unassigned
+
+
+def split_large_groups(
+    groups: dict[str, list[str]],
+    max_size: int,
+) -> dict[str, list[str]]:
+    """Split any group exceeding max_size into chunks named <group>_000, _001, …"""
+    result: dict[str, list[str]] = {}
+    for name, genes in groups.items():
+        if len(genes) <= max_size:
+            result[name] = genes
+        else:
+            for i, start in enumerate(range(0, len(genes), max_size)):
+                result[f"{name}_{i:03d}"] = genes[start : start + max_size]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -263,60 +363,90 @@ def fetch_all_hallmarks(
 
 def build_vocabulary(
     gene_list: list[str] | None,
-    group_genes: dict[str, list[str]],
-    unassigned_cap: int = 500,
+    hallmark_groups: dict[str, list[str]],
+    supplementary_libraries: dict[str, dict[str, list[str]]],
+    min_pathway_size: int = 15,
+    max_group_size: int = 500,
 ) -> dict[str, dict]:
     """Assign genes to groups and return a vocabulary dict.
 
-    Args:
-        gene_list:      HGNC symbols to include.  If None, every gene found in
-                        any Hallmark set is included.
-        group_genes:    Mapping from group name to gene symbols in that group.
-                        Must be ordered (priority = key insertion order).
-        unassigned_cap: Warn if the unassigned group exceeds this size.
+    Assignment pipeline:
+    1. Hallmark groups (HALLMARK_PRIORITY order, first-match wins)
+    2. Supplementary libraries in order (Reactome, etc.)
+    3. Remaining genes → "unassigned"
+    4. All groups split at max_group_size
 
-    Returns:
-        vocabulary dict compatible with GeneVocabulary.from_dict().
+    Returns a vocabulary dict compatible with GeneVocabulary.from_dict().
     """
-    # gene → group assignment (first-match wins)
+    # Step 1: Hallmark assignment
     gene_to_group: dict[str, str] = {}
-    for group_name, genes in group_genes.items():
+    for group_name, genes in hallmark_groups.items():
         for gene in genes:
             if gene not in gene_to_group:
                 gene_to_group[gene] = group_name
 
-    # Determine final gene set
+    # Step 2: Determine final gene set
     if gene_list is not None:
         final_genes = gene_list
     else:
-        # Union of all genes across all Hallmark sets, sorted for determinism
-        all_hallmark_genes: set[str] = set()
-        for genes in group_genes.values():
-            all_hallmark_genes.update(genes)
-        final_genes = sorted(all_hallmark_genes)
+        all_genes: set[str] = set()
+        for genes in hallmark_groups.values():
+            all_genes.update(genes)
+        final_genes = sorted(all_genes)
 
-    # Build vocabulary: global_idx is position in final_genes
+    gene_universe = set(final_genes)
+    unassigned = [g for g in final_genes if g not in gene_to_group]
+    logger.info(
+        "After Hallmark assignment: %d assigned, %d unassigned",
+        len(final_genes) - len(unassigned), len(unassigned),
+    )
+
+    # Step 3: Supplementary assignment
+    extra_groups: dict[str, list[str]] = {}
+    for lib_name, lib_data in supplementary_libraries.items():
+        if not unassigned:
+            break
+        prefix = re.sub(r"[^a-z0-9]+", "_", lib_name.split("_")[0].lower()).strip("_")
+        new_groups, unassigned = assign_supplementary(
+            unassigned, lib_data, gene_universe, min_pathway_size, prefix
+        )
+        extra_groups.update(new_groups)
+        logger.info(
+            "After %s: %d more genes assigned, %d still unassigned",
+            lib_name, sum(len(g) for g in new_groups.values()), len(unassigned),
+        )
+
+    # Step 4: Collect all groups; append remainder
+    all_groups: dict[str, list[str]] = {}
+    all_groups.update(hallmark_groups)
+    all_groups.update(extra_groups)
+    if unassigned:
+        all_groups["unassigned"] = unassigned
+        logger.info("%d genes remain unassigned — will be split into chunks", len(unassigned))
+
+    # Step 5: Split groups exceeding max_group_size
+    all_groups = split_large_groups(all_groups, max_group_size)
+
+    # Step 6: Build final gene → group mapping from the (possibly split) groups
+    gene_to_group_final: dict[str, str] = {
+        gene: group_name
+        for group_name, genes in all_groups.items()
+        for gene in genes
+    }
+
+    # Step 7: Emit vocabulary dict in final_genes order
     vocab: dict[str, dict] = {}
     group_counters: dict[str, int] = {}
-
     for global_idx, gene in enumerate(final_genes):
-        group = gene_to_group.get(gene, "unassigned")
+        group = gene_to_group_final.get(gene, "unassigned")
         within_idx = group_counters.get(group, 0)
         group_counters[group] = within_idx + 1
         vocab[gene] = {
             "global_idx": global_idx,
             "group": group,
             "group_idx": within_idx,
-            "chromosome": "",  # filled by caller if chromosome data is available
+            "chromosome": "",
         }
-
-    n_unassigned = group_counters.get("unassigned", 0)
-    if n_unassigned > unassigned_cap:
-        logger.warning(
-            "%d genes assigned to 'unassigned' group (cap=%d). "
-            "Consider adding more Hallmark groups or refining the gene list.",
-            n_unassigned, unassigned_cap,
-        )
 
     return vocab
 
@@ -325,9 +455,51 @@ def print_stats(vocab: dict[str, dict]) -> None:
     from collections import Counter
     group_counts = Counter(e["group"] for e in vocab.values())
     print(f"\nVocabulary stats — {len(vocab)} genes, {len(group_counts)} groups")
-    print("-" * 48)
+    print("-" * 52)
     for group, count in sorted(group_counts.items(), key=lambda x: -x[1]):
-        print(f"  {group:<40s} {count:>5d}")
+        print(f"  {group:<44s} {count:>5d}")
+
+
+# ---------------------------------------------------------------------------
+# Gene-sets file I/O (combined hallmarks + supplementary for offline use)
+# ---------------------------------------------------------------------------
+
+
+def save_gene_sets(
+    hallmarks: dict[str, list[str]],
+    supplementary: dict[str, dict[str, list[str]]],
+    out_path: Path,
+) -> None:
+    """Save hallmarks and supplementary library data to a single JSON file."""
+    payload = {"hallmarks": hallmarks, **supplementary}
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+
+
+def load_gene_sets(
+    path: Path,
+) -> tuple[dict[str, list[str]], dict[str, dict[str, list[str]]]]:
+    """Load a gene-sets JSON file.
+
+    Supports both the new combined format (top-level 'hallmarks' key) and the
+    legacy hallmarks-only format (flat {group_name: [genes]}).
+
+    Returns:
+        hallmarks:    {group_name: [genes]}
+        supplementary: {library_name: {pathway_name: [genes]}}
+    """
+    with open(path, encoding="utf-8") as fh:
+        data: dict = json.load(fh)
+
+    if "hallmarks" in data:
+        hallmarks = data.pop("hallmarks")
+        supplementary = data  # remaining keys are library names
+    else:
+        hallmarks = data
+        supplementary = {}
+
+    return hallmarks, supplementary
 
 
 # ---------------------------------------------------------------------------
@@ -341,49 +513,68 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--gene-list",
-        metavar="FILE",
+        "--gene-list", metavar="FILE",
         help="Text file with one HGNC symbol per line. "
              "If omitted, uses the union of all Hallmark genes.",
     )
     parser.add_argument(
         "--out", default=None, metavar="FILE",
-        help="Output path for vocabulary.json. Required except with --save-hallmarks.",
+        help="Output path for vocabulary.json. Required except with --save-gene-sets.",
     )
-    parser.add_argument(
-        "--unassigned-cap", type=int, default=500, metavar="N",
-        help="Warn if unassigned group exceeds N genes. Default: 500.",
+
+    # --- Gene-set source (offline workflow) ---
+    offline = parser.add_argument_group("offline workflow")
+    offline.add_argument(
+        "--save-gene-sets", metavar="FILE",
+        help="Download Hallmark + supplementary gene sets and save to FILE, then exit. "
+             "Run on a login node with internet access.",
     )
-    # Synthetic mode
-    parser.add_argument(
+    offline.add_argument(
+        "--gene-sets-file", metavar="FILE",
+        help="Load pre-downloaded gene sets from FILE (produced by --save-gene-sets). "
+             "Skips all network access.",
+    )
+    # Legacy aliases kept for backward compatibility
+    offline.add_argument("--save-hallmarks", metavar="FILE", help=argparse.SUPPRESS)
+    offline.add_argument("--hallmarks-file", metavar="FILE", help=argparse.SUPPRESS)
+
+    # --- Supplementary libraries ---
+    supp = parser.add_argument_group("supplementary libraries")
+    supp.add_argument(
+        "--supplementary-libraries", nargs="*", default=["Reactome_2022"],
+        metavar="LIB",
+        help="Enrichr library names to use after Hallmark assignment. "
+             "Default: Reactome_2022. Pass empty list to disable.",
+    )
+    supp.add_argument(
+        "--min-pathway-size", type=int, default=15, metavar="N",
+        help="Minimum genes from the corpus a pathway must contain to be used. "
+             "Default: 15.",
+    )
+    supp.add_argument(
+        "--max-group-size", type=int, default=500, metavar="N",
+        help="Groups larger than N are split into numbered chunks. Default: 500.",
+    )
+
+    # --- Synthetic mode ---
+    synth = parser.add_argument_group("synthetic mode")
+    synth.add_argument(
         "--use-synthetic", action="store_true",
         help="Generate a deterministic synthetic vocabulary (no network).",
     )
-    parser.add_argument(
+    synth.add_argument(
         "--n-genes", type=int, default=1000, metavar="N",
-        help="Number of genes in synthetic vocabulary. Default: 1000.",
+        help="Genes in synthetic vocabulary. Default: 1000.",
     )
-    parser.add_argument(
+    synth.add_argument(
         "--n-groups", type=int, default=10, metavar="N",
-        help="Number of groups in synthetic vocabulary. Default: 10.",
+        help="Groups in synthetic vocabulary. Default: 10.",
     )
-    parser.add_argument(
+    synth.add_argument(
         "--seed", type=int, default=24,
-        help="Random seed for synthetic vocabulary. Default: 24.",
+        help="RNG seed for synthetic vocabulary. Default: 24.",
     )
-    # Offline / pre-downloaded hallmarks
-    parser.add_argument(
-        "--hallmarks-file",
-        metavar="FILE",
-        help="Path to a pre-downloaded hallmarks JSON (produced by --save-hallmarks). "
-             "Skips all network access.",
-    )
-    parser.add_argument(
-        "--save-hallmarks",
-        metavar="FILE",
-        help="Download all Hallmark gene sets and save to FILE as JSON, then exit. "
-             "Run this on a machine with internet access; use --hallmarks-file on HPC.",
-    )
+
     return parser.parse_args(argv)
 
 
@@ -395,24 +586,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parse_args(argv)
 
-    if not args.save_hallmarks and args.out is None:
-        logger.error("--out is required unless using --save-hallmarks")
-        sys.exit(1)
+    # Resolve legacy aliases
+    save_target = args.save_gene_sets or args.save_hallmarks
+    load_source = args.gene_sets_file or args.hallmarks_file
 
-    # --- Save-hallmarks mode (login-node download, then exit) -------------
-    if args.save_hallmarks:
-        logger.info("Downloading %d Hallmark gene sets from MSigDB …", len(HALLMARK_PRIORITY))
-        group_genes = fetch_all_hallmarks(HALLMARK_PRIORITY)
-        n_fetched = sum(len(g) for g in group_genes.values())
-        if n_fetched == 0:
-            logger.error("No genes fetched from MSigDB. Check network connection.")
-            sys.exit(1)
-        out_path = Path(args.save_hallmarks)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump(group_genes, fh)
-        logger.info("Saved %d sets (%d gene entries) to %s", len(group_genes), n_fetched, out_path)
-        return
+    if not save_target and args.out is None and not args.use_synthetic:
+        logger.error("--out is required unless using --save-gene-sets or --use-synthetic")
+        sys.exit(1)
 
     # --- Synthetic mode ---------------------------------------------------
     if args.use_synthetic:
@@ -422,13 +602,38 @@ def main(argv: list[str] | None = None) -> None:
             args.n_genes, args.n_groups, args.seed,
         )
         vocab = generate_synthetic_vocabulary(
-            n_genes=args.n_genes,
-            n_groups=args.n_groups,
-            seed=args.seed,
+            n_genes=args.n_genes, n_groups=args.n_groups, seed=args.seed,
         )
         print_stats(vocab)
         save_vocabulary(vocab, args.out)
         logger.info("Saved to %s", args.out)
+        return
+
+    # --- Save-gene-sets mode (login-node download, then exit) -------------
+    if save_target:
+        logger.info("Downloading Hallmark gene sets …")
+        hallmarks = fetch_hallmarks(HALLMARK_PRIORITY)
+        if not any(hallmarks.values()):
+            logger.error("No Hallmark genes fetched. Check network connection.")
+            sys.exit(1)
+
+        supplementary: dict[str, dict[str, list[str]]] = {}
+        for lib_name in (args.supplementary_libraries or []):
+            logger.info("Downloading supplementary library: %s …", lib_name)
+            try:
+                supplementary[lib_name] = fetch_enrichr_library(lib_name)
+                n = sum(len(v) for v in supplementary[lib_name].values())
+                logger.info("  %s: %d pathways, %d gene entries", lib_name,
+                            len(supplementary[lib_name]), n)
+            except Exception as exc:
+                logger.error("Failed to fetch %s: %s", lib_name, exc)
+                sys.exit(1)
+
+        save_gene_sets(hallmarks, supplementary, Path(save_target))
+        total = sum(len(v) for v in hallmarks.values()) + sum(
+            len(v) for lib in supplementary.values() for v in lib.values()
+        )
+        logger.info("Saved to %s  (%d total gene entries)", save_target, total)
         return
 
     # --- Automated mode ---------------------------------------------------
@@ -445,30 +650,38 @@ def main(argv: list[str] | None = None) -> None:
         ]
         logger.info("Loaded %d genes from %s", len(gene_list), args.gene_list)
 
-    if args.hallmarks_file:
-        hallmarks_path = Path(args.hallmarks_file)
-        if not hallmarks_path.exists():
-            logger.error("Hallmarks file not found: %s", args.hallmarks_file)
+    if load_source:
+        source_path = Path(load_source)
+        if not source_path.exists():
+            logger.error("Gene-sets file not found: %s", load_source)
             sys.exit(1)
-        with open(hallmarks_path, encoding="utf-8") as fh:
-            group_genes: dict[str, list[str]] = json.load(fh)
+        hallmarks, supplementary = load_gene_sets(source_path)
         logger.info(
-            "Loaded %d Hallmark sets from %s",
-            len(group_genes), hallmarks_path,
+            "Loaded %d Hallmark groups + %d supplementary libraries from %s",
+            len(hallmarks), len(supplementary), source_path,
         )
     else:
-        logger.info("Fetching %d Hallmark gene sets from MSigDB …", len(HALLMARK_PRIORITY))
-        group_genes = fetch_all_hallmarks(HALLMARK_PRIORITY)
+        logger.info("Fetching Hallmark gene sets from network …")
+        hallmarks = fetch_hallmarks(HALLMARK_PRIORITY)
+        supplementary = {}
+        for lib_name in (args.supplementary_libraries or []):
+            logger.info("Fetching supplementary library: %s …", lib_name)
+            supplementary[lib_name] = fetch_enrichr_library(lib_name)
 
-    n_fetched = sum(len(g) for g in group_genes.values())
-    if n_fetched == 0:
+    if not any(hallmarks.values()):
         logger.error(
-            "No genes fetched from MSigDB. Check your network connection. "
-            "Use --hallmarks-file with a pre-downloaded file, or --use-synthetic for offline mode."
+            "No Hallmark genes loaded. Use --gene-sets-file with a pre-downloaded file, "
+            "or --use-synthetic for offline mode."
         )
         sys.exit(1)
 
-    vocab = build_vocabulary(gene_list, group_genes, unassigned_cap=args.unassigned_cap)
+    vocab = build_vocabulary(
+        gene_list=gene_list,
+        hallmark_groups=hallmarks,
+        supplementary_libraries=supplementary,
+        min_pathway_size=args.min_pathway_size,
+        max_group_size=args.max_group_size,
+    )
     print_stats(vocab)
 
     from endo_model.data.vocabulary import save_vocabulary

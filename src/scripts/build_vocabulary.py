@@ -106,34 +106,116 @@ HALLMARK_PRIORITY = [
     if not (h in _seen or _seen.add(h))  # type: ignore[func-returns-value]
 ]
 
-# Base URL for MSigDB REST API (no authentication required for Hallmark sets)
+# Primary source: Enrichr API (single batch request, no per-set rate limit)
+_ENRICHR_BASE = "https://maayanlab.cloud/Enrichr"
+_ENRICHR_LIBRARY = "MSigDB_Hallmark_2020"
+
+# Fallback: MSigDB per-set JSON (often unreachable from HPC / firewalled networks)
 _MSIGDB_BASE = "https://data.gsea-msigdb.org/gsea/msigdb/human/genesets"
+
+# Mapping from HALLMARK_PRIORITY suffix → Enrichr display name.
+# Enrichr uses human-readable names that differ from the MSigDB suffix format.
+_SUFFIX_TO_ENRICHR: dict[str, str] = {
+    "ESTROGEN_RESPONSE_EARLY":           "Estrogen Response Early",
+    "ESTROGEN_RESPONSE_LATE":            "Estrogen Response Late",
+    "ANDROGEN_RESPONSE":                 "Androgen Response",
+    "ANGIOGENESIS":                      "Angiogenesis",
+    "HYPOXIA":                           "Hypoxia",
+    "EPITHELIAL_MESENCHYMAL_TRANSITION": "Epithelial Mesenchymal Transition",
+    "INFLAMMATORY_RESPONSE":             "Inflammatory Response",
+    "TNFA_SIGNALING_VIA_NFKB":          "TNF-alpha Signaling via NF-kB",
+    "INTERFERON_ALPHA_RESPONSE":         "Interferon Alpha Response",
+    "INTERFERON_GAMMA_RESPONSE":         "Interferon Gamma Response",
+    "IL6_JAK_STAT3_SIGNALING":          "IL-6/JAK/STAT3 Signaling",
+    "IL2_STAT5_SIGNALING":              "IL-2/STAT5 Signaling",
+    "COMPLEMENT":                        "Complement",
+    "COAGULATION":                       "Coagulation",
+    "TGF_BETA_SIGNALING":               "TGF-beta Signaling",
+    "WNT_BETA_CATENIN_SIGNALING":       "Wnt-beta Catenin Signaling",
+    "NOTCH_SIGNALING":                  "Notch Signaling",
+    "HEDGEHOG_SIGNALING":               "Hedgehog Signaling",
+    "KRAS_SIGNALING_UP":                "KRAS Signaling Up",
+    "KRAS_SIGNALING_DN":                "KRAS Signaling Dn",
+    "PI3K_AKT_MTOR_SIGNALING":         "PI3K/AKT/mTOR  Signaling",
+    "MTORC1_SIGNALING":                 "mTORC1 Signaling",
+    "MYC_TARGETS_V1":                   "Myc Targets V1",
+    "MYC_TARGETS_V2":                   "Myc Targets V2",
+    "E2F_TARGETS":                      "E2F Targets",
+    "G2M_CHECKPOINT":                   "G2-M Checkpoint",
+    "MITOTIC_SPINDLE":                  "Mitotic Spindle",
+    "DNA_REPAIR":                       "DNA Repair",
+    "P53_PATHWAY":                      "p53 Pathway",
+    "APOPTOSIS":                        "Apoptosis",
+    "REACTIVE_OXYGEN_SPECIES_PATHWAY":  "Reactive Oxygen Species Pathway",
+    "OXIDATIVE_PHOSPHORYLATION":        "Oxidative Phosphorylation",
+    "GLYCOLYSIS":                       "Glycolysis",
+    "FATTY_ACID_METABOLISM":            "Fatty Acid Metabolism",
+    "CHOLESTEROL_HOMEOSTASIS":          "Cholesterol Homeostasis",
+    "BILE_ACID_METABOLISM":             "Bile Acid Metabolism",
+    "XENOBIOTIC_METABOLISM":            "Xenobiotic Metabolism",
+    "UNFOLDED_PROTEIN_RESPONSE":        "Unfolded Protein Response",
+    "PROTEIN_SECRETION":                "Protein Secretion",
+    "PEROXISOME":                       "Pperoxisome",   # Enrichr has a typo here
+    "HEME_METABOLISM":                  "heme Metabolism",
+    "UV_RESPONSE_UP":                   "UV Response Up",
+    "UV_RESPONSE_DN":                   "UV Response Dn",
+    "MYOGENESIS":                       "Myogenesis",
+    "SPERMATOGENESIS":                  "Spermatogenesis",
+    "PANCREAS_BETA_CELLS":              "Pancreas Beta Cells",
+    "ALLOGRAFT_REJECTION":              "Allograft Rejection",
+    "ADIPOGENESIS":                     "Adipogenesis",
+}
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# MSigDB fetch
+# Hallmark fetch — Enrichr (primary) with MSigDB per-set fallback
 # ---------------------------------------------------------------------------
 
 
-def fetch_hallmark_genes(hallmark_suffix: str, retry: int = 3) -> list[str]:
-    """Fetch gene symbols for one MSigDB Hallmark gene set.
+def _fetch_all_from_enrichr(
+    hallmark_priority: list[tuple[str, str]],
+) -> dict[str, list[str]]:
+    """Single-request GMT fetch from Enrichr. Returns {group_name: [genes]}."""
+    url = f"{_ENRICHR_BASE}/geneSetLibrary?mode=text&libraryName={_ENRICHR_LIBRARY}"
+    req = urllib.request.Request(url, headers={"User-Agent": "ELAJ-vocab-builder/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        text = resp.read().decode("utf-8")
 
-    Returns an empty list if the network is unavailable or the set is not found.
-    """
+    # GMT format: "DisplayName\tDescription\tGene1\tGene2\t..."
+    enrichr_genes: dict[str, list[str]] = {}
+    for line in text.strip().splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        enrichr_genes[parts[0].strip()] = [g.strip() for g in parts[2:] if g.strip()]
+
+    # Map Enrichr display names → group names via HALLMARK_PRIORITY + _SUFFIX_TO_ENRICHR
+    enrichr_to_group = {
+        enrichr_name: group_name
+        for suffix, group_name in hallmark_priority
+        if (enrichr_name := _SUFFIX_TO_ENRICHR.get(suffix))
+    }
+
+    result: dict[str, list[str]] = {}
+    for enrichr_name, genes in enrichr_genes.items():
+        group_name = enrichr_to_group.get(enrichr_name)
+        if group_name is not None:
+            result[group_name] = genes
+
+    return result
+
+
+def _fetch_one_from_msigdb(hallmark_suffix: str, retry: int = 3) -> list[str]:
+    """Fetch a single Hallmark gene set from the MSigDB per-set JSON API."""
     url = f"{_MSIGDB_BASE}/HALLMARK_{hallmark_suffix}.json"
     for attempt in range(retry):
         try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "ELAJ-vocab-builder/1.0"},
-            )
+            req = urllib.request.Request(url, headers={"User-Agent": "ELAJ-vocab-builder/1.0"})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 payload: dict = json.loads(resp.read().decode())
-            # JSON structure: {"HALLMARK_NAME": {"geneSymbols": [...]}}
-            set_data = next(iter(payload.values()))
-            return set_data.get("geneSymbols", [])
+            return next(iter(payload.values())).get("geneSymbols", [])
         except Exception as exc:
             if attempt < retry - 1:
                 time.sleep(2 ** attempt)
@@ -145,15 +227,28 @@ def fetch_hallmark_genes(hallmark_suffix: str, retry: int = 3) -> list[str]:
 def fetch_all_hallmarks(
     hallmark_priority: list[tuple[str, str]],
 ) -> dict[str, list[str]]:
-    """Fetch all Hallmark gene sets. Returns {group_name: [gene, ...]}."""
+    """Fetch all Hallmark gene sets. Returns {group_name: [gene, ...]}.
+
+    Tries Enrichr first (single batch request). Falls back to individual
+    MSigDB calls if Enrichr is unreachable.
+    """
+    try:
+        logger.info("Fetching all Hallmark sets from Enrichr (%s) …", _ENRICHR_LIBRARY)
+        result = _fetch_all_from_enrichr(hallmark_priority)
+        if result:
+            logger.info("Fetched %d gene sets from Enrichr", len(result))
+            return result
+        logger.warning("Enrichr returned no matching sets — falling back to MSigDB")
+    except Exception as exc:
+        logger.warning("Enrichr fetch failed (%s) — falling back to MSigDB", exc)
+
     group_genes: dict[str, list[str]] = {}
     for i, (suffix, group_name) in enumerate(hallmark_priority):
         logger.info(
             "[%d/%d] Fetching HALLMARK_%s → %s",
             i + 1, len(hallmark_priority), suffix, group_name,
         )
-        genes = fetch_hallmark_genes(suffix)
-        group_genes[group_name] = genes
+        group_genes[group_name] = _fetch_one_from_msigdb(suffix)
     return group_genes
 
 

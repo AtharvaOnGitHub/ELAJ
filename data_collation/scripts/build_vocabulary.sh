@@ -21,9 +21,9 @@ module load SciPy-bundle/2024.05-gfbf-2024a
 export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
-PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
-GENE_LIST=${PROCESSED}/gene_list.txt
-VOCAB_OUT=${PROCESSED}/vocabulary.json
+export PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
+export GENE_LIST=${PROCESSED}/gene_list.txt
+export VOCAB_OUT=${PROCESSED}/vocabulary.json
 
 # ── Step 1: extract gene union from all processed h5ad files ──────────────
 echo "Extracting gene union from processed studies ..."

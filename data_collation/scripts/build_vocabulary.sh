@@ -49,11 +49,16 @@ print(f"\nUnion: {len(sorted_genes):,} unique genes → {gene_list_path}")
 PYEOF
 
 # ── Step 2: assign genes to MSigDB Hallmark groups → vocabulary.json ──────
+# hallmarks_msigdb.json is pre-downloaded on a login node (which has internet
+# access) using:
+#   python scripts/build_vocabulary.py --save-hallmarks src/data/hallmarks_msigdb.json
+# Compute nodes are firewalled, so we read from disk instead.
 echo ""
 echo "Building vocabulary from Hallmark gene sets ..."
 cd /rds/homes/a/axw1008/axw1008/src
 python scripts/build_vocabulary.py \
     --gene-list "${GENE_LIST}" \
+    --hallmarks-file data/hallmarks_msigdb.json \
     --out "${VOCAB_OUT}"
 
 echo ""

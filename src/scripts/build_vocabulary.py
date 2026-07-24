@@ -272,6 +272,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--seed", type=int, default=24,
         help="Random seed for synthetic vocabulary. Default: 24.",
     )
+    # Offline / pre-downloaded hallmarks
+    parser.add_argument(
+        "--hallmarks-file",
+        metavar="FILE",
+        help="Path to a pre-downloaded hallmarks JSON (produced by --save-hallmarks). "
+             "Skips all network access.",
+    )
+    parser.add_argument(
+        "--save-hallmarks",
+        metavar="FILE",
+        help="Download all Hallmark gene sets and save to FILE as JSON, then exit. "
+             "Run this on a machine with internet access; use --hallmarks-file on HPC.",
+    )
     return parser.parse_args(argv)
 
 
@@ -282,6 +295,21 @@ def main(argv: list[str] | None = None) -> None:
         datefmt="%H:%M:%S",
     )
     args = parse_args(argv)
+
+    # --- Save-hallmarks mode (login-node download, then exit) -------------
+    if args.save_hallmarks:
+        logger.info("Downloading %d Hallmark gene sets from MSigDB …", len(HALLMARK_PRIORITY))
+        group_genes = fetch_all_hallmarks(HALLMARK_PRIORITY)
+        n_fetched = sum(len(g) for g in group_genes.values())
+        if n_fetched == 0:
+            logger.error("No genes fetched from MSigDB. Check network connection.")
+            sys.exit(1)
+        out_path = Path(args.save_hallmarks)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as fh:
+            json.dump(group_genes, fh)
+        logger.info("Saved %d sets (%d gene entries) to %s", len(group_genes), n_fetched, out_path)
+        return
 
     # --- Synthetic mode ---------------------------------------------------
     if args.use_synthetic:
@@ -314,14 +342,26 @@ def main(argv: list[str] | None = None) -> None:
         ]
         logger.info("Loaded %d genes from %s", len(gene_list), args.gene_list)
 
-    logger.info("Fetching %d Hallmark gene sets from MSigDB …", len(HALLMARK_PRIORITY))
-    group_genes = fetch_all_hallmarks(HALLMARK_PRIORITY)
+    if args.hallmarks_file:
+        hallmarks_path = Path(args.hallmarks_file)
+        if not hallmarks_path.exists():
+            logger.error("Hallmarks file not found: %s", args.hallmarks_file)
+            sys.exit(1)
+        with open(hallmarks_path, encoding="utf-8") as fh:
+            group_genes: dict[str, list[str]] = json.load(fh)
+        logger.info(
+            "Loaded %d Hallmark sets from %s",
+            len(group_genes), hallmarks_path,
+        )
+    else:
+        logger.info("Fetching %d Hallmark gene sets from MSigDB …", len(HALLMARK_PRIORITY))
+        group_genes = fetch_all_hallmarks(HALLMARK_PRIORITY)
 
     n_fetched = sum(len(g) for g in group_genes.values())
     if n_fetched == 0:
         logger.error(
             "No genes fetched from MSigDB. Check your network connection. "
-            "Use --use-synthetic for offline mode."
+            "Use --hallmarks-file with a pre-downloaded file, or --use-synthetic for offline mode."
         )
         sys.exit(1)
 

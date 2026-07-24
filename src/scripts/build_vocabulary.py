@@ -4,9 +4,11 @@ Assignment pipeline
 -------------------
 1. MSigDB Hallmark sets (48 curated, endometriosis-relevant sets have highest
    priority — see HALLMARK_PRIORITY below).
-2. Supplementary Enrichr libraries (e.g. Reactome_2022) cover genes not in any
-   Hallmark set.  Libraries are applied in the order given; within each library
-   only pathways with >= --min-pathway-size genes in the corpus are used.
+2. Supplementary Enrichr libraries (see DEFAULT_SUPPLEMENTARY_LIBRARIES) cover
+   genes not in any Hallmark set.  Libraries are applied in the order given;
+   within each library only pathways with >= --min-pathway-size corpus genes
+   are used, and each gene goes to the smallest qualifying pathway
+   (--pathway-preference specific) so groups stay biologically coherent.
 3. Remaining unassigned genes are collected into an "unassigned" group.
 4. All groups larger than --max-group-size are split into numbered chunks so
    the group encoder's attention is never given an infeasible sequence length.
@@ -15,11 +17,10 @@ Offline workflow (HPC nodes have no outbound internet)
 ------------------------------------------------------
 On a login node that has internet access:
 
-    python scripts/build_vocabulary.py \\
-        --save-gene-sets src/data/gene_sets.json \\
-        --supplementary-libraries Reactome_2022
+    python scripts/build_vocabulary.py --save-gene-sets src/data/gene_sets.json
 
-This downloads all gene sets and saves them to a single JSON file.
+This downloads Hallmark plus every default supplementary library and saves
+them to a single JSON file.
 
 On a compute node (sbatch):
 
@@ -120,6 +121,25 @@ HALLMARK_PRIORITY = [
 # Primary source: Enrichr API (single batch request, no per-set rate limit)
 _ENRICHR_BASE = "https://maayanlab.cloud/Enrichr"
 _ENRICHR_HALLMARK_LIBRARY = "MSigDB_Hallmark_2020"
+
+# Supplementary libraries applied after Hallmark, in priority order.
+# Curated, pathway-specific databases come first; broad ontologies act as
+# catch-alls.  Measured marginal coverage over Hallmark (unique human genes):
+#   GO BP +10,823 | Oncogenic +2,636 | KEGG +846 | GO CC +419 | BioPlanet +356
+#   GO MF +226 | Reactome +194 | Elsevier +160 | WikiPathways +125
+# Combined ceiling ≈ 20,085 genes — effectively the annotatable protein-coding
+# genome.  Panther_2016 (+30) and HumanCyc_2016 (+11) are excluded as noise.
+DEFAULT_SUPPLEMENTARY_LIBRARIES: tuple[str, ...] = (
+    "Reactome_2022",
+    "KEGG_2021_Human",
+    "WikiPathway_2023_Human",
+    "BioPlanet_2019",
+    "Elsevier_Pathway_Collection",
+    "MSigDB_Oncogenic_Signatures",
+    "GO_Biological_Process_2023",
+    "GO_Molecular_Function_2023",
+    "GO_Cellular_Component_2023",
+)
 
 # Fallback: MSigDB per-set JSON (often unreachable from firewalled networks)
 _MSIGDB_BASE = "https://data.gsea-msigdb.org/gsea/msigdb/human/genesets"
@@ -290,12 +310,26 @@ def assign_supplementary(
     gene_universe: set[str],
     min_pathway_size: int,
     prefix: str,
+    prefer_specific: bool = True,
 ) -> tuple[dict[str, list[str]], list[str]]:
     """Assign unassigned genes to pathways from a supplementary library.
 
-    Only pathways with >= min_pathway_size genes in gene_universe are used.
-    Within each pathway, genes are assigned largest-pathway-first so each gene
-    ends up in the broadest pathway that covers it (stable, well-characterised).
+    Greedy set-cover: pathways are visited in preference order and each claims
+    only the genes no earlier pathway took.  A pathway is skipped unless it can
+    contribute >= min_pathway_size *unclaimed* genes — this is what guarantees
+    every emitted group is substantial.  (Filtering on total pathway size
+    instead would emit thousands of 1-2 gene fragments, since overlapping
+    pathways leave each other almost nothing.)
+
+    Group count is a first-class cost: HierarchicalEncoder builds one full
+    transformer per group (~100k parameters at d_token=64), so min_pathway_size
+    is the main dial controlling model size.
+
+    prefer_specific=True visits the smallest qualifying pathways first, so genes
+    land in specific, biologically coherent terms (e.g. "Interleukin-4
+    signaling") rather than generic roots (e.g. "Immune System").  A generic
+    root has no coherent internal structure for attention to learn, and gets
+    arbitrarily chunked by split_large_groups anyway.
 
     Returns:
         new_groups:       {sanitized_group_name: [genes]}
@@ -309,13 +343,19 @@ def assign_supplementary(
         if len(corpus_genes) >= min_pathway_size:
             valid.append((name, corpus_genes))
 
-    valid.sort(key=lambda x: -len(x[1]))
+    # Ties broken by name for determinism across runs.
+    valid.sort(key=lambda x: (len(x[1]) if prefer_specific else -len(x[1]), x[0]))
 
     gene_to_raw: dict[str, str] = {}
     for raw_name, corpus_genes in valid:
-        for gene in corpus_genes:
-            if gene in unassigned_set and gene not in gene_to_raw:
-                gene_to_raw[gene] = raw_name
+        claimable = [
+            g for g in corpus_genes
+            if g in unassigned_set and g not in gene_to_raw
+        ]
+        if len(claimable) < min_pathway_size:
+            continue
+        for gene in claimable:
+            gene_to_raw[gene] = raw_name
 
     pathway_to_genes: dict[str, list[str]] = {}
     still_unassigned: list[str] = []
@@ -365,8 +405,9 @@ def build_vocabulary(
     gene_list: list[str] | None,
     hallmark_groups: dict[str, list[str]],
     supplementary_libraries: dict[str, dict[str, list[str]]],
-    min_pathway_size: int = 15,
+    min_pathway_size: int = 50,
     max_group_size: int = 500,
+    prefer_specific: bool = True,
 ) -> dict[str, dict]:
     """Assign genes to groups and return a vocabulary dict.
 
@@ -408,7 +449,8 @@ def build_vocabulary(
             break
         prefix = re.sub(r"[^a-z0-9]+", "_", lib_name.split("_")[0].lower()).strip("_")
         new_groups, unassigned = assign_supplementary(
-            unassigned, lib_data, gene_universe, min_pathway_size, prefix
+            unassigned, lib_data, gene_universe, min_pathway_size, prefix,
+            prefer_specific=prefer_specific,
         )
         extra_groups.update(new_groups)
         logger.info(
@@ -541,19 +583,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --- Supplementary libraries ---
     supp = parser.add_argument_group("supplementary libraries")
     supp.add_argument(
-        "--supplementary-libraries", nargs="*", default=["Reactome_2022"],
+        "--supplementary-libraries", nargs="*", default=list(DEFAULT_SUPPLEMENTARY_LIBRARIES),
         metavar="LIB",
-        help="Enrichr library names to use after Hallmark assignment. "
-             "Default: Reactome_2022. Pass empty list to disable.",
+        help="Enrichr library names to use after Hallmark assignment, in priority "
+             f"order. Default: {' '.join(DEFAULT_SUPPLEMENTARY_LIBRARIES)}. "
+             "Pass empty list to disable.",
     )
     supp.add_argument(
-        "--min-pathway-size", type=int, default=15, metavar="N",
-        help="Minimum genes from the corpus a pathway must contain to be used. "
-             "Default: 15.",
+        "--min-pathway-size", type=int, default=50, metavar="N",
+        help="Minimum *unclaimed* corpus genes a pathway must contribute to be "
+             "emitted as a group. This is the main dial on model size: each group "
+             "costs one transformer (~100k params). Default: 50 (~250 groups).",
     )
     supp.add_argument(
         "--max-group-size", type=int, default=500, metavar="N",
         help="Groups larger than N are split into numbered chunks. Default: 500.",
+    )
+    supp.add_argument(
+        "--pathway-preference", choices=["specific", "generic"], default="specific",
+        help="When a gene belongs to several pathways, assign it to the smallest "
+             "('specific') or largest ('generic') one. Default: specific.",
     )
 
     # --- Synthetic mode ---
@@ -681,6 +730,7 @@ def main(argv: list[str] | None = None) -> None:
         supplementary_libraries=supplementary,
         min_pathway_size=args.min_pathway_size,
         max_group_size=args.max_group_size,
+        prefer_specific=(args.pathway_preference == "specific"),
     )
     print_stats(vocab)
 

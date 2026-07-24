@@ -48,21 +48,23 @@ gene_list_path.write_text("\n".join(sorted_genes) + "\n")
 print(f"\nUnion: {len(sorted_genes):,} unique genes → {gene_list_path}")
 PYEOF
 
-# ── Step 2: assign genes to Hallmark + Reactome groups → vocabulary.json ──
+# ── Step 2: assign genes to pathway groups → vocabulary.json ──────────────
 # gene_sets.json is pre-downloaded on a login node (which has internet access)
 # using:
-#   python src/scripts/build_vocabulary.py \
-#       --save-gene-sets src/data/gene_sets.json \
-#       --supplementary-libraries Reactome_2022
+#   python src/scripts/build_vocabulary.py --save-gene-sets src/data/gene_sets.json
 # Compute nodes are firewalled, so we read from disk instead.
+#
+# min-pathway-size is the main dial on model size: each group costs one
+# transformer (~100k params at d_token=64).  50 gives ~250 groups (~25M params).
 echo ""
-echo "Building vocabulary from Hallmark + Reactome gene sets ..."
+echo "Building vocabulary from Hallmark + 9 pathway libraries ..."
 cd /rds/homes/a/axw1008/axw1008/src
 python scripts/build_vocabulary.py \
     --gene-list "${GENE_LIST}" \
     --gene-sets-file data/gene_sets.json \
     --max-group-size 500 \
-    --min-pathway-size 15 \
+    --min-pathway-size 50 \
+    --pathway-preference specific \
     --out "${VOCAB_OUT}"
 
 echo ""

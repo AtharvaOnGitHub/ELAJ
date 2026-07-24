@@ -39,6 +39,10 @@ import time
 import urllib.request
 from pathlib import Path
 
+# Ensure src/ is on sys.path so endo_model is importable when the script is
+# invoked directly (python scripts/build_vocabulary.py) rather than as a module.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 # ---------------------------------------------------------------------------
 # Hallmark priority order
 # ---------------------------------------------------------------------------

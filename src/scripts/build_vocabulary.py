@@ -248,8 +248,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "If omitted, uses the union of all Hallmark genes.",
     )
     parser.add_argument(
-        "--out", required=True, metavar="FILE",
-        help="Output path for vocabulary.json.",
+        "--out", default=None, metavar="FILE",
+        help="Output path for vocabulary.json. Required except with --save-hallmarks.",
     )
     parser.add_argument(
         "--unassigned-cap", type=int, default=500, metavar="N",
@@ -295,6 +295,10 @@ def main(argv: list[str] | None = None) -> None:
         datefmt="%H:%M:%S",
     )
     args = parse_args(argv)
+
+    if not args.save_hallmarks and args.out is None:
+        logger.error("--out is required unless using --save-hallmarks")
+        sys.exit(1)
 
     # --- Save-hallmarks mode (login-node download, then exit) -------------
     if args.save_hallmarks:

@@ -1,28 +1,28 @@
-"""Visualise the vocabulary trade-off space.
+"""Visualise how model parameters respond to the vocabulary control variables.
 
-Three coupled quantities determine the shape of the model's gene vocabulary,
-all driven by the single dial --min-pathway-size:
+Total model parameters are the dependent quantity throughout.  They are set by
+the vocabulary's structure via:
 
-    1. Gene-group size        (how many genes attend together in one group)
-    2. Model parameters       (one transformer per group + gene embeddings)
-    3. Gene-space dimension    (how many genes the vocabulary covers)
+    total_params = n_groups * per_group_transformer(d_token) + vocab_size * d_token
 
-Raising min_pathway_size makes groups larger and the model smaller, but drops
-the genes belonging only to small pathways — so coverage falls too.  There is
-no setting that is best on all three axes; this script maps the frontier so the
-operating point can be chosen deliberately.
+Three quantities can be varied, all moving together as min_pathway_size is
+swept:
 
-It runs the real assignment (build_vocabulary) across a grid of thresholds
-using the project's gene sets and gene list, then renders four figures with the
-project visualisation theme.
+    1. min_pathway_size        (the grouping threshold that is turned directly)
+    2. median group size        (how many genes end up in a typical group)
+    3. gene-space dimension     (how many genes the vocabulary covers)
+
+This script runs the real assignment (build_vocabulary) across a grid of
+thresholds, then renders one figure per control variable — each with total
+parameters on the y-axis — so the effect of each on parameter count can be read
+directly.
 
 Usage
 -----
     python scripts/plot_vocab_tradeoff.py \\
         --gene-list   /path/to/gene_list.txt \\
         --gene-sets-file data/gene_sets.json \\
-        --out-dir     /path/to/figures \\
-        --chosen-min-pathway-size 50
+        --out-dir     /path/to/figures
 """
 
 from __future__ import annotations
@@ -142,136 +142,73 @@ def _annotatable_universe(hallmarks: dict, supplementary: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Figures (one function per figure)
+# Figures — parameters (y) as a function of each control variable (x)
 # ---------------------------------------------------------------------------
+#
+# Every figure puts total model parameters on the y-axis.  The x-axis is one of
+# the three quantities that can be varied: the grouping threshold, the resulting
+# median group size, and the resulting gene-space dimension.  All three move
+# together as min_pathway_size is swept, so each figure is the same sweep read
+# against a different control variable.
 
 
-def _chosen_record(records: list[dict], chosen_mp: int) -> dict | None:
-    return next((r for r in records if r["min_pathway_size"] == chosen_mp), None)
+def _params_vs(records, x_key, x_label, x_scale, title, filename, out_dir, annotate_mp):
+    """Generic: plot total parameters (y) against one control variable (x).
 
-
-def plot_core_tradeoff(records, chosen_mp, out_dir):
-    """Headline: the dial vs the two outcomes it pulls in opposite directions."""
+    Points are the sweep configurations, ordered along x and connected with a
+    guide line.  When annotate_mp is set, each point is labelled with the
+    min_pathway_size that produced it, so the three figures can be cross-read.
+    """
     import matplotlib.pyplot as plt
 
-    mp = [r["min_pathway_size"] for r in records]
-    params = [r["total_params"] / 1e6 for r in records]
-    vocab = [r["vocab_size"] / 1000 for r in records]
+    pts = sorted(records, key=lambda r: r[x_key])
+    x = [r[x_key] / x_scale for r in pts]
+    y = [r["total_params"] / 1e6 for r in pts]
 
-    fig, ax_left = plt.subplots(figsize=(7.2, 4.6))
-    ax_right = ax_left.twinx()
-    ax_right.grid(False)
+    fig, ax = plt.subplots(figsize=(7.0, 4.6))
+    ax.plot(x, y, color=PALETTE.primary, marker="o", zorder=3)
 
-    l1 = ax_left.plot(mp, params, color=PALETTE.primary, marker="o",
-                      label="Model parameters")[0]
-    l2 = ax_right.plot(mp, vocab, color=PALETTE.secondary, marker="s",
-                       label="Genes covered")[0]
+    if annotate_mp:
+        for r, xi, yi in zip(pts, x, y):
+            ax.annotate(str(r["min_pathway_size"]), (xi, yi),
+                        xytext=(0, 10), textcoords="offset points",
+                        ha="center", fontsize=8, color=PALETTE.ink_soft)
 
-    ax_left.set_xlabel("min_pathway_size  (grouping threshold)")
-    ax_left.set_ylabel("Parameters (millions)", color=PALETTE.primary)
-    ax_right.set_ylabel("Genes in vocabulary (thousands)", color=PALETTE.secondary)
-    ax_left.tick_params(axis="y", labelcolor=PALETTE.primary)
-    ax_right.tick_params(axis="y", labelcolor=PALETTE.secondary)
-    ax_left.set_title("Model parameters and gene coverage vs min_pathway_size")
-
-    chosen = _chosen_record(records, chosen_mp)
-    if chosen:
-        ax_left.axvline(chosen_mp, color=PALETTE.muted, lw=1.2, ls="--", zorder=0)
-
-    ax_left.legend(handles=[l1, l2], loc="upper right")
-    save_figure(fig, out_dir / "vocab_tradeoff_core")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Model parameters (millions)")
+    ax.set_title(title)
+    save_figure(fig, out_dir / filename)
     plt.close(fig)
 
 
-def plot_pareto(records, chosen_mp, out_dir):
-    """The 3D space in one view: params × coverage, sized by median group size."""
-    import matplotlib.pyplot as plt
-
-    params = np.array([r["total_params"] / 1e6 for r in records])
-    vocab = np.array([r["vocab_size"] / 1000 for r in records])
-    med = np.array([r["median_group"] for r in records])
-
-    fig, ax = plt.subplots(figsize=(7.2, 5.0))
-    sizes = 40 + (med - med.min()) / max(int(np.ptp(med)), 1) * 320
-    sc = ax.scatter(params, vocab, s=sizes, c=med, cmap="viridis",
-                    edgecolor=PALETTE.paper, linewidth=1.2, zorder=3)
-
-    # Connect points along the frontier for readability.
-    order = np.argsort(params)
-    ax.plot(params[order], vocab[order], color=PALETTE.muted, lw=1.0,
-            zorder=1, alpha=0.7)
-
-    for r, x, y in zip(records, params, vocab):
-        ax.annotate(str(r["min_pathway_size"]), (x, y),
-                    xytext=(0, 11), textcoords="offset points",
-                    ha="center", fontsize=8, color=PALETTE.ink_soft)
-
-    chosen = _chosen_record(records, chosen_mp)
-    if chosen:
-        cx, cy = chosen["total_params"] / 1e6, chosen["vocab_size"] / 1000
-        ax.scatter([cx], [cy], s=520, facecolor="none",
-                   edgecolor=PALETTE.secondary, linewidth=2.4, zorder=4)
-
-    ax.set_xlabel("Model parameters (millions)")
-    ax.set_ylabel("Genes in vocabulary (thousands)")
-    ax.set_title("Gene coverage vs model parameters  (labels = min_pathway_size)")
-    cbar = fig.colorbar(sc, ax=ax, pad=0.02)
-    cbar.set_label("Median group size (genes)")
-    cbar.outline.set_visible(False)
-    save_figure(fig, out_dir / "vocab_tradeoff_pareto")
-    plt.close(fig)
-
-
-def plot_param_decomposition(records, chosen_mp, out_dir):
-    """Where the parameters live: group encoders dominate and shrink fastest."""
-    import matplotlib.pyplot as plt
-
-    mp = [r["min_pathway_size"] for r in records]
-    group_enc = np.array([r["group_enc_params"] / 1e6 for r in records])
-    embedding = np.array([r["embedding_params"] / 1e6 for r in records])
-
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
-    ax.stackplot(
-        mp, group_enc, embedding,
-        labels=["Group encoders (1 transformer / group)", "Gene embeddings"],
-        colors=[PALETTE.primary, PALETTE.categorical[1]], alpha=0.9,
+def plot_params_vs_min_pathway_size(records, out_dir):
+    """Parameters (y) vs the grouping threshold (x)."""
+    _params_vs(
+        records, x_key="min_pathway_size",
+        x_label="min_pathway_size  (grouping threshold)", x_scale=1,
+        title="Model parameters vs min_pathway_size",
+        filename="params_vs_min_pathway_size", out_dir=out_dir, annotate_mp=False,
     )
-    ax.set_xlabel("min_pathway_size  (grouping threshold)")
-    ax.set_ylabel("Parameters (millions)")
-    ax.set_title("Parameters by component vs min_pathway_size")
-    ax.legend(loc="upper right")
-
-    if _chosen_record(records, chosen_mp):
-        ax.axvline(chosen_mp, color=PALETTE.ink, lw=1.2, ls="--", zorder=5)
-    save_figure(fig, out_dir / "vocab_tradeoff_params")
-    plt.close(fig)
 
 
-def plot_group_size_distribution(records, chosen_mp, out_dir, max_group_size):
-    """What the chosen vocabulary actually looks like: the group-size histogram."""
-    import matplotlib.pyplot as plt
-
-    chosen = _chosen_record(records, chosen_mp)
-    if not chosen:
-        logger.warning("Chosen mp=%d not in grid; skipping distribution plot", chosen_mp)
-        return
-    sizes = np.array(chosen["group_sizes"])
-
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
-    ax.hist(sizes, bins=24, color=PALETTE.primary, edgecolor=PALETTE.paper, linewidth=0.6)
-    ax.axvline(float(np.median(sizes)), color=PALETTE.secondary, lw=2.0,
-               label=f"median = {int(np.median(sizes))} genes")
-    ax.axvline(max_group_size, color=PALETTE.muted, lw=1.4, ls="--",
-               label=f"cap = {max_group_size}")
-    ax.set_xlabel("Genes per group")
-    ax.set_ylabel("Number of groups")
-    ax.set_title(
-        f"Chosen vocabulary (min_pathway_size={chosen_mp}): "
-        f"{chosen['n_groups']} groups, {chosen['vocab_size']:,} genes"
+def plot_params_vs_median_group_size(records, out_dir):
+    """Parameters (y) vs median group size (x)."""
+    _params_vs(
+        records, x_key="median_group",
+        x_label="Median group size (genes)", x_scale=1,
+        title="Model parameters vs median group size",
+        filename="params_vs_median_group_size", out_dir=out_dir, annotate_mp=True,
     )
-    ax.legend(loc="upper right")
-    save_figure(fig, out_dir / "vocab_tradeoff_group_sizes")
-    plt.close(fig)
+
+
+def plot_params_vs_gene_space(records, out_dir):
+    """Parameters (y) vs gene-space dimension (x)."""
+    _params_vs(
+        records, x_key="vocab_size",
+        x_label="Gene-space dimension (genes in vocabulary, thousands)", x_scale=1000,
+        title="Model parameters vs gene-space dimension",
+        filename="params_vs_gene_space", out_dir=out_dir, annotate_mp=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +226,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Pre-downloaded gene sets (from build_vocabulary --save-gene-sets).")
     p.add_argument("--out-dir", required=True, metavar="DIR",
                    help="Directory for output figures.")
-    p.add_argument("--chosen-min-pathway-size", type=int, default=50, metavar="N",
-                   help="Operating point to highlight. Default: 50.")
     p.add_argument("--max-group-size", type=int, default=500, metavar="N",
                    help="Group size cap used in the sweep. Default: 500.")
     p.add_argument("--d-token", type=int, default=64,
@@ -332,12 +267,9 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     apply_theme()
-    plot_core_tradeoff(records, args.chosen_min_pathway_size, out_dir)
-    plot_pareto(records, args.chosen_min_pathway_size, out_dir)
-    plot_param_decomposition(records, args.chosen_min_pathway_size, out_dir)
-    plot_group_size_distribution(
-        records, args.chosen_min_pathway_size, out_dir, args.max_group_size
-    )
+    plot_params_vs_min_pathway_size(records, out_dir)
+    plot_params_vs_median_group_size(records, out_dir)
+    plot_params_vs_gene_space(records, out_dir)
     logger.info("All figures written to %s", out_dir)
 
 

@@ -28,7 +28,6 @@ python scripts/plot_vocab_tradeoff.py \
     --gene-list "${PROCESSED}/gene_list.txt" \
     --gene-sets-file data/gene_sets.json \
     --out-dir "${FIG_DIR}" \
-    --chosen-min-pathway-size 50 \
     --max-group-size 500 \
     --d-token 64
 

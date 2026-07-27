@@ -408,14 +408,21 @@ def build_vocabulary(
     min_pathway_size: int = 50,
     max_group_size: int = 500,
     prefer_specific: bool = True,
+    drop_unassigned: bool = False,
 ) -> dict[str, dict]:
     """Assign genes to groups and return a vocabulary dict.
 
     Assignment pipeline:
     1. Hallmark groups (HALLMARK_PRIORITY order, first-match wins)
     2. Supplementary libraries in order (Reactome, etc.)
-    3. Remaining genes → "unassigned"
+    3. Remaining genes → "unassigned" (or dropped, if drop_unassigned)
     4. All groups split at max_group_size
+
+    drop_unassigned=True excludes genes matched by no pathway from the
+    vocabulary entirely.  The vocabulary then contains only genes that belong
+    to a real biological group — every group has coherent internal structure
+    for the group encoder to attend over.  global_idx stays contiguous over
+    the kept genes.
 
     Returns a vocabulary dict compatible with GeneVocabulary.from_dict().
     """
@@ -458,13 +465,16 @@ def build_vocabulary(
             lib_name, sum(len(g) for g in new_groups.values()), len(unassigned),
         )
 
-    # Step 4: Collect all groups; append remainder
+    # Step 4: Collect all groups; handle the unassigned remainder
     all_groups: dict[str, list[str]] = {}
     all_groups.update(hallmark_groups)
     all_groups.update(extra_groups)
     if unassigned:
-        all_groups["unassigned"] = unassigned
-        logger.info("%d genes remain unassigned — will be split into chunks", len(unassigned))
+        if drop_unassigned:
+            logger.info("%d unassigned genes dropped from vocabulary", len(unassigned))
+        else:
+            all_groups["unassigned"] = unassigned
+            logger.info("%d genes remain unassigned — will be split into chunks", len(unassigned))
 
     # Step 5: Split groups exceeding max_group_size
     all_groups = split_large_groups(all_groups, max_group_size)
@@ -476,11 +486,19 @@ def build_vocabulary(
         for gene in genes
     }
 
-    # Step 7: Emit vocabulary dict in final_genes order
+    # Step 7: Restrict the emitted genes to those actually present in a group.
+    # Genes are always dropped if they aren't in gene_to_group_final — either
+    # because drop_unassigned removed the 'unassigned' group, or because a gene
+    # in gene_list was never in any pathway or hallmark set.  Keeping
+    # final_genes order preserves determinism; global_idx is re-numbered so it
+    # stays contiguous over the kept genes.
+    kept_genes = [g for g in final_genes if g in gene_to_group_final]
+
+    # Step 8: Emit vocabulary dict
     vocab: dict[str, dict] = {}
     group_counters: dict[str, int] = {}
-    for global_idx, gene in enumerate(final_genes):
-        group = gene_to_group_final.get(gene, "unassigned")
+    for global_idx, gene in enumerate(kept_genes):
+        group = gene_to_group_final[gene]
         within_idx = group_counters.get(group, 0)
         group_counters[group] = within_idx + 1
         vocab[gene] = {
@@ -603,6 +621,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--pathway-preference", choices=["specific", "generic"], default="specific",
         help="When a gene belongs to several pathways, assign it to the smallest "
              "('specific') or largest ('generic') one. Default: specific.",
+    )
+    supp.add_argument(
+        "--drop-unassigned", action="store_true",
+        help="Exclude genes matched by no pathway from the vocabulary entirely, "
+             "so every group is a real biological pathway. Otherwise unassigned "
+             "genes are kept in size-capped 'unassigned' chunks.",
     )
 
     # --- Synthetic mode ---
@@ -731,6 +755,7 @@ def main(argv: list[str] | None = None) -> None:
         min_pathway_size=args.min_pathway_size,
         max_group_size=args.max_group_size,
         prefer_specific=(args.pathway_preference == "specific"),
+        drop_unassigned=args.drop_unassigned,
     )
     print_stats(vocab)
 

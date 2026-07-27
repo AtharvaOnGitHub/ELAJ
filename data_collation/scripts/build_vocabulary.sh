@@ -65,6 +65,7 @@ python scripts/build_vocabulary.py \
     --max-group-size 500 \
     --min-pathway-size 50 \
     --pathway-preference specific \
+    --drop-unassigned \
     --out "${VOCAB_OUT}"
 
 echo ""

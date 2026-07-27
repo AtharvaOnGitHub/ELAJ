@@ -1,28 +1,31 @@
-"""Visualise how model parameters respond to the vocabulary control variables.
+"""Explore how model parameter count depends on the vocabulary structure.
 
-Total model parameters are the dependent quantity throughout.  They are set by
-the vocabulary's structure via:
+Parameter count has an exact closed form.  Each gene group is one transformer,
+and every gene carries one embedding vector:
 
-    total_params = n_groups * per_group_transformer(d_token) + vocab_size * d_token
+    P(d)         = (12·d² + 13·d)·n_layers + d      # params per group encoder
+    total_params = n_groups·P(d) + D·d
+                 = D·( P(d)/G + d )                  # since n_groups = D/G
 
-Three quantities can be varied, all moving together as min_pathway_size is
-swept:
+The three independent structural drivers are therefore:
 
-    1. min_pathway_size        (the grouping threshold that is turned directly)
-    2. median group size        (how many genes end up in a typical group)
-    3. gene-space dimension     (how many genes the vocabulary covers)
+    D  gene-space dimension   (genes in the vocabulary)   — total_params ∝ D
+    G  group size             (genes per group)           — total_params ∝ 1/G
+    d  token dimension        (embedding width)           — P(d) ∝ d²
 
-This script runs the real assignment (build_vocabulary) across a grid of
-thresholds, then renders one figure per control variable — each with total
-parameters on the y-axis — so the effect of each on parameter count can be read
-directly.
+This is a purely analytic tool: it evaluates the formula over the ranges you
+give for D, G and d — no assignment run is needed.  Each figure fixes total
+parameters on the y-axis, sweeps one variable on the x-axis, draws a coloured
+family of curves for a second variable, and splits panels across the third, so
+the values of all three are visible while reading any one.
 
 Usage
 -----
     python scripts/plot_vocab_tradeoff.py \\
-        --gene-list   /path/to/gene_list.txt \\
-        --gene-sets-file data/gene_sets.json \\
-        --out-dir     /path/to/figures
+        --gene-space-range 4000 20000 5 \\
+        --group-size-range 20 300 6 \\
+        --d-token-range 32 128 4 \\
+        --out-dir /path/to/figures
 """
 
 from __future__ import annotations
@@ -34,181 +37,128 @@ from pathlib import Path
 
 import numpy as np
 
-# Make endo_model importable and pull build_vocabulary from the sibling script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from build_vocabulary import build_vocabulary, load_gene_sets  # noqa: E402
-
-from endo_model.viz import PALETTE, apply_theme, save_figure  # noqa: E402
+from endo_model.viz import apply_theme, save_figure, sequential_line_colors  # noqa: E402
 
 logger = logging.getLogger("elaj.plot_vocab")
 
-# Grid of thresholds to sweep. Chosen point is highlighted separately.
-_DEFAULT_GRID = (15, 25, 40, 50, 75, 100, 150, 200, 300)
+# How densely the x-axis variable is sampled for smooth curves.
+_X_RESOLUTION = 80
+
+# Human-readable axis labels per variable key.
+_LABELS = {
+    "gene_space": "Gene-space dimension  D  (genes)",
+    "group_size": "Group size  G  (genes / group)",
+    "d_token": "Token dimension  d",
+}
+_SHORT = {"gene_space": "D", "group_size": "G", "d_token": "d"}
 
 
 # ---------------------------------------------------------------------------
-# Model-size model
+# Parameter model
 # ---------------------------------------------------------------------------
 
 
-def per_group_transformer_params(
-    d_token: int, n_heads: int, n_layers: int, ff_mult: int = 4
-) -> int:
-    """Parameter count of one GroupEncoder (a pre-LN transformer + CLS token).
+def per_group_transformer_params(d_token, n_layers: int, ff_mult: int = 4):
+    """Parameters of one GroupEncoder: (12·d² + 13·d)·n_layers + d (ff_mult=4).
 
-    Independent of n_heads (attention projections are square in d_token).
+    Accepts scalars or arrays for d_token.
     """
-    d = d_token
+    d = np.asarray(d_token, dtype=float)
     ff = ff_mult * d
     attn = 3 * d * d + 3 * d + d * d + d      # qkv in_proj + out_proj
     ffn = d * ff + ff + ff * d + d             # linear1 + linear2
-    norms = 4 * d                              # two LayerNorms (weight+bias)
+    norms = 4 * d                              # two LayerNorms
     return (attn + ffn + norms) * n_layers + d
 
 
-def model_size_terms(
-    n_groups: int, vocab_size: int, d_token: int, n_heads: int, n_layers: int
-) -> tuple[int, int]:
-    """Return (group_encoder_params, gene_embedding_params).
+def total_params(gene_space, group_size, d_token, n_layers: int):
+    """Total model parameters (array-broadcasting).
 
-    These are the two vocabulary-structure-dependent terms. Group encoders:
-    one transformer per group. Embeddings: one d_token vector per gene.
+    total_params = (D / G)·P(d) + D·d, where n_groups = D/G is left real-valued
+    so the surface is smooth.
     """
-    group_enc = n_groups * per_group_transformer_params(d_token, n_heads, n_layers)
-    embedding = vocab_size * d_token
-    return group_enc, embedding
+    D = np.asarray(gene_space, dtype=float)
+    G = np.asarray(group_size, dtype=float)
+    d = np.asarray(d_token, dtype=float)
+    per_group = per_group_transformer_params(d, n_layers)
+    return (D / G) * per_group + D * d
 
 
 # ---------------------------------------------------------------------------
-# Sweep
+# Range parsing
 # ---------------------------------------------------------------------------
 
 
-def run_sweep(
-    gene_list: list[str],
-    hallmarks: dict,
-    supplementary: dict,
-    grid: tuple[int, ...],
-    max_group_size: int,
-    d_token: int,
-    n_heads: int,
-    n_layers: int,
-) -> list[dict]:
-    """Build the vocabulary at each threshold; return one record per setting."""
-    from collections import Counter
-
-    records: list[dict] = []
-    for mp in grid:
-        vocab = build_vocabulary(
-            gene_list=gene_list,
-            hallmark_groups=hallmarks,
-            supplementary_libraries=supplementary,
-            min_pathway_size=mp,
-            max_group_size=max_group_size,
-            prefer_specific=True,
-            drop_unassigned=True,
-        )
-        sizes = sorted(Counter(e["group"] for e in vocab.values()).values())
-        n_groups = len(sizes)
-        vocab_size = len(vocab)
-        group_enc, embedding = model_size_terms(
-            n_groups, vocab_size, d_token, n_heads, n_layers
-        )
-        records.append({
-            "min_pathway_size": mp,
-            "n_groups": n_groups,
-            "vocab_size": vocab_size,
-            "median_group": int(np.median(sizes)),
-            "mean_group": float(np.mean(sizes)),
-            "group_sizes": sizes,
-            "group_enc_params": group_enc,
-            "embedding_params": embedding,
-            "total_params": group_enc + embedding,
-        })
-        logger.info(
-            "mp=%-3d  groups=%-4d  vocab=%-6d  median=%-3d  params=%.1fM",
-            mp, n_groups, vocab_size, records[-1]["median_group"],
-            records[-1]["total_params"] / 1e6,
-        )
-    return records
-
-
-def _annotatable_universe(hallmarks: dict, supplementary: dict) -> int:
-    """Total unique genes reachable by any gene set — the coverage ceiling."""
-    genes: set[str] = {g for gs in hallmarks.values() for g in gs}
-    for lib in supplementary.values():
-        genes |= {g for gs in lib.values() for g in gs}
-    return len(genes)
+def parse_range(spec: list[int], name: str) -> np.ndarray:
+    """Turn a [min, max, count] spec into a sorted array of unique ints."""
+    lo, hi, count = spec
+    if count < 1:
+        raise ValueError(f"{name}: count must be >= 1, got {count}")
+    if count == 1:
+        return np.array([int(lo)])
+    vals = np.linspace(lo, hi, count)
+    return np.unique(np.round(vals).astype(int))
 
 
 # ---------------------------------------------------------------------------
-# Figures — parameters (y) as a function of each control variable (x)
+# Figure — parameters (y) vs one variable (x), family (colour) × facet (panel)
 # ---------------------------------------------------------------------------
-#
-# Every figure puts total model parameters on the y-axis.  The x-axis is one of
-# the three quantities that can be varied: the grouping threshold, the resulting
-# median group size, and the resulting gene-space dimension.  All three move
-# together as min_pathway_size is swept, so each figure is the same sweep read
-# against a different control variable.
 
 
-def _params_vs(records, x_key, x_label, x_scale, title, filename, out_dir, annotate_mp):
-    """Generic: plot total parameters (y) against one control variable (x).
+def _params_for(x_key, facet_key, color_key, x_arr, facet_val, color_val, n_layers):
+    """Evaluate total_params along the x range for one (facet, colour) pair."""
+    kwargs = {x_key: x_arr, facet_key: facet_val, color_key: color_val}
+    return total_params(
+        gene_space=kwargs["gene_space"],
+        group_size=kwargs["group_size"],
+        d_token=kwargs["d_token"],
+        n_layers=n_layers,
+    )
 
-    Points are the sweep configurations, ordered along x and connected with a
-    guide line.  When annotate_mp is set, each point is labelled with the
-    min_pathway_size that produced it, so the three figures can be cross-read.
+
+def plot_params_vs(x_key: str, values: dict[str, np.ndarray], n_layers: int, out_dir: Path):
+    """One figure: params on y, x_key on x, the other two as colour × facet.
+
+    The remaining variable with fewer values becomes the facet (panels); the
+    other becomes the colour family.  Panel titles and the legend carry the
+    fixed values, so all three variables are legible from any single figure.
     """
     import matplotlib.pyplot as plt
 
-    pts = sorted(records, key=lambda r: r[x_key])
-    x = [r[x_key] / x_scale for r in pts]
-    y = [r["total_params"] / 1e6 for r in pts]
+    others = [k for k in ("gene_space", "group_size", "d_token") if k != x_key]
+    facet_key = min(others, key=lambda k: len(values[k]))
+    color_key = next(k for k in others if k != facet_key)
 
-    fig, ax = plt.subplots(figsize=(7.0, 4.6))
-    ax.plot(x, y, color=PALETTE.primary, marker="o", zorder=3)
+    facet_vals = values[facet_key]
+    color_vals = values[color_key]
+    x_lo, x_hi = values[x_key].min(), values[x_key].max()
+    x_arr = np.linspace(x_lo, x_hi, _X_RESOLUTION)
 
-    if annotate_mp:
-        for r, xi, yi in zip(pts, x, y):
-            ax.annotate(str(r["min_pathway_size"]), (xi, yi),
-                        xytext=(0, 10), textcoords="offset points",
-                        ha="center", fontsize=8, color=PALETTE.ink_soft)
+    colors = sequential_line_colors(len(color_vals))
+    n_panels = len(facet_vals)
+    fig, axes = plt.subplots(
+        1, n_panels, figsize=(4.2 * n_panels + 0.5, 4.6),
+        sharey=True, squeeze=False,
+    )
+    axes = axes[0]
 
-    ax.set_xlabel(x_label)
-    ax.set_ylabel("Model parameters (millions)")
-    ax.set_title(title)
-    save_figure(fig, out_dir / filename)
+    for ax, fval in zip(axes, facet_vals):
+        for cval, color in zip(color_vals, colors):
+            y = _params_for(x_key, facet_key, color_key, x_arr, fval, cval, n_layers) / 1e6
+            ax.plot(x_arr, y, color=color, label=f"{_SHORT[color_key]} = {cval:,}")
+        ax.set_title(f"{_SHORT[facet_key]} = {fval:,}")
+        ax.set_xlabel(_LABELS[x_key])
+    axes[0].set_ylabel("Model parameters (millions)")
+
+    # One shared legend for the colour family, to the right of the panels.
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, title=_LABELS[color_key], loc="center left",
+               bbox_to_anchor=(1.0, 0.5))
+    fig.suptitle(f"Model parameters vs {_LABELS[x_key]}")
+
+    save_figure(fig, out_dir / f"params_vs_{x_key}", formats=("png",))
     plt.close(fig)
-
-
-def plot_params_vs_min_pathway_size(records, out_dir):
-    """Parameters (y) vs the grouping threshold (x)."""
-    _params_vs(
-        records, x_key="min_pathway_size",
-        x_label="min_pathway_size  (grouping threshold)", x_scale=1,
-        title="Model parameters vs min_pathway_size",
-        filename="params_vs_min_pathway_size", out_dir=out_dir, annotate_mp=False,
-    )
-
-
-def plot_params_vs_median_group_size(records, out_dir):
-    """Parameters (y) vs median group size (x)."""
-    _params_vs(
-        records, x_key="median_group",
-        x_label="Median group size (genes)", x_scale=1,
-        title="Model parameters vs median group size",
-        filename="params_vs_median_group_size", out_dir=out_dir, annotate_mp=True,
-    )
-
-
-def plot_params_vs_gene_space(records, out_dir):
-    """Parameters (y) vs gene-space dimension (x)."""
-    _params_vs(
-        records, x_key="vocab_size",
-        x_label="Gene-space dimension (genes in vocabulary, thousands)", x_scale=1000,
-        title="Model parameters vs gene-space dimension",
-        filename="params_vs_gene_space", out_dir=out_dir, annotate_mp=True,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -220,18 +170,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--gene-list", required=True, metavar="FILE",
-                   help="Corpus gene list, one HGNC symbol per line.")
-    p.add_argument("--gene-sets-file", required=True, metavar="FILE",
-                   help="Pre-downloaded gene sets (from build_vocabulary --save-gene-sets).")
+    p.add_argument("--gene-space-range", nargs=3, type=int, metavar=("MIN", "MAX", "COUNT"),
+                   default=[4000, 20000, 5],
+                   help="Gene-space dimension D: min max count. Default: 4000 20000 5.")
+    p.add_argument("--group-size-range", nargs=3, type=int, metavar=("MIN", "MAX", "COUNT"),
+                   default=[20, 300, 6],
+                   help="Group size G: min max count. Default: 20 300 6.")
+    p.add_argument("--d-token-range", nargs=3, type=int, metavar=("MIN", "MAX", "COUNT"),
+                   default=[32, 128, 4],
+                   help="Token dimension d: min max count. Default: 32 128 4.")
+    p.add_argument("--n-layers", type=int, default=2,
+                   help="Transformer layers per group encoder. Default: 2.")
     p.add_argument("--out-dir", required=True, metavar="DIR",
-                   help="Directory for output figures.")
-    p.add_argument("--max-group-size", type=int, default=500, metavar="N",
-                   help="Group size cap used in the sweep. Default: 500.")
-    p.add_argument("--d-token", type=int, default=64,
-                   help="Token dim for parameter accounting. Default: 64 (ELAJ_medium).")
-    p.add_argument("--n-heads", type=int, default=4, help="Group encoder heads. Default: 4.")
-    p.add_argument("--n-layers", type=int, default=2, help="Group encoder layers. Default: 2.")
+                   help="Directory for output figures (PNG).")
     return p.parse_args(argv)
 
 
@@ -241,35 +192,22 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s  %(levelname)-8s  %(message)s",
         datefmt="%H:%M:%S",
     )
-    # Quieten build_vocabulary's per-run INFO chatter during the sweep.
-    logging.getLogger("build_vocabulary").setLevel(logging.WARNING)
-    logging.getLogger("__main__").setLevel(logging.WARNING)
-
     args = parse_args(argv)
     out_dir = Path(args.out_dir)
 
-    gene_list = [
-        line.strip()
-        for line in Path(args.gene_list).read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
-    hallmarks, supplementary = load_gene_sets(Path(args.gene_sets_file))
-    ceiling = _annotatable_universe(hallmarks, supplementary)
-    logger.info(
-        "Corpus: %d genes | annotatable ceiling: %d | %d supplementary libraries",
-        len(gene_list), ceiling, len(supplementary),
-    )
-
-    records = run_sweep(
-        gene_list=gene_list, hallmarks=hallmarks, supplementary=supplementary,
-        grid=_DEFAULT_GRID, max_group_size=args.max_group_size,
-        d_token=args.d_token, n_heads=args.n_heads, n_layers=args.n_layers,
-    )
+    values = {
+        "gene_space": parse_range(args.gene_space_range, "gene-space-range"),
+        "group_size": parse_range(args.group_size_range, "group-size-range"),
+        "d_token": parse_range(args.d_token_range, "d-token-range"),
+    }
+    for key, arr in values.items():
+        logger.info("%s (%s): %s", key, _SHORT[key], ", ".join(f"{v:,}" for v in arr))
+    logger.info("Group-encoder layers: %d  |  P(d=64) = %d params",
+                args.n_layers, int(per_group_transformer_params(64, args.n_layers)))
 
     apply_theme()
-    plot_params_vs_min_pathway_size(records, out_dir)
-    plot_params_vs_median_group_size(records, out_dir)
-    plot_params_vs_gene_space(records, out_dir)
+    for x_key in ("gene_space", "group_size", "d_token"):
+        plot_params_vs(x_key, values, args.n_layers, out_dir)
     logger.info("All figures written to %s", out_dir)
 
 

@@ -25,6 +25,7 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from cycler import cycler
+from matplotlib.colors import LinearSegmentedColormap
 
 from endo_model.viz.palette import PALETTE, Palette
 
@@ -113,6 +114,22 @@ def apply_theme(palette: Palette = PALETTE) -> None:
     """Apply the project theme to matplotlib's global rcParams."""
     mpl.rcParams.update(build_rcparams(palette))
     logger.debug("ELAJ visualisation theme applied")
+
+
+def sequential_line_colors(
+    n: int, palette: Palette = PALETTE, dark_bias: float = 0.30
+) -> list:
+    """Ordered colours for n line series encoding a continuous variable.
+
+    Samples the palette's sequential ramp but starts partway in (dark_bias) so
+    the lightest end never produces a near-invisible line on a white ground.
+    Light → dark maps to low → high value.
+    """
+    cmap = LinearSegmentedColormap.from_list("elaj_sequential", list(palette.sequential))
+    if n <= 1:
+        return [cmap(1.0)]
+    span = 1.0 - dark_bias
+    return [cmap(dark_bias + span * i / (n - 1)) for i in range(n)]
 
 
 def save_figure(

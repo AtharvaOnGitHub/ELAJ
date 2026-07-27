@@ -7,7 +7,12 @@ Import the theme and apply it once at the top of any plotting script:
 """
 
 from endo_model.viz.palette import PALETTE, Palette
-from endo_model.viz.theme import apply_theme, build_rcparams, save_figure
+from endo_model.viz.theme import (
+    apply_theme,
+    build_rcparams,
+    save_figure,
+    sequential_line_colors,
+)
 
 __all__ = [
     "PALETTE",
@@ -15,4 +20,5 @@ __all__ = [
     "apply_theme",
     "build_rcparams",
     "save_figure",
+    "sequential_line_colors",
 ]

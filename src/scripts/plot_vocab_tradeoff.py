@@ -222,6 +222,94 @@ def plot_metric_vs(
     plt.close(fig)
 
 
+def _global_max(metric, x_key, facet_key, color_key, x_arr, facet_vals, color_vals):
+    """Largest scaled metric value over all (facet, colour) curves — for a
+    common y-limit so twin axes are comparable across facet panels."""
+    m = 0.0
+    for fval in facet_vals:
+        for cval in color_vals:
+            y = _eval_metric(metric, x_key, facet_key, color_key, x_arr, fval, cval)
+            m = max(m, float(np.max(y)))
+    return m / metric.y_scale
+
+
+def plot_combined_vs(
+    left_metric: Metric, right_metric: Metric, x_key: str,
+    values: dict[str, np.ndarray], out_dir: Path, markers: bool = True,
+):
+    """One figure with both metrics on twin y-axes (busy, for reference only).
+
+    Left axis: left_metric (solid line, round markers).
+    Right axis: right_metric (dashed line, square markers).
+    Colour encodes the family variable; panels facet the third variable.
+    Both axes use a common limit across panels so facets stay comparable.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    others = [k for k in ("gene_space", "group_size", "d_token") if k != x_key]
+    facet_key = min(others, key=lambda k: len(values[k]))
+    color_key = next(k for k in others if k != facet_key)
+
+    facet_vals = values[facet_key]
+    color_vals = values[color_key]
+    x_grid = values[x_key]
+    x_arr = np.linspace(x_grid.min(), x_grid.max(), _X_RESOLUTION)
+    colors = PALETTE.categorical_cycle(len(color_vals))
+
+    left_max = _global_max(left_metric, x_key, facet_key, color_key, x_arr, facet_vals, color_vals)
+    right_max = _global_max(right_metric, x_key, facet_key, color_key, x_arr, facet_vals, color_vals)
+
+    n_panels = len(facet_vals)
+    fig, axes = plt.subplots(
+        1, n_panels, figsize=(4.6 * n_panels + 1.0, 4.8), sharey=True, squeeze=False,
+    )
+    axes = axes[0]
+
+    right_axes = []
+    for i, (ax, fval) in enumerate(zip(axes, facet_vals)):
+        axr = ax.twinx()
+        axr.grid(False)
+        right_axes.append(axr)
+        for cval, color in zip(color_vals, colors):
+            yl = _eval_metric(left_metric, x_key, facet_key, color_key, x_arr, fval, cval)
+            axr_y = _eval_metric(right_metric, x_key, facet_key, color_key, x_arr, fval, cval)
+            ax.plot(x_arr, yl / left_metric.y_scale, color=color, linestyle="-")
+            axr.plot(x_arr, axr_y / right_metric.y_scale, color=color, linestyle="--")
+            if markers:
+                ylp = _eval_metric(left_metric, x_key, facet_key, color_key, x_grid, fval, cval)
+                yrp = _eval_metric(right_metric, x_key, facet_key, color_key, x_grid, fval, cval)
+                ax.plot(x_grid, ylp / left_metric.y_scale, linestyle="none", marker="o",
+                        markersize=4, color=color, markeredgecolor=PALETTE.paper, markeredgewidth=0.5)
+                axr.plot(x_grid, yrp / right_metric.y_scale, linestyle="none", marker="s",
+                         markersize=4, color=color, markeredgecolor=PALETTE.paper, markeredgewidth=0.5)
+        ax.set_ylim(0, left_max * 1.05)
+        axr.set_ylim(0, right_max * 1.05)
+        ax.set_title(f"{_SHORT[facet_key]} = {fval:,}")
+        ax.set_xlabel(_LABELS[x_key])
+        if i != n_panels - 1:                    # right ticks only on last panel
+            axr.set_yticklabels([])
+    axes[0].set_ylabel(left_metric.y_label)
+    right_axes[-1].set_ylabel(right_metric.y_label)
+
+    # Two legends: colour family (values) and linestyle (which metric / axis).
+    color_handles = [Line2D([0], [0], color=c, lw=2) for c in colors]
+    color_labels = [f"{_SHORT[color_key]} = {v:,}" for v in color_vals]
+    style_handles = [
+        Line2D([0], [0], color=PALETTE.ink, lw=2, ls="-", marker="o", markersize=4),
+        Line2D([0], [0], color=PALETTE.ink, lw=2, ls="--", marker="s", markersize=4),
+    ]
+    style_labels = [f"{left_metric.title}  (left)", f"{right_metric.title}  (right)"]
+    leg1 = fig.legend(color_handles, color_labels, title=_LABELS[color_key],
+                      loc="center left", bbox_to_anchor=(1.0, 0.66))
+    fig.add_artist(leg1)
+    fig.legend(style_handles, style_labels, loc="center left", bbox_to_anchor=(1.0, 0.34))
+    fig.suptitle(f"{left_metric.title} and {right_metric.title} vs {_LABELS[x_key]}")
+
+    save_figure(fig, out_dir / f"combined_vs_{x_key}", formats=("png",))
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -290,6 +378,12 @@ def main(argv: list[str] | None = None) -> None:
     for metric in metrics:
         for x_key in ("gene_space", "group_size", "d_token"):
             plot_metric_vs(metric, x_key, values, out_dir, markers=args.markers)
+
+    # Combined dual-axis figures (busy — for reference, not the thesis).
+    params_metric, effective_metric = metrics
+    for x_key in ("gene_space", "group_size", "d_token"):
+        plot_combined_vs(params_metric, effective_metric, x_key, values,
+                         out_dir, markers=args.markers)
     logger.info("All figures written to %s", out_dir)
 
 

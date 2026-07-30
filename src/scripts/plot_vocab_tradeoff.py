@@ -117,12 +117,19 @@ def _params_for(x_key, facet_key, color_key, x_arr, facet_val, color_val, n_laye
     )
 
 
-def plot_params_vs(x_key: str, values: dict[str, np.ndarray], n_layers: int, out_dir: Path):
+def plot_params_vs(
+    x_key: str, values: dict[str, np.ndarray], n_layers: int, out_dir: Path,
+    markers: bool = True,
+):
     """One figure: params on y, x_key on x, the other two as colour × facet.
 
     The remaining variable with fewer values becomes the facet (panels); the
     other becomes the colour family.  Panel titles and the legend carry the
     fixed values, so all three variables are legible from any single figure.
+
+    The curve is drawn smoothly (see _X_RESOLUTION).  When markers is True, a
+    marker is also placed at each discrete x value from the CLI range — i.e.
+    the COUNT of the x-axis variable sets how many markers appear.
     """
     import matplotlib.pyplot as plt
 
@@ -132,8 +139,8 @@ def plot_params_vs(x_key: str, values: dict[str, np.ndarray], n_layers: int, out
 
     facet_vals = values[facet_key]
     color_vals = values[color_key]
-    x_lo, x_hi = values[x_key].min(), values[x_key].max()
-    x_arr = np.linspace(x_lo, x_hi, _X_RESOLUTION)
+    x_grid = values[x_key]                                   # CLI discrete points
+    x_arr = np.linspace(x_grid.min(), x_grid.max(), _X_RESOLUTION)  # smooth line
 
     # Multi-hue categorical colours: adjacent series stay easy to tell apart.
     # The legend preserves the natural ordering of the values.
@@ -149,6 +156,13 @@ def plot_params_vs(x_key: str, values: dict[str, np.ndarray], n_layers: int, out
         for cval, color in zip(color_vals, colors):
             y = _params_for(x_key, facet_key, color_key, x_arr, fval, cval, n_layers) / 1e6
             ax.plot(x_arr, y, color=color, label=f"{_SHORT[color_key]} = {cval:,}")
+            if markers:
+                y_pts = _params_for(
+                    x_key, facet_key, color_key, x_grid, fval, cval, n_layers
+                ) / 1e6
+                ax.plot(x_grid, y_pts, linestyle="none", marker="o", markersize=5,
+                        color=color, markeredgecolor=PALETTE.paper,
+                        markeredgewidth=0.6, zorder=4)
         ax.set_title(f"{_SHORT[facet_key]} = {fval:,}")
         ax.set_xlabel(_LABELS[x_key])
     axes[0].set_ylabel("Model parameters (millions)")
@@ -183,6 +197,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Token dimension d: min max count. Default: 32 128 4.")
     p.add_argument("--n-layers", type=int, default=2,
                    help="Transformer layers per group encoder. Default: 2.")
+    p.add_argument("--markers", action=argparse.BooleanOptionalAction, default=True,
+                   help="Mark each discrete x-axis grid point. Use --no-markers "
+                        "for clean thesis figures. Default: on.")
     p.add_argument("--out-dir", required=True, metavar="DIR",
                    help="Directory for output figures (PNG).")
     return p.parse_args(argv)
@@ -209,7 +226,7 @@ def main(argv: list[str] | None = None) -> None:
 
     apply_theme()
     for x_key in ("gene_space", "group_size", "d_token"):
-        plot_params_vs(x_key, values, args.n_layers, out_dir)
+        plot_params_vs(x_key, values, args.n_layers, out_dir, markers=args.markers)
     logger.info("All figures written to %s", out_dir)
 
 

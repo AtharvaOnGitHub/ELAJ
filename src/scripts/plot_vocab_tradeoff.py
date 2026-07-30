@@ -13,9 +13,19 @@ The three independent structural drivers are therefore:
     G  group size             (genes per group)           — total_params ∝ 1/G
     d  token dimension        (embedding width)           — P(d) ∝ d²
 
-This is a purely analytic tool: it evaluates the formula over the ranges you
-give for D, G and d — no assignment run is needed.  Each figure fixes total
-parameters on the y-axis, sweeps one variable on the x-axis, draws a coloured
+Two dependent quantities are plotted, each on its own set of figures:
+
+    total parameters        = (D/G)·P(d) + D·d
+    effective gene space    = d · n_groups = d · D / G
+
+The effective gene space is the equivalent single (ungrouped) embedding
+dimension: each group holds an independent d-dim gene embedding, so treating
+the per-group blocks as orthogonal gives d·(D/G) total dimensions.  It is an
+allocated-capacity measure, not a claim about realised rank.
+
+This is a purely analytic tool: it evaluates the formulae over the ranges you
+give for D, G and d — no assignment run is needed.  Each figure fixes one
+metric on the y-axis, sweeps one variable on the x-axis, draws a coloured
 family of curves for a second variable, and splits panels across the third, so
 the values of all three are visible while reading any one.
 
@@ -33,7 +43,10 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -85,6 +98,25 @@ def total_params(gene_space, group_size, d_token, n_layers: int):
     return (D / G) * per_group + D * d
 
 
+def effective_gene_space(gene_space, group_size, d_token):
+    """Effective gene-space dimension (array-broadcasting).
+
+    Each group learns its own d-dimensional gene embedding, and separate group
+    encoders keep those blocks independent.  Treating them as orthogonal, the
+    total representational dimensionality allocated to gene identity is:
+
+        effective = d · n_groups = d · D / G
+
+    This is the equivalent single (ungrouped) embedding dimension that would
+    give the same block-independent capacity.  It is an allocated-capacity
+    upper bound, not a claim about the realised (learned) rank.
+    """
+    D = np.asarray(gene_space, dtype=float)
+    G = np.asarray(group_size, dtype=float)
+    d = np.asarray(d_token, dtype=float)
+    return (D / G) * d
+
+
 # ---------------------------------------------------------------------------
 # Range parsing
 # ---------------------------------------------------------------------------
@@ -102,26 +134,40 @@ def parse_range(spec: list[int], name: str) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Figure — parameters (y) vs one variable (x), family (colour) × facet (panel)
+# Metrics — each maps (D, G, d) → a dependent quantity to put on the y-axis
 # ---------------------------------------------------------------------------
 
 
-def _params_for(x_key, facet_key, color_key, x_arr, facet_val, color_val, n_layers):
-    """Evaluate total_params along the x range for one (facet, colour) pair."""
+@dataclass(frozen=True)
+class Metric:
+    """A dependent quantity plotted on the y-axis.
+
+    fn takes keyword args gene_space, group_size, d_token (scalars or arrays)
+    and returns the metric.  y_scale divides the value for display; y_label and
+    file_prefix name the axis and the output files.
+    """
+    fn: Callable
+    y_label: str
+    title: str
+    file_prefix: str
+    y_scale: float
+
+
+def _eval_metric(metric, x_key, facet_key, color_key, x_arr, facet_val, color_val):
+    """Evaluate a metric along the x range for one (facet, colour) pair."""
     kwargs = {x_key: x_arr, facet_key: facet_val, color_key: color_val}
-    return total_params(
+    return metric.fn(
         gene_space=kwargs["gene_space"],
         group_size=kwargs["group_size"],
         d_token=kwargs["d_token"],
-        n_layers=n_layers,
     )
 
 
-def plot_params_vs(
-    x_key: str, values: dict[str, np.ndarray], n_layers: int, out_dir: Path,
+def plot_metric_vs(
+    metric: Metric, x_key: str, values: dict[str, np.ndarray], out_dir: Path,
     markers: bool = True,
 ):
-    """One figure: params on y, x_key on x, the other two as colour × facet.
+    """One figure: metric on y, x_key on x, the other two as colour × facet.
 
     The remaining variable with fewer values becomes the facet (panels); the
     other becomes the colour family.  Panel titles and the legend carry the
@@ -154,26 +200,25 @@ def plot_params_vs(
 
     for ax, fval in zip(axes, facet_vals):
         for cval, color in zip(color_vals, colors):
-            y = _params_for(x_key, facet_key, color_key, x_arr, fval, cval, n_layers) / 1e6
-            ax.plot(x_arr, y, color=color, label=f"{_SHORT[color_key]} = {cval:,}")
+            y = _eval_metric(metric, x_key, facet_key, color_key, x_arr, fval, cval)
+            ax.plot(x_arr, y / metric.y_scale, color=color,
+                    label=f"{_SHORT[color_key]} = {cval:,}")
             if markers:
-                y_pts = _params_for(
-                    x_key, facet_key, color_key, x_grid, fval, cval, n_layers
-                ) / 1e6
-                ax.plot(x_grid, y_pts, linestyle="none", marker="o", markersize=5,
-                        color=color, markeredgecolor=PALETTE.paper,
+                y_pts = _eval_metric(metric, x_key, facet_key, color_key, x_grid, fval, cval)
+                ax.plot(x_grid, y_pts / metric.y_scale, linestyle="none", marker="o",
+                        markersize=5, color=color, markeredgecolor=PALETTE.paper,
                         markeredgewidth=0.6, zorder=4)
         ax.set_title(f"{_SHORT[facet_key]} = {fval:,}")
         ax.set_xlabel(_LABELS[x_key])
-    axes[0].set_ylabel("Model parameters (millions)")
+    axes[0].set_ylabel(metric.y_label)
 
     # One shared legend for the colour family, to the right of the panels.
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, title=_LABELS[color_key], loc="center left",
                bbox_to_anchor=(1.0, 0.5))
-    fig.suptitle(f"Model parameters vs {_LABELS[x_key]}")
+    fig.suptitle(f"{metric.title} vs {_LABELS[x_key]}")
 
-    save_figure(fig, out_dir / f"params_vs_{x_key}", formats=("png",))
+    save_figure(fig, out_dir / f"{metric.file_prefix}_vs_{x_key}", formats=("png",))
     plt.close(fig)
 
 
@@ -224,9 +269,27 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("Group-encoder layers: %d  |  P(d=64) = %d params",
                 args.n_layers, int(per_group_transformer_params(64, args.n_layers)))
 
+    metrics = [
+        Metric(
+            fn=partial(total_params, n_layers=args.n_layers),
+            y_label="Model parameters (millions)",
+            title="Model parameters",
+            file_prefix="params",
+            y_scale=1e6,
+        ),
+        Metric(
+            fn=effective_gene_space,
+            y_label="Effective gene-space dimension (thousands)",
+            title="Effective gene-space dimension  (d · D / G)",
+            file_prefix="effective_gene_space",
+            y_scale=1e3,
+        ),
+    ]
+
     apply_theme()
-    for x_key in ("gene_space", "group_size", "d_token"):
-        plot_params_vs(x_key, values, args.n_layers, out_dir, markers=args.markers)
+    for metric in metrics:
+        for x_key in ("gene_space", "group_size", "d_token"):
+            plot_metric_vs(metric, x_key, values, out_dir, markers=args.markers)
     logger.info("All figures written to %s", out_dir)
 
 

@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from endo_model.viz import apply_theme, save_figure, sequential_line_colors  # noqa: E402
+from endo_model.viz import PALETTE, apply_theme, save_figure  # noqa: E402
 
 logger = logging.getLogger("elaj.plot_vocab")
 
@@ -135,7 +135,9 @@ def plot_params_vs(x_key: str, values: dict[str, np.ndarray], n_layers: int, out
     x_lo, x_hi = values[x_key].min(), values[x_key].max()
     x_arr = np.linspace(x_lo, x_hi, _X_RESOLUTION)
 
-    colors = sequential_line_colors(len(color_vals))
+    # Multi-hue categorical colours: adjacent series stay easy to tell apart.
+    # The legend preserves the natural ordering of the values.
+    colors = PALETTE.categorical_cycle(len(color_vals))
     n_panels = len(facet_vals)
     fig, axes = plt.subplots(
         1, n_panels, figsize=(4.2 * n_panels + 0.5, 4.6),

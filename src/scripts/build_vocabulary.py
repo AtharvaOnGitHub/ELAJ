@@ -479,26 +479,30 @@ def build_vocabulary(
     # Step 5: Split groups exceeding max_group_size
     all_groups = split_large_groups(all_groups, max_group_size)
 
-    # Step 6: Build final gene → group mapping from the (possibly split) groups
-    gene_to_group_final: dict[str, str] = {
+    # Steps 6-8: emit the vocabulary from the (possibly split) groups.
+    return emit_vocabulary(all_groups, final_genes)
+
+
+def emit_vocabulary(
+    groups: dict[str, list[str]], gene_order: list[str]
+) -> dict[str, dict]:
+    """Turn {group_name: [genes]} into a GeneVocabulary-compatible dict.
+
+    Genes absent from every group are dropped.  Emission follows gene_order for
+    determinism; global_idx is contiguous over the kept genes, and group_idx
+    counts position within each group.
+    """
+    gene_to_group: dict[str, str] = {
         gene: group_name
-        for group_name, genes in all_groups.items()
+        for group_name, genes in groups.items()
         for gene in genes
     }
+    kept_genes = [g for g in gene_order if g in gene_to_group]
 
-    # Step 7: Restrict the emitted genes to those actually present in a group.
-    # Genes are always dropped if they aren't in gene_to_group_final — either
-    # because drop_unassigned removed the 'unassigned' group, or because a gene
-    # in gene_list was never in any pathway or hallmark set.  Keeping
-    # final_genes order preserves determinism; global_idx is re-numbered so it
-    # stays contiguous over the kept genes.
-    kept_genes = [g for g in final_genes if g in gene_to_group_final]
-
-    # Step 8: Emit vocabulary dict
     vocab: dict[str, dict] = {}
     group_counters: dict[str, int] = {}
     for global_idx, gene in enumerate(kept_genes):
-        group = gene_to_group_final[gene]
+        group = gene_to_group[gene]
         within_idx = group_counters.get(group, 0)
         group_counters[group] = within_idx + 1
         vocab[gene] = {
@@ -507,8 +511,41 @@ def build_vocabulary(
             "group_idx": within_idx,
             "chromosome": "",
         }
-
     return vocab
+
+
+def build_hierarchical_vocabulary(
+    gene_list: list[str],
+    reactome_enrichr: dict[str, list[str]],
+    go_enrichr: dict[str, list[str]],
+    hierarchy_dir: Path,
+    target_group_size: int,
+) -> dict[str, dict]:
+    """Build a vocabulary by hierarchical roll-up (Reactome then GO residual).
+
+    Args:
+        gene_list:          Corpus genes (defines order and universe).
+        reactome_enrichr:   Enrichr Reactome gene sets (names carry R-HSA ids).
+        go_enrichr:         Enrichr GO BP gene sets (names carry GO ids).
+        hierarchy_dir:      Directory with ReactomePathwaysRelation.txt,
+                            ReactomePathways.txt and go-basic.obo.
+        target_group_size:  Target genes per group.
+    """
+    from endo_model.data.grouping.build import build_hierarchical_groups
+    from endo_model.data.grouping.go import load_go
+    from endo_model.data.grouping.reactome import load_reactome
+
+    hdir = Path(hierarchy_dir)
+    reactome = load_reactome(
+        hdir / "ReactomePathwaysRelation.txt",
+        hdir / "ReactomePathways.txt",
+        reactome_enrichr,
+    )
+    go = load_go(hdir / "go-basic.obo", go_enrichr)
+    groups = build_hierarchical_groups(
+        set(gene_list), reactome, go, target_group_size
+    )
+    return emit_vocabulary(groups, gene_list)
 
 
 def print_stats(vocab: dict[str, dict]) -> None:
@@ -629,6 +666,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "genes are kept in size-capped 'unassigned' chunks.",
     )
 
+    # --- Grouping strategy ---
+    grp = parser.add_argument_group("grouping strategy")
+    grp.add_argument(
+        "--grouping", choices=["greedy", "hierarchical"], default="greedy",
+        help="greedy: flat set-cover over pathways (min-pathway-size dial). "
+             "hierarchical: roll up Reactome then GO to a target group size. "
+             "Default: greedy.",
+    )
+    grp.add_argument(
+        "--target-group-size", type=int, default=500, metavar="N",
+        help="Target genes per group for hierarchical grouping. Default: 500.",
+    )
+    grp.add_argument(
+        "--hierarchy-dir", metavar="DIR",
+        help="Directory with ReactomePathwaysRelation.txt, ReactomePathways.txt "
+             "and go-basic.obo (from --save-hierarchy). Required for hierarchical.",
+    )
+    grp.add_argument(
+        "--save-hierarchy", metavar="DIR",
+        help="Download the Reactome + GO structure files into DIR, then exit. "
+             "Run on a login node with internet access.",
+    )
+
     # --- Synthetic mode ---
     synth = parser.add_argument_group("synthetic mode")
     synth.add_argument(
@@ -666,6 +726,12 @@ def main(argv: list[str] | None = None) -> None:
     if not save_target and args.out is None and not args.use_synthetic:
         logger.error("--out is required unless using --save-gene-sets or --use-synthetic")
         sys.exit(1)
+
+    # --- Save-hierarchy mode (login-node download, then exit) -------------
+    if args.save_hierarchy:
+        from endo_model.data.grouping.fetch import save_hierarchy_files
+        save_hierarchy_files(args.save_hierarchy)
+        return
 
     # --- Synthetic mode ---------------------------------------------------
     if args.use_synthetic:
@@ -741,27 +807,60 @@ def main(argv: list[str] | None = None) -> None:
             logger.info("Fetching supplementary library: %s …", lib_name)
             supplementary[lib_name] = fetch_enrichr_library(lib_name)
 
-    if not any(hallmarks.values()):
+    if args.grouping == "greedy" and not any(hallmarks.values()):
         logger.error(
             "No Hallmark genes loaded. Use --gene-sets-file with a pre-downloaded file, "
             "or --use-synthetic for offline mode."
         )
         sys.exit(1)
 
-    vocab = build_vocabulary(
-        gene_list=gene_list,
-        hallmark_groups=hallmarks,
-        supplementary_libraries=supplementary,
-        min_pathway_size=args.min_pathway_size,
-        max_group_size=args.max_group_size,
-        prefer_specific=(args.pathway_preference == "specific"),
-        drop_unassigned=args.drop_unassigned,
-    )
+    if args.grouping == "hierarchical":
+        if gene_list is None:
+            logger.error("--grouping hierarchical requires --gene-list")
+            sys.exit(1)
+        if not args.hierarchy_dir or not Path(args.hierarchy_dir).is_dir():
+            logger.error("--grouping hierarchical requires --hierarchy-dir (see --save-hierarchy)")
+            sys.exit(1)
+        reactome_enrichr = _find_library(supplementary, "Reactome")
+        go_enrichr = _find_library(supplementary, "GO_Biological_Process")
+        if reactome_enrichr is None or go_enrichr is None:
+            logger.error(
+                "Hierarchical grouping needs the Reactome and GO_Biological_Process "
+                "libraries in the gene-sets file. Found: %s", list(supplementary)
+            )
+            sys.exit(1)
+        vocab = build_hierarchical_vocabulary(
+            gene_list=gene_list,
+            reactome_enrichr=reactome_enrichr,
+            go_enrichr=go_enrichr,
+            hierarchy_dir=Path(args.hierarchy_dir),
+            target_group_size=args.target_group_size,
+        )
+    else:
+        vocab = build_vocabulary(
+            gene_list=gene_list,
+            hallmark_groups=hallmarks,
+            supplementary_libraries=supplementary,
+            min_pathway_size=args.min_pathway_size,
+            max_group_size=args.max_group_size,
+            prefer_specific=(args.pathway_preference == "specific"),
+            drop_unassigned=args.drop_unassigned,
+        )
     print_stats(vocab)
 
     from endo_model.data.vocabulary import save_vocabulary
     save_vocabulary(vocab, args.out)
     logger.info("Saved to %s", args.out)
+
+
+def _find_library(
+    supplementary: dict[str, dict[str, list[str]]], needle: str
+) -> dict[str, list[str]] | None:
+    """Find a supplementary library whose name contains needle (case-insensitive)."""
+    for name, data in supplementary.items():
+        if needle.lower() in name.lower():
+            return data
+    return None
 
 
 if __name__ == "__main__":

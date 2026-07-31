@@ -1,7 +1,7 @@
 from .adversarial import DABClassifier
 from .composite import CompositeLoss
 from .contrastive import InfoNCELoss
-from .kl_divergence import GaussianKLLoss, VonMisesKLLoss
+from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss, VonMisesKLLoss
 from .reconstruction import NegativeBinomialLoss
 
 __all__ = [
@@ -10,5 +10,6 @@ __all__ = [
     "GaussianKLLoss",
     "InfoNCELoss",
     "NegativeBinomialLoss",
+    "PowerSphericalKLLoss",
     "VonMisesKLLoss",
 ]

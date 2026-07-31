@@ -18,7 +18,7 @@ from torch import Tensor
 
 from .adversarial import DABClassifier
 from .contrastive import InfoNCELoss
-from .kl_divergence import GaussianKLLoss, VonMisesKLLoss
+from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
 from .reconstruction import NegativeBinomialLoss
 
 
@@ -63,7 +63,7 @@ class CompositeLoss(nn.Module):
 
         self.nb_loss = NegativeBinomialLoss()
         self.gauss_kl = GaussianKLLoss()
-        self.vmf_kl = VonMisesKLLoss()
+        self.vmf_kl = PowerSphericalKLLoss()
         self.dab = DABClassifier(
             d_in=d_gauss + n_vMF,
             n_studies=n_studies,

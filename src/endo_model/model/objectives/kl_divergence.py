@@ -7,11 +7,19 @@ VonMisesKLLoss:
     KL(vMF(mu, kappa) || Uniform) = kappa * A(kappa) - log(I_0(kappa))
     where A(kappa) = I_1(kappa) / I_0(kappa) is the mean resultant length.
     This is always ≥ 0; minimising it pushes kappa → 0 (towards uniform prior).
+    (Retained for reference; the directional branch now uses Power Spherical.)
+
+PowerSphericalKLLoss:
+    KL(PowerSpherical(mu, kappa) || Uniform(S^1)) — the analytic KL of the
+    distribution the directional branch actually samples from.  Closed form in
+    power_spherical.py, cross-checked against Monte-Carlo.
 """
 
 import torch
 import torch.nn as nn
 from torch import Tensor
+
+from endo_model.model.latent.power_spherical import power_spherical_kl_uniform
 
 
 class GaussianKLLoss(nn.Module):
@@ -52,3 +60,21 @@ class VonMisesKLLoss(nn.Module):
         A = i1 / (i0 + eps)                            # mean resultant length
         kl = kappa * A - torch.log(i0 + eps)          # (B, n_vMF) ≥ 0
         return kl.mean()
+
+
+class PowerSphericalKLLoss(nn.Module):
+    """Mean KL from the uniform circular prior for the Power Spherical branch.
+
+    KL is computed per-cell per-dimension (on S^1, dim=2) and averaged.
+    """
+
+    def forward(self, kappa: Tensor) -> Tensor:
+        """Compute mean KL( PowerSpherical(mu, kappa) ‖ Uniform(S^1) ).
+
+        Args:
+            kappa: (B, n_vMF) — concentration parameters (> 0).
+
+        Returns:
+            Scalar — mean KL over (B, n_vMF).
+        """
+        return power_spherical_kl_uniform(kappa, dim=2).mean()

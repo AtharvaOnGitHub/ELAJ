@@ -1,23 +1,32 @@
-"""VonMisesBranch: maps CELL_CLS to directional (vMF) latent variables.
+"""VonMisesBranch: maps CELL_CLS to directional latent variables.
 
-Each of the n_vMF directional variables is a unit circle angle represented as
+Each of the n_vMF directional variables is a unit-circle angle represented as
 (cos θ, sin θ) for a total of 2*n_vMF stored dimensions.
 
-The von Mises distribution is parameterised by mu_angle (the mean direction)
-and kappa (the concentration).  Higher kappa = more peaked distribution.
+Sampling uses the Power Spherical distribution (De Cao & Aziz, 2020) on the
+circle (S¹, i.e. ambient dimension d = 2) rather than torch's von Mises.  The
+von Mises has no reparameterised sampler in torch (`rsample` raises
+NotImplementedError); the Power Spherical is a vMF-like directional
+distribution with an *exact*, reparameterisable sampler and a closed-form KL to
+the uniform prior, so reconstruction-loss gradients reach both the mean and the
+concentration heads.  See power_spherical.py and PowerSphericalKLLoss.
 
-Sampling uses torch.distributions.VonMises.rsample() — a reparameterised
-sample from the true von Mises distribution, consistent with VonMisesKLLoss.
+The public interface is unchanged: forward() still returns (mu_angle, kappa,
+z_vmf).  kappa is fed to PowerSphericalKLLoss (with dim=2) for regularisation.
 """
 
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.distributions import VonMises
+
+from endo_model.model.latent.power_spherical import PowerSpherical
+
+# Circular latents live on S¹, embedded in a 2-D ambient space.
+_CIRCLE_DIM = 2
 
 
 class VonMisesBranch(nn.Module):
-    """vMF variational branch over n_vMF independent circular dimensions.
+    """Directional variational branch over n_vMF independent circular dimensions.
 
     Args:
         d_agg:  Input dimension (CELL_CLS from AggregationEncoder).
@@ -31,7 +40,7 @@ class VonMisesBranch(nn.Module):
         self.kappa_head = nn.Linear(d_agg, n_vMF)      # concentration
 
     def forward(self, cell_cls: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """Compute vMF parameters and sample (cos θ, sin θ) pairs.
+        """Compute directional parameters and sample (cos θ, sin θ) pairs.
 
         Args:
             cell_cls: (B, d_agg).
@@ -48,15 +57,18 @@ class VonMisesBranch(nn.Module):
             self.kappa_head(cell_cls)
         ) + 1e-4                                       # (B, n_vMF) > 0
 
-        if self.training:
-            # rsample() gives reparameterised gradients from the true vMF,
-            # consistent with VonMisesKLLoss which uses the vMF KL formula.
-            theta = VonMises(loc=mu_angle, concentration=kappa).rsample()
-        else:
-            theta = mu_angle
+        # Mean direction as unit vectors on the circle: (B, n_vMF, 2).
+        loc = torch.stack([torch.cos(mu_angle), torch.sin(mu_angle)], dim=-1)
 
-        cos_theta = torch.cos(theta)                   # (B, n_vMF)
-        sin_theta = torch.sin(theta)                   # (B, n_vMF)
+        if self.training:
+            # Exact reparameterised Power Spherical sample → (B, n_vMF, 2).
+            sample = PowerSpherical(loc=loc, scale=kappa).rsample()
+        else:
+            # Deterministic mean direction at eval time.
+            sample = loc
+
+        cos_theta = sample[..., 0]                     # (B, n_vMF)
+        sin_theta = sample[..., 1]                     # (B, n_vMF)
         z_vmf = torch.cat([cos_theta, sin_theta], dim=-1)  # (B, 2*n_vMF)
 
         return mu_angle, kappa, z_vmf

@@ -89,7 +89,14 @@ class PowerSpherical:
             [t.unsqueeze(-1), (1 - t**2).clamp_min(0).sqrt().unsqueeze(-1) * v],
             dim=-1,
         )                                                    # (..., d), centred on e1
-        return self._reflect_e1_to_loc(y)
+        x = self._reflect_e1_to_loc(y)
+
+        # The Householder reflection divides by (1 − loc₀), which is small
+        # whenever loc is near e1 — a real, non-negligible case for a directional
+        # prior. float32 rounding there can drift the result off the unit sphere
+        # by ~1e-3; renormalize so downstream code can rely on exact unit norm
+        # (z_vmf's components are used directly as cos θ, sin θ).
+        return x / x.norm(dim=-1, keepdim=True).clamp_min(1e-12)
 
     def _reflect_e1_to_loc(self, y: Tensor) -> Tensor:
         """Householder reflection mapping e1 = (1, 0, …) onto loc.

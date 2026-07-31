@@ -6,7 +6,7 @@
 |------|--------|---------|
 | `evaluator.py` | `Evaluator` | NB loss, Pearson r, median kappa on held-out test set |
 | `latent_analysis.py` | `collect_embeddings` | Collect (N, d) embedding arrays via inference |
-| `latent_analysis.py` | `kappa_histogram` | Collect vMF kappa values to assess directional usage |
+| `latent_analysis.py` | `kappa_histogram` | Collect directional kappa values to assess circular-latent usage |
 | `scib_metrics.py` | `compute_scib_metrics` | Batch-correction + bio-conservation metrics (scib-metrics / scib / sklearn fallback) |
 | `umap_analysis.py` | `compute_umap` | UMAP 2D projection (requires umap-learn) |
 
@@ -52,7 +52,7 @@ save_umap_npz("umap.npz", coords, study_ids=study_ids, disease=disease_labels)
 |--------|-------------|
 | `nb_loss` | Mean negative log-likelihood of the NB distribution on test cells |
 | `pearson_r` | Mean per-gene Pearson r between observed and predicted counts |
-| `median_kappa` | Median vMF concentration — high values indicate active directional usage |
+| `median_kappa` | Median directional concentration — high values indicate active circular-latent usage |
 | `ilisi_knn` | iLISI: batch mixing (higher = more mixed = better batch correction) |
 | `clisi_knn` | cLISI: cell-type separation (lower = more pure clusters = better bio conservation) |
 | `silhouette_batch` | ASW batch (higher = more mixed = better) |
@@ -68,3 +68,16 @@ save_umap_npz("umap.npz", coords, study_ids=study_ids, disease=disease_labels)
 | sklearn | + scikit-learn | + nmi, ari |
 | scib | + scib or scib-metrics | + ilisi, clisi, silhouette_batch, silhouette_bio |
 | UMAP | + umap-learn | compute_umap |
+
+## ⚠ Memory scaling
+
+`Evaluator.evaluate()` accumulates every batch's observed and predicted count
+matrices and concatenates them into dense `(N, G_meas)` arrays.  At corpus scale
+this is the largest allocation in the project — for a test split of ~260k cells
+and a ~17k-gene vocabulary it is well beyond a single node's RAM.
+
+Mitigations, in increasing order of effort: evaluate on a subsample
+(`max_cells_per_study`), reduce the vocabulary, or convert the Pearson
+computation to a streaming form (accumulate per-gene sums rather than raw
+matrices).  `collect_embeddings` is far cheaper — it stores `(N, d_latent)`, not
+`(N, n_genes)`.

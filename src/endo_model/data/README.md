@@ -12,6 +12,37 @@ Data contracts, vocabulary, and the full scRNA-seq loading pipeline.
 | `dataset.py` | `EndometriosisDataset` — loads .h5ad files, applies DNS logic, patient-level splits |
 | `samplers.py` | `PerStudyBatchSampler` — enforces single-study batches for DSBN |
 | `collate.py` | `collate_fn` / `make_collate_fn` — builds `Batch` from per-cell dicts |
+| `grouping/` | Hierarchical gene grouping — Reactome/GO roll-up to a target group size |
+
+## `grouping/` — hierarchical gene grouping
+
+| File | Responsibility |
+|---|---|
+| `hierarchy.py` | `Hierarchy` — source-agnostic DAG of pathway nodes with gene roll-up |
+| `tree_cut.py` | `tree_cut` — cuts a hierarchy into ~target-size groups |
+| `reactome.py` | Loads `ReactomePathwaysRelation.txt` + Enrichr gene sets → `Hierarchy` |
+| `go.py` | Parses `go-basic.obo` (BP namespace) + Enrichr gene sets → `Hierarchy` |
+| `build.py` | Two-phase orchestration: Reactome first, GO on the residual |
+| `fetch.py` | Downloads the structural files (login node only) |
+
+**Why hierarchical.**  Real pathways are small (~15–200 genes), but the encoder
+builds one transformer per group, so group *count* drives model size.  Cutting a
+hierarchy lets group size be set directly (`--target-group-size`) while every
+group remains a **named biological category** rather than an arbitrary chunk.
+
+**Two phases.**  Reactome claims its genes first; GO then sees only the residual
+(`GO minus Reactome`), so the two hierarchies never need reconciling.  Genes in
+neither hierarchy are dropped — a defensible "no hierarchical annotation"
+exclusion.
+
+**`::other` groups.**  When a node is descended into its children, genes
+annotated *directly* to the parent (and to no child) are kept as a
+`<node>::other` group.  These are the "known broad function, unknown specific
+pathway" genes, which would otherwise be silently lost.
+
+`tree_cut` handles trees (Reactome) and multi-parent DAGs (GO) identically: the
+frontier is an antichain and each gene is assigned to the most specific frontier
+node containing it.
 
 ## Data flow
 
@@ -61,7 +92,19 @@ Each study's `.h5ad` file must have the following columns in `adata.obs`:
 
 `adata.var.index` must be HGNC gene symbols (e.g. `VEGFA`, `CD3E`).
 
-Valid `disease_status` strings: `eutopic`, `ectopic`, `control`, `other` (case-insensitive).
+Valid `disease_status` strings: `eutopic`, `ectopic`, `control`, `other` (case-insensitive).  Anything unrecognised silently maps to `other` (code 3), so verify these values per study during QC.
+
+### ⚠ `tissue_type` name collision with CELLxGENE
+
+The CELLxGENE schema (≥ 4.0) defines an obs column *also* named `tissue_type`,
+but holding free text (`tissue`, `organoid`, `cell culture`) rather than this
+model's integer hierarchy level.
+
+Tissue-level columns are coerced with `pd.to_numeric` **once per study**.  A
+column that cannot be coerced is treated as absent (level defaults to 0) and a
+warning is logged naming the collision, so CELLxGENE-derived studies load rather
+than raising `ValueError`.  Partially-numeric columns keep their valid values and
+default only the rest.
 
 ## vocabulary.json schema
 
@@ -81,7 +124,16 @@ Valid `disease_status` strings: `eutopic`, `ectopic`, `control`, `other` (case-i
 - `group_idx`: position within the group's embedding table.  Must be contiguous 0 … G_k-1 per group.
 - `chromosome`: cytogenetic band (optional metadata; empty string is valid).
 
-Build vocabulary.json with `scripts/build_vocabulary.py`.  See that script's docstring for full usage.
+Build vocabulary.json with `scripts/build_vocabulary.py`, which offers two
+grouping strategies:
+
+| `--grouping` | How groups are formed | Main dial |
+|---|---|---|
+| `hierarchical` | Reactome rolled up to a target size, then GO on the residual | `--target-group-size` |
+| `greedy` | Flat greedy set-cover over pathway libraries | `--min-pathway-size` |
+
+Both read pre-downloaded data (`--gene-sets-file`, `--hierarchy-dir`) so they run
+on firewalled compute nodes.  See the script's docstring for full usage.
 
 ## group_indices design
 
@@ -107,7 +159,6 @@ The sampler guarantees that every batch contains cells from exactly one study.  
 
 ```python
 sampler = PerStudyBatchSampler(dataset.study_ids, batch_size=256)
-sampler.set_epoch(epoch)   # call before each epoch for a fresh shuffle
 
 loader = DataLoader(
     dataset,
@@ -115,6 +166,11 @@ loader = DataLoader(
     collate_fn=make_collate_fn(vocab),
 )
 ```
+
+`set_epoch(epoch)` re-seeds the shuffle (the sampler derives its RNG from
+`seed + epoch`).  **`Trainer` calls this automatically** at the start of every
+epoch — you only need to call it yourself when iterating a loader outside the
+`Trainer`.
 
 ## Unit tests
 
@@ -124,4 +180,6 @@ loader = DataLoader(
 - `test_vocabulary.py` — GeneVocabulary round-trips, lookups, group membership, synthetic vocab
 - `test_samplers.py` — single-study batch invariant, reproducibility, set_epoch shuffle, drop_last
 - `test_collate.py` — DNS mask, library_size, group_indices/group_dns_mask shapes, NaN age passthrough
-- `test_dataset.py` — synthetic .h5ad fixtures, DNS assignment, split sizes, missing obs columns
+- `test_dataset.py` — synthetic .h5ad fixtures, DNS assignment, split sizes, missing obs columns, CELLxGENE string `tissue_type`
+- `test_tree_cut.py` — hierarchy roll-up, partition invariant, `::other` groups, multi-parent DAG nodes
+- `test_hierarchy_loaders.py` — Reactome/GO parsing, non-human and obsolete-term filtering, two-phase residual handling

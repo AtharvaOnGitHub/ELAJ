@@ -39,6 +39,42 @@ trainer = Trainer(
 history = trainer.fit()
 ```
 
+## Scheduler stepping — units matter
+
+`Trainer` calls `scheduler.step()` **once per epoch**, so any scheduler passed in
+must be configured in *epoch* units:
+
+```python
+scheduler = CosineAnnealingLR(optimizer, T_max=train_cfg.max_epochs)   # correct
+scheduler = CosineAnnealingLR(optimizer, T_max=len(loader) * epochs)   # WRONG
+```
+
+The second form stretches the cosine period by `len(train_loader)`, leaving the
+learning rate effectively constant for the whole run — a silent quality
+regression, not a crash.
+
+Note the contrast with `Trainer.total_steps`, which *is* in optimiser steps
+(`len(train_loader) * max_epochs`): it drives KL annealing off `global_step`,
+which increments per batch.
+
+## Epoch shuffling
+
+`fit()` calls `set_epoch(epoch)` on the train loader's sampler at the start of
+each epoch, so `PerStudyBatchSampler` reshuffles.  Samplers without `set_epoch`
+are skipped silently.
+
+## Resuming
+
+`fit()` iterates `range(self.current_epoch, max_epochs)`.  Set `current_epoch`
+after restoring a checkpoint and training continues rather than replaying
+completed epochs:
+
+```python
+payload = CheckpointManager.load(path, model, optimizer)
+trainer.current_epoch = payload["epoch"] + 1
+trainer.fit()
+```
+
 ## CCE (double forward pass)
 
 When `cce_enabled=True`, the Trainer runs a second forward pass of each batch under a different dropout mask and passes both outputs to `CompositeLoss.forward(model_output2=...)`.  The InfoNCE loss then pushes the two `mu_gauss` embeddings for the same cell to agree.

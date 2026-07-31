@@ -14,6 +14,14 @@ Optional (default to 0 / NaN if missing)
     tissue_microsite (int)    Tissue hierarchy level 3.
     age (float)               Patient age in years; NaN if unknown.
 
+NOTE — `tissue_type` name collision:
+    The CELLxGENE schema (>= 4.0) also defines an obs column literally named
+    `tissue_type`, but holding *strings* ("tissue", "organoid", "cell culture")
+    rather than this model's integer hierarchy level.  Any tissue-level column
+    that cannot be coerced to integers is treated as absent (level defaults to
+    0) and a warning is logged, so CELLxGENE-derived studies load rather than
+    crashing.
+
 AnnData.var index must be HGNC gene symbols.
 Genes in var but not in the vocabulary are silently dropped.
 Genes in the vocabulary but not in this study's var are DNS.
@@ -36,6 +44,56 @@ from endo_model.data.constants import (
 from endo_model.data.vocabulary import GeneVocabulary
 
 logger = logging.getLogger(__name__)
+
+# obs columns holding the four tissue hierarchy levels, in level order.
+_TISSUE_LEVEL_COLUMNS = (
+    "tissue_compartment",
+    "tissue_organ",
+    "tissue_type",
+    "tissue_microsite",
+)
+
+
+def _tissue_level_matrix(obs, study_name: str) -> np.ndarray:
+    """Build an (n_cells, N_TISSUE_LEVELS) int64 matrix of tissue hierarchy codes.
+
+    Columns that are missing, or whose values cannot be coerced to numbers, are
+    left at 0.  The latter is the CELLxGENE `tissue_type` case: that schema uses
+    the same column name for free-text values ("tissue", "organoid", …), which
+    would otherwise raise ValueError on int() conversion.
+
+    Coercion is vectorised per study rather than per cell.
+    """
+    import pandas as pd
+
+    matrix = np.zeros((len(obs), N_TISSUE_LEVELS), dtype=np.int64)
+
+    for level_i, col in enumerate(_TISSUE_LEVEL_COLUMNS):
+        if col not in obs.columns:
+            continue
+
+        coerced = pd.to_numeric(obs[col], errors="coerce")
+        if coerced.isna().all():
+            sample = obs[col].dropna().unique()[:3].tolist()
+            logger.warning(
+                "Study '%s': obs column '%s' is not numeric (e.g. %s) — treating "
+                "tissue level %d as absent (0). If this is the CELLxGENE "
+                "`tissue_type` column, it is a name collision, not this model's "
+                "tissue hierarchy level.",
+                study_name, col, sample, level_i,
+            )
+            continue
+
+        if coerced.isna().any():
+            logger.warning(
+                "Study '%s': obs column '%s' has %d non-numeric/missing values — "
+                "those cells default to 0 for tissue level %d.",
+                study_name, col, int(coerced.isna().sum()), level_i,
+            )
+
+        matrix[:, level_i] = coerced.fillna(0).to_numpy(dtype=np.int64)
+
+    return matrix
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +161,8 @@ class EndometriosisDataset:
 
         # Collect all patient IDs across all studies first (needed for split)
         all_patient_ids: list[str] = []
-        raw_study_data: list[tuple[int, object, list[str]]] = []  # (study_id, adata, patient_ids)
+        # (study_id, study_name, adata, patient_ids)
+        raw_study_data: list[tuple[int, str, object, list[str]]] = []
 
         try:
             import anndata
@@ -129,7 +188,7 @@ class EndometriosisDataset:
 
             study_patients = adata.obs["patient_id"].astype(str).tolist()
             all_patient_ids.extend(study_patients)
-            raw_study_data.append((study_id, adata, study_patients))
+            raw_study_data.append((study_id, name, adata, study_patients))
 
         # Build patient → split assignment
         unique_patients = sorted(set(all_patient_ids))
@@ -161,7 +220,7 @@ class EndometriosisDataset:
         # Build records for the requested split
         rng_subsample = np.random.default_rng(seed + 1)
 
-        for study_id, adata, study_patients in raw_study_data:
+        for study_id, name, adata, study_patients in raw_study_data:
             # Map study genes → global vocabulary indices
             study_gene_names = list(adata.var_names)
             global_idxs: list[int] = []      # global idx for each study gene
@@ -193,6 +252,9 @@ class EndometriosisDataset:
                 "Study %d split='%s': %d cells", study_id, split, len(cell_indices)
             )
 
+            # Coerce the tissue hierarchy columns once per study (vectorised).
+            tissue_matrix = _tissue_level_matrix(adata.obs, name)
+
             for local_cell_idx in cell_indices:
                 obs_row = adata.obs.iloc[local_cell_idx]
 
@@ -208,13 +270,8 @@ class EndometriosisDataset:
                 for local_i, global_i in zip(study_local_idxs, global_idxs):
                     counts[global_i] = row[local_i]
 
-                # Tissue levels (4-vector)
-                tissue_levels = np.zeros(N_TISSUE_LEVELS, dtype=np.int64)
-                for level_i, col in enumerate(
-                    ["tissue_compartment", "tissue_organ", "tissue_type", "tissue_microsite"]
-                ):
-                    if col in obs_row.index:
-                        tissue_levels[level_i] = int(obs_row[col])
+                # Tissue levels (4-vector), from the per-study coerced matrix
+                tissue_levels = tissue_matrix[local_cell_idx]
 
                 # Age
                 age = float(obs_row["age"]) if "age" in obs_row.index else float("nan")

@@ -299,3 +299,59 @@ def test_max_cells_per_study(tmp_path, vocab_and_raw):
         max_cells_per_study=20, seed=24,
     )
     assert len(ds) <= 20
+
+
+# ---------------------------------------------------------------------------
+# CELLxGENE `tissue_type` name collision (string values, not hierarchy ints)
+# ---------------------------------------------------------------------------
+
+
+def _write_h5ad_with_string_tissue_type(tmp_path, gene_names, filename="cxg.h5ad"):
+    """Synthetic study whose `tissue_type` follows the CELLxGENE schema."""
+    import pandas as pd
+    rng = np.random.default_rng(11)
+    n_cells = 40
+
+    x = rng.negative_binomial(n=5, p=0.5, size=(n_cells, len(gene_names))).astype(np.float32)
+    obs = pd.DataFrame({
+        "patient_id": [f"P{i % 4:03d}" for i in range(n_cells)],
+        "disease_status": ["eutopic"] * n_cells,
+        # CELLxGENE >= 4.0 ships this column as free text, not an int level.
+        "tissue_type": rng.choice(["tissue", "organoid", "cell culture"], size=n_cells).tolist(),
+        "tissue_compartment": rng.integers(0, 3, size=n_cells).tolist(),
+    })
+    adata = anndata.AnnData(
+        X=scipy_sparse.csr_matrix(x), obs=obs,
+        var=pd.DataFrame(index=gene_names),
+    )
+    path = str(tmp_path / filename)
+    adata.write_h5ad(path)
+    return path
+
+
+def test_string_tissue_type_does_not_crash(tmp_path, vocab_and_raw):
+    """Regression: int(obs_row['tissue_type']) raised ValueError on CELLxGENE studies."""
+    vocab, raw = vocab_and_raw
+    path = _write_h5ad_with_string_tissue_type(tmp_path, list(raw.keys()))
+
+    ds = EndometriosisDataset(
+        [{"id": 0, "name": "cxg_study", "path": path}],
+        vocab, split="train", val_fraction=0.0, test_fraction=0.0, seed=24,
+    )
+    assert len(ds) > 0
+
+    levels = ds[0]["tissue_levels"]
+    assert levels.shape == (4,)
+    # Level 2 (`tissue_type`) is unusable text -> defaults to 0 ...
+    assert levels[2] == 0
+    # ... while the genuinely numeric level still loads.
+    assert all(ds[i]["tissue_levels"][0] in (0, 1, 2) for i in range(len(ds)))
+
+
+def test_numeric_tissue_levels_still_load(two_study_setup):
+    """The collision guard must not suppress valid integer tissue levels."""
+    vocab, study_configs = two_study_setup
+    ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
+    stacked = np.stack([ds[i]["tissue_levels"] for i in range(len(ds))])
+    # Fixture draws tissue_type from range(0, 6); at least one non-zero must survive.
+    assert stacked[:, 2].max() > 0

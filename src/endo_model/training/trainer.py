@@ -85,8 +85,11 @@ class Trainer:
         """
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
 
-        for epoch in range(self.config.max_epochs):
+        # Start from current_epoch so resuming from a checkpoint continues
+        # rather than re-running epochs that were already completed.
+        for epoch in range(self.current_epoch, self.config.max_epochs):
             self.current_epoch = epoch
+            self._set_sampler_epoch(epoch)
             train_metrics = self._train_epoch()
             history["train_loss"].append(train_metrics["total"])
 
@@ -110,6 +113,19 @@ class Trainer:
                 self.scheduler.step()
 
         return history
+
+    def _set_sampler_epoch(self, epoch: int) -> None:
+        """Re-seed the training sampler so each epoch gets a fresh shuffle.
+
+        PerStudyBatchSampler derives its RNG from seed + epoch; without this the
+        batch order is identical every epoch.  Silently skipped for samplers
+        that do not implement set_epoch.
+        """
+        sampler = getattr(self.train_loader, "batch_sampler", None) or getattr(
+            self.train_loader, "sampler", None
+        )
+        if hasattr(sampler, "set_epoch"):
+            sampler.set_epoch(epoch)
 
     def _train_epoch(self) -> dict[str, float]:
         self.model.train()

@@ -146,9 +146,11 @@ def main() -> None:
     )
 
     # ── Scheduler ─────────────────────────────────────────────────────────────
-    total_steps = len(train_loader) * train_cfg.max_epochs
+    # Trainer calls scheduler.step() once per EPOCH, so T_max is in epochs.
+    # (Using total optimiser steps here would stretch the cosine period by
+    # len(train_loader) and leave the LR essentially constant for the whole run.)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(total_steps, 1)
+        optimizer, T_max=max(train_cfg.max_epochs, 1)
     )
 
     # ── Resume from checkpoint ────────────────────────────────────────────────

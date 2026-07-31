@@ -723,8 +723,10 @@ def main(argv: list[str] | None = None) -> None:
     save_target = args.save_gene_sets or args.save_hallmarks
     load_source = args.gene_sets_file or args.hallmarks_file
 
-    if not save_target and args.out is None and not args.use_synthetic:
-        logger.error("--out is required unless using --save-gene-sets or --use-synthetic")
+    if not save_target and not args.save_hierarchy and args.out is None and not args.use_synthetic:
+        logger.error(
+            "--out is required unless using --save-gene-sets, --save-hierarchy or --use-synthetic"
+        )
         sys.exit(1)
 
     # --- Save-hierarchy mode (login-node download, then exit) -------------

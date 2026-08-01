@@ -10,6 +10,7 @@ Data contracts, vocabulary, and the full scRNA-seq loading pipeline.
 | `schema.py` | `Batch` TypedDict — the complete type contract for model inputs |
 | `vocabulary.py` | `GeneVocabulary` class + `generate_synthetic_vocabulary` helper |
 | `dataset.py` | `EndometriosisDataset` — loads .h5ad files, applies DNS logic, patient-level splits |
+| `panel.py` | `StudyPanel` — sparse per-study count storage, densified one cell at a time |
 | `samplers.py` | `PerStudyBatchSampler` — enforces single-study batches for DSBN |
 | `collate.py` | `collate_fn` / `make_collate_fn` — builds `Batch` from per-cell dicts |
 | `grouping/` | Hierarchical gene grouping — Reactome/GO roll-up to a target group size |
@@ -105,6 +106,31 @@ column that cannot be coerced is treated as absent (level defaults to 0) and a
 warning is logged naming the collision, so CELLxGENE-derived studies load rather
 than raising `ValueError`.  Partially-numeric columns keep their valid values and
 default only the rest.
+
+## Count storage: sparse in memory, dense at the model boundary
+
+The model consumes a dense `(vocab_size,)` float32 vector per cell.  Holding
+that materialised for every cell costs ~76 KB each — around 90 GB over a
+million-cell corpus.
+
+`StudyPanel` stores each study's counts as CSR — the form they already have in
+the `.h5ad` — and `EndometriosisDataset.__getitem__` rebuilds the dense vector
+for one cell on access, inside the DataLoader worker.  At ~10 % density this is
+roughly a sixth of the memory, and the returned vector is bit-identical to the
+eager construction it replaces (`tests/test_data/test_panel.py`).
+
+This is a **storage** change only.  The model stays fully dense: `torch.sparse`
+has no autograd path for attention, LayerNorm, or embedding gathers, so nothing
+downstream of `collate_fn` could consume a sparse tensor.
+
+`counts()` performs two scatters, and the order matters:
+
+1. every panel gene is set to `0.0` — a **measured zero**;
+2. the CSR row's non-zeros overwrite their positions.
+
+Everything untouched keeps `DNS_SENTINEL`.  Collapsing these two steps would
+erase the distinction between "measured, and the count was zero" and "this study
+never assayed this gene", which is the entire purpose of DNS.
 
 ## vocabulary.json schema
 

@@ -39,9 +39,9 @@ import scipy.sparse
 
 from endo_model.data.constants import (
     DISEASE_STATUS_TO_INT,
-    DNS_SENTINEL,
     N_TISSUE_LEVELS,
 )
+from endo_model.data.panel import StudyPanel
 from endo_model.data.vocabulary import GeneVocabulary
 
 logger = logging.getLogger(__name__)
@@ -153,10 +153,14 @@ def _disease_status_codes(obs, study_name: str) -> np.ndarray:
 class _CellRecord:
     """Lightweight in-memory record for one cell.
 
-    counts is (vocab_size,) float32 with DNS_SENTINEL for unmeasured genes.
-    tissue_levels is (4,) int64.
+    Counts are *not* stored here.  The record points at its study's StudyPanel
+    and the row it occupies there; the dense (vocab_size,) vector is rebuilt in
+    __getitem__.  See panel.py for why.
+
+    tissue_levels is a (4,) int64 view into the study's tissue matrix.
     """
-    counts: np.ndarray
+    panel: StudyPanel
+    panel_row: int
     study_id: int
     tissue_levels: np.ndarray
     age: float
@@ -312,25 +316,34 @@ class EndometriosisDataset:
             age_arr = _age_vector(adata.obs)
             disease_arr = _disease_status_codes(adata.obs, name)
 
+            # Slice once, to this split's cells and this study's in-vocabulary
+            # genes, and keep the result sparse.  Densification happens per
+            # cell in __getitem__ — see panel.py.
+            cell_idx_arr = np.asarray(cell_indices, dtype=np.int64)
             x_matrix = adata.X
-            x_is_sparse = scipy.sparse.issparse(x_matrix)
+            if not scipy.sparse.issparse(x_matrix):
+                x_matrix = scipy.sparse.csr_matrix(x_matrix)
+            panel_matrix = x_matrix.tocsr()[cell_idx_arr][:, local_idx_arr]
 
-            for local_cell_idx in cell_indices:
-                # Extract counts row
-                x = x_matrix[local_cell_idx]
-                if x_is_sparse:
-                    x = x.toarray()
-                row = np.asarray(x, dtype=np.float32).flatten()
+            panel = StudyPanel(
+                matrix=panel_matrix,
+                global_idx=global_idx_arr,
+                vocab_size=vocab.vocab_size,
+                study_name=name,
+            )
+            logger.info(
+                "Study %d split='%s': panel holds %d cells in %.2f GB sparse "
+                "(%.2f GB if densified)",
+                study_id, split, panel.n_cells,
+                panel.nbytes / 1e9,
+                panel.n_cells * vocab.vocab_size * 4 / 1e9,
+            )
 
-                # Build full-vocab count vector with DNS for unmeasured genes.
-                # Vectorised scatter: positions not in this study's panel keep
-                # DNS_SENTINEL, the rest are filled in one numpy assignment.
-                counts = np.full(vocab.vocab_size, float(DNS_SENTINEL), dtype=np.float32)
-                counts[global_idx_arr] = row[local_idx_arr]
-
+            for panel_row, local_cell_idx in enumerate(cell_indices):
                 self._records.append(
                     _CellRecord(
-                        counts=counts,
+                        panel=panel,
+                        panel_row=panel_row,
                         study_id=study_id,
                         # (4,) slice of the per-study coerced tissue matrix
                         tissue_levels=tissue_matrix[local_cell_idx],
@@ -350,7 +363,7 @@ class EndometriosisDataset:
     def __getitem__(self, idx: int) -> dict:
         rec = self._records[idx]
         return {
-            "counts": rec.counts,
+            "counts": rec.panel.counts(rec.panel_row),
             "study_id": rec.study_id,
             "tissue_levels": rec.tissue_levels,
             "age": rec.age,

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import csv
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,6 +104,57 @@ def load_studies_csv(csv_path: str) -> List[StudyConfig]:
     return studies
 
 
+def exclude_and_reindex(
+    studies: List[StudyConfig], exclude: List[str]
+) -> List[StudyConfig]:
+    """Drop named studies and renumber the survivors from 0.
+
+    Renumbering is not cosmetic.  Study id is used directly as an index into
+    the DSBN and study-embedding tables, whose width is ``len(studies)``, so a
+    gap in the ids would put a valid study out of range at lookup time.
+
+    Args:
+        studies: Studies in id order.
+        exclude: Study *names* to drop.  Matching is exact and case-sensitive.
+
+    Returns:
+        The retained studies, with ``id`` reassigned to 0..N-1 in the original
+        relative order.
+
+    Raises:
+        ValueError: if a name in `exclude` matches no study (a typo would
+            otherwise silently keep the study in the corpus), or if every
+            study is excluded.
+    """
+    if not exclude:
+        return studies
+
+    names = {s.name for s in studies}
+    unknown = [n for n in exclude if n not in names]
+    if unknown:
+        raise ValueError(
+            f"exclude_studies names not found in the corpus: {unknown}. "
+            f"Available: {sorted(names)}"
+        )
+
+    excluded = set(exclude)
+    kept = [s for s in studies if s.name not in excluded]
+    if not kept:
+        raise ValueError("exclude_studies removed every study from the corpus.")
+
+    logger.info(
+        "Excluded %d study/studies (%s); %d remain, renumbered 0..%d",
+        len(studies) - len(kept), ", ".join(sorted(excluded)), len(kept), len(kept) - 1,
+    )
+    for new_id, study in enumerate(kept):
+        if study.id != new_id:
+            logger.info(
+                "  study '%s': id %d -> %d", study.name, study.id, new_id
+            )
+        study.id = new_id
+    return kept
+
+
 @dataclass
 class DataConfig:
     vocabulary_path: str = "data/processed/vocabulary.json"
@@ -109,6 +163,7 @@ class DataConfig:
     splits: SplitConfig = field(default_factory=SplitConfig)
     dns_sentinel: int = -1
     max_cells_per_study: Optional[int] = None
+    exclude_studies: List[str] = field(default_factory=list)
 
     def resolve_studies(self, root: str = ".") -> List[StudyConfig]:
         """Return the study list, loading from CSV if studies_csv is configured.
@@ -117,13 +172,19 @@ class DataConfig:
         config-load time, so the CSV does not need to exist when the config
         is constructed.
 
+        Studies named in `exclude_studies` are dropped here and the remainder
+        renumbered, so every downstream consumer — Dataset, DSBN, the study
+        embedding table, `n_studies` — sees one consistent corpus.
+
         Args:
             root: Project root for resolving relative paths in studies_csv.
         """
         if self.studies_csv is not None:
             csv_path = str(Path(root) / self.studies_csv)
-            return load_studies_csv(csv_path)
-        return self.studies
+            studies = load_studies_csv(csv_path)
+        else:
+            studies = list(self.studies)
+        return exclude_and_reindex(studies, self.exclude_studies)
 
     @classmethod
     def from_dict(cls, d: dict) -> "DataConfig":
@@ -138,4 +199,5 @@ class DataConfig:
                 if d.get("max_cells_per_study") is not None
                 else None
             ),
+            exclude_studies=[str(s) for s in d.get("exclude_studies", [])],
         )

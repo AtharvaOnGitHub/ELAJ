@@ -3,7 +3,19 @@
 Metrics computed:
   - Reconstruction: mean NB log-likelihood on held-out test cells.
   - Pearson correlation: per-gene Pearson r between observed and predicted mean.
-  - kappa summary: median per-dim vMF concentration (indicates directional usage).
+  - kappa summary: median per-dim directional concentration (circular usage).
+
+Per-gene Pearson is accumulated in a single streaming pass (see
+StreamingPearson) rather than by materialising the full observed/predicted
+matrices.  Two reasons:
+
+  1. Correctness.  `measured_global_idxs` is derived from each batch's DNS
+     mask, which is study-specific, so G_meas differs between batches whenever
+     studies have different gene panels.  Concatenating (B_i, G_meas_i) blocks
+     raises a shape mismatch.  Accumulating in *global vocabulary index space*
+     handles heterogeneous panels naturally.
+  2. Memory.  The dense form is O(n_cells x n_genes) — tens of GB at corpus
+     scale — versus O(n_genes) here.
 
 scib integration is left as a future extension.  The evaluator outputs a dict
 of scalar metrics suitable for logging.
@@ -48,9 +60,8 @@ class Evaluator:
         """
         self.model.eval()
         nb_losses: list[float] = []
-        all_obs: list[np.ndarray] = []
-        all_pred: list[np.ndarray] = []
         all_kappa: list[np.ndarray] = []
+        pearson: StreamingPearson | None = None
 
         for batch in self.loader:
             batch_dev = _move(batch, self.device)
@@ -62,15 +73,24 @@ class Evaluator:
             nb = self._nb_loss(x_meas, out["mu_hat"], out["theta"])
             nb_losses.append(nb.item())
 
-            all_obs.append(x_meas.cpu().numpy())
-            all_pred.append(out["mu_hat"].cpu().numpy())
+            if pearson is None:
+                pearson = StreamingPearson(n_genes=batch_dev["counts"].shape[1])
+            pearson.update(
+                global_idxs=meas_idxs.cpu().numpy(),
+                obs=x_meas.cpu().numpy(),
+                pred=out["mu_hat"].cpu().numpy(),
+            )
+
+            # (N, n_vMF) is small — a few tens of MB — and an exact median
+            # needs every value, so this one stays materialised.
             all_kappa.append(out["kappa"].cpu().numpy())
 
-        obs = np.concatenate(all_obs, axis=0)   # (N, G_meas)
-        pred = np.concatenate(all_pred, axis=0)  # (N, G_meas)
-        kappa = np.concatenate(all_kappa, axis=0)  # (N, n_vMF)
+        if pearson is None:
+            raise ValueError("Evaluation loader yielded no batches.")
 
-        pearson_r = _per_gene_pearson(obs, pred)
+        kappa = np.concatenate(all_kappa, axis=0)  # (N, n_vMF)
+        pearson_r = pearson.result()               # (vocab_size,)
+
         return {
             "nb_loss": float(np.mean(nb_losses)),
             "pearson_r": float(np.nanmean(pearson_r)),
@@ -78,11 +98,77 @@ class Evaluator:
         }
 
 
-def _per_gene_pearson(obs: np.ndarray, pred: np.ndarray) -> np.ndarray:
-    """Compute Pearson r for each gene across cells.
+class StreamingPearson:
+    """Per-gene Pearson r accumulated in one pass, in O(n_genes) memory.
 
-    Returns:
-        (G_meas,) array of correlation values.
+    Uses the sum form of the correlation coefficient, so every term is a running
+    total and no batch needs to be retained:
+
+        r = (n*Sxy - Sx*Sy) / sqrt[(n*Sxx - Sx^2) * (n*Syy - Sy^2)]
+
+    Accumulators are indexed by **global vocabulary index**, and `n` is tracked
+    *per gene* rather than as a scalar: with heterogeneous study panels a gene is
+    only measured in the subset of cells whose study includes it.
+
+    Genes never measured, or with zero variance in either series, yield NaN —
+    correlation is undefined there.  Use np.nanmean over the result.
+
+    Accumulation is float64: sums of squares over hundreds of thousands of cells
+    lose significance in float32.
+    """
+
+    def __init__(self, n_genes: int) -> None:
+        self._n_genes = n_genes
+        self._n = np.zeros(n_genes, dtype=np.float64)
+        self._sum_x = np.zeros(n_genes, dtype=np.float64)
+        self._sum_y = np.zeros(n_genes, dtype=np.float64)
+        self._sum_xx = np.zeros(n_genes, dtype=np.float64)
+        self._sum_yy = np.zeros(n_genes, dtype=np.float64)
+        self._sum_xy = np.zeros(n_genes, dtype=np.float64)
+
+    def update(
+        self, global_idxs: np.ndarray, obs: np.ndarray, pred: np.ndarray
+    ) -> None:
+        """Fold one batch into the accumulators.
+
+        Args:
+            global_idxs: (G_meas,) global vocabulary index of each measured gene.
+            obs:         (B, G_meas) observed counts.
+            pred:        (B, G_meas) predicted means.
+        """
+        x = np.asarray(obs, dtype=np.float64)
+        y = np.asarray(pred, dtype=np.float64)
+        idx = np.asarray(global_idxs, dtype=np.int64)
+
+        # np.add.at scatters into the global positions; plain += would drop
+        # contributions if an index ever repeated.
+        np.add.at(self._n, idx, float(x.shape[0]))
+        np.add.at(self._sum_x, idx, x.sum(axis=0))
+        np.add.at(self._sum_y, idx, y.sum(axis=0))
+        np.add.at(self._sum_xx, idx, (x * x).sum(axis=0))
+        np.add.at(self._sum_yy, idx, (y * y).sum(axis=0))
+        np.add.at(self._sum_xy, idx, (x * y).sum(axis=0))
+
+    def result(self) -> np.ndarray:
+        """Return (n_genes,) Pearson r; NaN where undefined."""
+        n = self._n
+        cov = n * self._sum_xy - self._sum_x * self._sum_y
+        var_x = n * self._sum_xx - self._sum_x ** 2
+        var_y = n * self._sum_yy - self._sum_y ** 2
+
+        # Clip tiny negatives from floating-point cancellation before sqrt.
+        denom = np.sqrt(np.clip(var_x, 0.0, None) * np.clip(var_y, 0.0, None))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r = np.where((n >= 2) & (denom > 0), cov / denom, np.nan)
+        return r
+
+
+def _per_gene_pearson(obs: np.ndarray, pred: np.ndarray) -> np.ndarray:
+    """Dense reference implementation of per-gene Pearson r.
+
+    Retained as the correctness reference for StreamingPearson in the tests.
+    Not used by Evaluator — it requires the full (N, G) matrices in memory and
+    cannot handle per-batch variation in the measured gene set.
     """
     obs_c = obs - obs.mean(axis=0, keepdims=True)
     pred_c = pred - pred.mean(axis=0, keepdims=True)

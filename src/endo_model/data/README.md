@@ -38,24 +38,38 @@ corpus at `target_size=500`, the result was 202 groups with a median of 60 —
 every group under the bound, none near it.
 
 `union_cut` inverts the control.  It starts at the hierarchy roots (Reactome's
-~29 top-level categories, which are already the intended granularity) and takes
+top-level categories, which are already the intended granularity) and takes
 the **set union** of groups that fall below `min_size`, pairing the two smallest
 each time so the distribution stays balanced rather than letting one group
 absorb every stray.  Because only undersized groups move, the median settles
 near 2× the floor.
 
-GO `biological_process` is single-rooted, so its roots alone give one group;
-`go_groups` descends the frontier first.  Reactome needs no descent, which is
-why `reactome_groups` defaults to `None`.
+`union_cut` also takes a `max_size` ceiling, applied *before* assignment by
+descending any node that rolls up more than that.  The two bounds do different
+jobs: the floor sets the median, the ceiling trims the tail.  **The tail is what
+costs.**  `GroupEncoder` runs self-attention over a group's genes, so activation
+memory is quadratic in group size — the first real build left GO:0008150 holding
+3869 genes, which is 61 GB of attention at batch 256 for that one group.
 
-Both remain available — a ceiling is the right control when group size must be
-bounded above, e.g. if per-group attention cost becomes the constraint.
+Keep `max_size >= 2 * min_size`.  The floor pass accumulates into a merged group
+until it clears the floor, so a merged group can reach roughly twice it; a
+tighter ceiling cannot hold, and `union_cut` warns rather than pretending.
+
+**`expand_to` (`--reactome-groups` / `--go-groups`) is a frontier *count*, and
+is usually inert.**  It only descends while the frontier holds fewer nodes than
+asked.  GO `biological_process` parses to ~388 roots — only `is_a` edges give
+parents, so terms attached by `part_of`/`regulates` surface as roots — so the
+frontier starts far above any small count and the loop never runs.  `max_size`
+is the knob that bounds GO in practice.
+
+Both cuts remain available — a ceiling alone is the right control when only the
+upper bound matters.
 
 ```bash
-# floor-controlled (default): ~29 Reactome roots + ~4 GO groups
---grouping hierarchical --cut union --min-group-size 250 --go-groups 4
+# banded (default): floor 250, ceiling 500
+--grouping hierarchical --cut union --min-group-size 250 --max-group-size 500
 
-# ceiling-controlled
+# ceiling only
 --grouping hierarchical --cut tree --target-group-size 500
 ```
 

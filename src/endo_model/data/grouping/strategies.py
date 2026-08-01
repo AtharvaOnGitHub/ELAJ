@@ -60,15 +60,22 @@ class UnionCutStrategy:
         min_size:        Floor on genes per group.  A floor of ~min_size tends
                          to produce a median near 2x it, since only groups that
                          fall under the floor get merged.
+        max_size:        Ceiling on genes per group; oversized nodes are
+                         descended.  The group encoder attends over a group's
+                         genes, so cost is quadratic in group size and the tail
+                         matters more than its gene count suggests.
         reactome_groups: Frontier size to descend to in the Reactome phase.
-                         None keeps Reactome's ~29 roots, which is the point of
-                         this strategy.
-        go_groups:       Frontier size to descend to in the GO phase.  GO
-                         biological_process has a single root, so without this
-                         the residual becomes one group.
+                         None keeps Reactome's roots, which is the point of this
+                         strategy.
+        go_groups:       Frontier size to descend to in the GO phase.  A count,
+                         so it is inert whenever the hierarchy already has more
+                         gene-bearing roots — GO BP parses to 388 of them, since
+                         only is_a edges give parents.  max_size is the knob that
+                         actually bites here.
     """
 
     min_size: int
+    max_size: Optional[int] = None
     reactome_groups: Optional[int] = None
     go_groups: int = 4
 
@@ -76,4 +83,6 @@ class UnionCutStrategy:
         self, hierarchy: Hierarchy, universe: set[str], phase: str
     ) -> dict[str, set[str]]:
         expand_to = self.reactome_groups if phase == REACTOME_PHASE else self.go_groups
-        return union_cut(hierarchy, universe, self.min_size, expand_to)
+        return union_cut(
+            hierarchy, universe, self.min_size, expand_to, self.max_size
+        )

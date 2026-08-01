@@ -70,6 +70,13 @@ PYEOF
 # group size, so the group count falls out as D / (~2 x floor).  A ceiling
 # (--cut tree) cannot do this: descending a node promotes all its children at
 # once, so most groups land far below the bound.
+#
+# --max-group-size is a separate concern from model size.  The group encoder
+# attends over a group's genes, so activation memory is quadratic in group size:
+# GO:0008150 rolled up 3869 genes on the first build, which is 61 GB of
+# attention at batch 256 for that one group.  The ceiling trims that tail.
+# Keep it at >= 2x --min-group-size: the floor pass accumulates a merged group
+# until it clears the floor, so merged groups can reach roughly twice it.
 echo ""
 echo "Building vocabulary by Reactome -> GO hierarchical roll-up ..."
 cd /rds/homes/a/axw1008/axw1008/src
@@ -80,6 +87,7 @@ python scripts/build_vocabulary.py \
     --grouping hierarchical \
     --cut union \
     --min-group-size 250 \
+    --max-group-size 500 \
     --go-groups 4 \
     --drop-unassigned \
     --out "${VOCAB_OUT}"

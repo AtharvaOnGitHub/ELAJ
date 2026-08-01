@@ -555,8 +555,11 @@ def make_cut_strategy(args):
 
     if args.cut == "tree":
         return TreeCutStrategy(target_size=args.target_group_size)
+    # 0 is the CLI spelling of "no ceiling"; argparse cannot default to None and
+    # still accept an explicit opt-out.
     return UnionCutStrategy(
         min_size=args.min_group_size,
+        max_size=args.max_group_size or None,
         reactome_groups=args.reactome_groups,
         go_groups=args.go_groups,
     )
@@ -665,10 +668,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "costs one transformer (~100k params). Default: 50 (~250 groups).",
     )
     supp.add_argument(
-        "--max-group-size", type=int, default=500, metavar="N",
-        help="Groups larger than N are split into numbered chunks. Default: 500.",
-    )
-    supp.add_argument(
         "--pathway-preference", choices=["specific", "generic"], default="specific",
         help="When a gene belongs to several pathways, assign it to the smallest "
              "('specific') or largest ('generic') one. Default: specific.",
@@ -703,15 +702,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "merged into each other. Default: 250.",
     )
     grp.add_argument(
+        "--max-group-size", type=int, default=500, metavar="N",
+        help="Ceiling on genes per group. --cut union descends oversized "
+             "hierarchy nodes; --grouping greedy splits into numbered chunks. "
+             "The group encoder attends over a group's genes, so activation "
+             "memory is quadratic in group size and the tail dominates. Set 0 "
+             "to disable (union only). Default: 500.",
+    )
+    grp.add_argument(
         "--reactome-groups", type=int, default=None, metavar="N",
         help="[--cut union] Descend Reactome until the frontier holds N nodes. "
-             "Default: unset, keeping Reactome's ~29 roots.",
+             "A count, so it is inert unless the hierarchy has fewer roots than "
+             "N. Default: unset, keeping Reactome's roots.",
     )
     grp.add_argument(
         "--go-groups", type=int, default=4, metavar="N",
-        help="[--cut union] Descend GO until the frontier holds N nodes. GO "
-             "biological_process has one root, so without this the residual "
-             "becomes a single group. Default: 4.",
+        help="[--cut union] Descend GO until the frontier holds N nodes. A "
+             "count, and GO BP parses to ~388 roots (only is_a edges give "
+             "parents), so this is normally inert — --max-group-size is what "
+             "bounds GO in practice. Default: 4.",
     )
     grp.add_argument(
         "--target-group-size", type=int, default=500, metavar="N",
@@ -878,6 +887,13 @@ def main(argv: list[str] | None = None) -> None:
             strategy=make_cut_strategy(args),
         )
     else:
+        if args.max_group_size <= 0:
+            # Only the hierarchical ceiling can be switched off: greedy chunks by
+            # slicing, and a step of 0 is not a range.
+            logger.error(
+                "--max-group-size 0 is only valid with --grouping hierarchical."
+            )
+            sys.exit(1)
         vocab = build_vocabulary(
             gene_list=gene_list,
             hallmark_groups=hallmarks,

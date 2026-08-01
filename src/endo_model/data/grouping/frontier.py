@@ -68,6 +68,31 @@ def expand_node(
         leftovers[f"{node}{OTHER_SUFFIX}"] = leftover
 
 
+def expand_largest(
+    hierarchy: Hierarchy,
+    frontier: set[str],
+    candidates: list[str],
+    universe: set[str],
+    leftovers: dict[str, set[str]],
+) -> bool:
+    """Expand the largest expandable node in `candidates`.
+
+    Largest first (deterministic tie-break by id) so the broadest, least
+    specific categories are the ones broken down.  Returns False when no
+    candidate has gene-bearing children, which is every descent loop's
+    termination condition — an unexpandable leaf cannot be made smaller.
+    """
+    expandable = [
+        n for n in candidates if gene_bearing_children(hierarchy, n, universe)
+    ]
+    if not expandable:
+        return False
+
+    node = max(expandable, key=lambda n: (node_size(hierarchy, n, universe), n))
+    expand_node(hierarchy, frontier, node, universe, leftovers)
+    return True
+
+
 def assign_most_specific(
     hierarchy: Hierarchy,
     frontier: set[str],

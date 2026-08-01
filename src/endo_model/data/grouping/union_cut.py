@@ -8,17 +8,24 @@ up far below the bound.
 
 Algorithm
 ---------
-1. Start the frontier at the roots.  With Reactome that is ~29 top-level
+1. Start the frontier at the roots.  With Reactome that is ~43 top-level
    biological categories, which is the intended granularity.
-2. If `expand_to` is given, descend the largest node repeatedly until the
-   frontier holds at least that many nodes.  This exists for single-rooted
-   hierarchies like GO biological_process, where the roots alone give one group.
-3. Assign each gene to the most specific frontier node containing it.
-4. Union pass: while the smallest group is below `min_size`, merge it into the
+2. Ceiling pass: while any frontier node rolls up more than `max_size` genes,
+   descend it.  Without this, a hierarchy's universal root can sit on the
+   frontier and absorb every gene no smaller node claims.
+3. If `expand_to` is given, descend the largest node until the frontier holds at
+   least that many nodes.
+4. Assign each gene to the most specific frontier node containing it.
+5. Floor pass: while the smallest group is below `min_size`, merge it into the
    next-smallest group.  Repeat until every group clears the floor (or only one
    group remains).
 
-Step 4 merges on **size, not biological similarity** — it pairs the two
+Steps 2 and 5 together give a size *band*.  The floor is what controls the
+median; the ceiling only trims the tail, but that tail is expensive — the group
+encoder runs self-attention over a group's genes, so cost is quadratic in group
+size and one oversized group can dominate the whole model's memory.
+
+Step 5 merges on **size, not biological similarity** — it pairs the two
 smallest groups so the result stays balanced, rather than dissolving small
 groups into a large one.  A merged group's id is its constituents joined by
 `MERGE_SEP`, so the caller can recover and label them.
@@ -31,8 +38,7 @@ from typing import Optional
 
 from endo_model.data.grouping.frontier import (
     assign_most_specific,
-    expand_node,
-    gene_bearing_children,
+    expand_largest,
     node_size,
     root_frontier,
 )
@@ -50,6 +56,7 @@ def union_cut(
     universe: set[str],
     min_size: int,
     expand_to: Optional[int] = None,
+    max_size: Optional[int] = None,
 ) -> dict[str, set[str]]:
     """Group the universe from the hierarchy roots, with a floor on group size.
 
@@ -59,36 +66,55 @@ def union_cut(
         min_size:  Minimum genes per group.  Groups below it are merged with
                    each other until they clear it.
         expand_to: Descend until the frontier holds at least this many nodes.
-                   None (the default) keeps the roots as they are — the right
-                   choice for Reactome.  Set it for a single-rooted hierarchy
-                   such as GO biological_process, which otherwise yields one
-                   group.
+                   A *count*, so it does nothing when the hierarchy already has
+                   more gene-bearing roots than this — which is the usual case.
+                   Prefer `max_size` to control granularity.
+        max_size:  Descend any node rolling up more than this many genes.  None
+                   leaves the tail unbounded, which lets a universal root absorb
+                   everything unclaimed (GO:0008150 took 3869 genes that way).
 
     Returns:
         group_id -> set of genes, disjoint, covering exactly the universe genes
         present in the hierarchy.  A merged group's id is its constituent ids
         joined by MERGE_SEP.
     """
+    if max_size is not None and max_size < 2 * min_size:
+        # The floor pass accumulates into one group until it clears min_size, so
+        # a merged group can reach ~2x the floor.  A tighter ceiling than that
+        # cannot hold, and silently wouldn't.
+        logger.warning(
+            "union_cut(%s): max_size=%d is below 2x min_size=%d; merged groups "
+            "may exceed the ceiling",
+            hierarchy.name, max_size, min_size,
+        )
+
     universe = set(universe)
     frontier = root_frontier(hierarchy, universe)
     leftovers: dict[str, set[str]] = {}
 
+    while max_size is not None and expand_largest(
+        hierarchy,
+        frontier,
+        [n for n in frontier if node_size(hierarchy, n, universe) > max_size],
+        universe,
+        leftovers,
+    ):
+        pass
+
     while expand_to is not None and len(frontier) < expand_to:
-        expandable = [
-            n for n in frontier if gene_bearing_children(hierarchy, n, universe)
-        ]
-        if not expandable:
+        if not expand_largest(
+            hierarchy, frontier, list(frontier), universe, leftovers
+        ):
             break
-        node = max(expandable, key=lambda n: (node_size(hierarchy, n, universe), n))
-        expand_node(hierarchy, frontier, node, universe, leftovers)
 
     groups = assign_most_specific(hierarchy, frontier, leftovers, universe)
     merged = merge_undersized(groups, min_size)
 
     logger.info(
-        "union_cut(%s): %d genes -> %d groups (min_size=%d, %d before merging)",
+        "union_cut(%s): %d genes -> %d groups (min_size=%s, max_size=%s, "
+        "%d before merging)",
         hierarchy.name, sum(len(g) for g in merged.values()),
-        len(merged), min_size, len(groups),
+        len(merged), min_size, max_size, len(groups),
     )
     return merged
 

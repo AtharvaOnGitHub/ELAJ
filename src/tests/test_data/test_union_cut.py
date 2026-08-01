@@ -95,6 +95,68 @@ def test_expand_to_descends_a_single_rooted_hierarchy():
     assert len(union_cut(go, universe, min_size=1, expand_to=3)) == 3
 
 
+def _universal_root():
+    """A root that rolls up everything, sitting beside a smaller peer root.
+
+    This is the GO BP shape: only is_a edges give parents, so terms attached by
+    part_of/regulates surface as extra roots next to GO:0008150, which still
+    rolls up the lot.
+    """
+    return _hierarchy(
+        "go_like",
+        {"all": ["kid1", "kid2", "kid3"]},
+        {
+            "kid1": [f"A{i}" for i in range(8)],
+            "kid2": [f"B{i}" for i in range(8)],
+            "kid3": [f"C{i}" for i in range(8)],
+            "peer": ["A0"],          # tiny peer root, overlaps kid1
+        },
+    )
+
+
+def _universal_universe():
+    return {f"{p}{i}" for p in "ABC" for i in range(8)}
+
+
+def test_max_size_descends_a_universal_root():
+    """Without a ceiling the root absorbs every gene no smaller node claims."""
+    h, u = _universal_root(), _universal_universe()
+
+    uncapped = union_cut(h, u, min_size=1)
+    assert max(len(g) for g in uncapped.values()) == 23, "root took all but A0"
+
+    capped = union_cut(h, u, min_size=1, max_size=10)
+    assert max(len(g) for g in capped.values()) <= 10
+
+
+def test_expand_to_is_inert_when_roots_already_exceed_it():
+    """The bug this ceiling replaces: a count target never fires here."""
+    h, u = _universal_root(), _universal_universe()
+    assert len(union_cut(h, u, min_size=1, expand_to=2)) == len(
+        union_cut(h, u, min_size=1)
+    )
+
+
+def test_max_size_still_covers_the_universe():
+    groups = union_cut(_universal_root(), _universal_universe(), min_size=1, max_size=10)
+    assert set().union(*groups.values()) == _universal_universe()
+
+
+def test_max_size_yields_to_an_unexpandable_leaf():
+    """A leaf bigger than the ceiling cannot be split; that must not hang."""
+    flat = _hierarchy("flat", {}, {"only": [f"G{i}" for i in range(50)]})
+    groups = union_cut(flat, {f"G{i}" for i in range(50)}, min_size=1, max_size=5)
+    assert len(groups) == 1
+    assert len(groups["only"]) == 50
+
+
+def test_floor_and_ceiling_apply_together():
+    h, u = _universal_root(), _universal_universe()
+    groups = union_cut(h, u, min_size=6, max_size=12)
+    assert all(len(g) >= 6 for g in groups.values())
+    assert all(len(g) <= 12 for g in groups.values())
+
+
 def test_expand_to_stops_when_nothing_can_be_expanded():
     """Asking for more groups than the DAG can supply must not hang."""
     flat = _hierarchy("flat", {}, {"only": ["G0", "G1"]})

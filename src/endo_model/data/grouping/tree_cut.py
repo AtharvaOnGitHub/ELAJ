@@ -31,8 +31,7 @@ import logging
 from endo_model.data.grouping.frontier import (
     OTHER_SUFFIX,
     assign_most_specific,
-    expand_node,
-    gene_bearing_children,
+    expand_largest,
     node_size,
     root_frontier,
 )
@@ -67,18 +66,14 @@ def tree_cut(
     frontier = root_frontier(hierarchy, universe)
     leftovers: dict[str, set[str]] = {}
 
-    while True:
-        expandable = [
-            n for n in frontier
-            if node_size(hierarchy, n, universe) > target_size
-            and gene_bearing_children(hierarchy, n, universe)
-        ]
-        if not expandable:
-            break
-        # Largest first (deterministic tie-break by id) so the biggest, least
-        # specific categories are the ones broken down.
-        node = max(expandable, key=lambda n: (node_size(hierarchy, n, universe), n))
-        expand_node(hierarchy, frontier, node, universe, leftovers)
+    while expand_largest(
+        hierarchy,
+        frontier,
+        [n for n in frontier if node_size(hierarchy, n, universe) > target_size],
+        universe,
+        leftovers,
+    ):
+        pass
 
     groups = assign_most_specific(hierarchy, frontier, leftovers, universe)
 

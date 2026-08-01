@@ -17,6 +17,11 @@ import logging
 import sys
 from pathlib import Path
 
+# Ensure src/ is on sys.path so endo_model is importable when the script is run
+# directly.  Python puts the *script's* directory on the path, not the cwd, so
+# cd-ing into src/ before running scripts/train.py is not enough.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",

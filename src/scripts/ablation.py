@@ -18,6 +18,9 @@ import logging
 import sys
 from pathlib import Path
 
+# See train.py — the script's directory goes on sys.path, not the cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",

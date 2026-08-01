@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=180G
 #SBATCH --job-name=elaj_train
 #SBATCH --output=logs/train_%j.log
@@ -15,9 +15,14 @@
 #
 # Defaults to first_run.yaml, which is full_model with batch_size 128.
 #
+# gpu:a100_80 asks for the 80 GB A100 rather than the plain gpu:a100, which is
+# the 40 GB part.  Group attention across the 45-group vocabulary is ~22.9 GB at
+# batch 128, which does not leave workable headroom on 40 GB.  Drop
+# training.batch_size to 64 if only the 40 GB nodes are free.
+#
 # CPU count feeds the DataLoader workers: StudyPanel keeps counts as CSR and
 # densifies one cell per __getitem__, so collation is CPU-bound and starving it
-# will idle the GPU.
+# will idle the GPU.  BlueBEAR recommends at most 18 cores per GPU.
 #
 # Walltime is a guess until an epoch has actually been timed.  Training is
 # resumable — set training.resume_from_checkpoint in the experiment YAML to

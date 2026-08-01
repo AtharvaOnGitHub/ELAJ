@@ -5,6 +5,7 @@ from pathlib import Path
 from endo_model.data.grouping.build import build_hierarchical_groups
 from endo_model.data.grouping.go import load_go
 from endo_model.data.grouping.reactome import load_reactome
+from endo_model.data.grouping.strategies import TreeCutStrategy
 
 
 def _write_reactome_fixture(d: Path) -> None:
@@ -67,7 +68,9 @@ def test_two_phase_reactome_then_go_drops_orphans(tmp_path):
     go = load_go(tmp_path / "go.obo", {"root (GO:0000001)": [f"m{i}" for i in range(12)]})
 
     universe = reactome.node_genes("R-HSA-1") | {f"m{i}" for i in range(12)} | {"orphan"}
-    groups = build_hierarchical_groups(universe, reactome, go, target_size=20)
+    groups = build_hierarchical_groups(
+        universe, reactome, go, TreeCutStrategy(target_size=20)
+    )
 
     assigned: set[str] = set()
     for genes in groups.values():

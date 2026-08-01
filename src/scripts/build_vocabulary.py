@@ -519,17 +519,17 @@ def build_hierarchical_vocabulary(
     reactome_enrichr: dict[str, list[str]],
     go_enrichr: dict[str, list[str]],
     hierarchy_dir: Path,
-    target_group_size: int,
+    strategy,
 ) -> dict[str, dict]:
     """Build a vocabulary by hierarchical roll-up (Reactome then GO residual).
 
     Args:
-        gene_list:          Corpus genes (defines order and universe).
-        reactome_enrichr:   Enrichr Reactome gene sets (names carry R-HSA ids).
-        go_enrichr:         Enrichr GO BP gene sets (names carry GO ids).
-        hierarchy_dir:      Directory with ReactomePathwaysRelation.txt,
-                            ReactomePathways.txt and go-basic.obo.
-        target_group_size:  Target genes per group.
+        gene_list:         Corpus genes (defines order and universe).
+        reactome_enrichr:  Enrichr Reactome gene sets (names carry R-HSA ids).
+        go_enrichr:        Enrichr GO BP gene sets (names carry GO ids).
+        hierarchy_dir:     Directory with ReactomePathwaysRelation.txt,
+                           ReactomePathways.txt and go-basic.obo.
+        strategy:          A CutStrategy — TreeCutStrategy or UnionCutStrategy.
     """
     from endo_model.data.grouping.build import build_hierarchical_groups
     from endo_model.data.grouping.go import load_go
@@ -542,10 +542,24 @@ def build_hierarchical_vocabulary(
         reactome_enrichr,
     )
     go = load_go(hdir / "go-basic.obo", go_enrichr)
-    groups = build_hierarchical_groups(
-        set(gene_list), reactome, go, target_group_size
-    )
+    groups = build_hierarchical_groups(set(gene_list), reactome, go, strategy)
     return emit_vocabulary(groups, gene_list)
+
+
+def make_cut_strategy(args):
+    """Build the CutStrategy selected by the CLI flags."""
+    from endo_model.data.grouping.strategies import (
+        TreeCutStrategy,
+        UnionCutStrategy,
+    )
+
+    if args.cut == "tree":
+        return TreeCutStrategy(target_size=args.target_group_size)
+    return UnionCutStrategy(
+        min_size=args.min_group_size,
+        reactome_groups=args.reactome_groups,
+        go_groups=args.go_groups,
+    )
 
 
 def print_stats(vocab: dict[str, dict]) -> None:
@@ -675,8 +689,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "Default: greedy.",
     )
     grp.add_argument(
+        "--cut", choices=["tree", "union"], default="union", metavar="STRATEGY",
+        help="How to cut each hierarchy under --grouping hierarchical. "
+             "union: start at the roots, merge groups below --min-group-size "
+             "(controls the floor, so the median lands near 2x it). "
+             "tree: descend until no group exceeds --target-group-size "
+             "(controls the ceiling; the median lands far below it). "
+             "Default: union.",
+    )
+    grp.add_argument(
+        "--min-group-size", type=int, default=250, metavar="N",
+        help="[--cut union] Floor on genes per group; smaller groups are "
+             "merged into each other. Default: 250.",
+    )
+    grp.add_argument(
+        "--reactome-groups", type=int, default=None, metavar="N",
+        help="[--cut union] Descend Reactome until the frontier holds N nodes. "
+             "Default: unset, keeping Reactome's ~29 roots.",
+    )
+    grp.add_argument(
+        "--go-groups", type=int, default=4, metavar="N",
+        help="[--cut union] Descend GO until the frontier holds N nodes. GO "
+             "biological_process has one root, so without this the residual "
+             "becomes a single group. Default: 4.",
+    )
+    grp.add_argument(
         "--target-group-size", type=int, default=500, metavar="N",
-        help="Target genes per group for hierarchical grouping. Default: 500.",
+        help="[--cut tree] Upper bound on genes per group. Default: 500.",
     )
     grp.add_argument(
         "--hierarchy-dir", metavar="DIR",
@@ -836,7 +875,7 @@ def main(argv: list[str] | None = None) -> None:
             reactome_enrichr=reactome_enrichr,
             go_enrichr=go_enrichr,
             hierarchy_dir=Path(args.hierarchy_dir),
-            target_group_size=args.target_group_size,
+            strategy=make_cut_strategy(args),
         )
     else:
         vocab = build_vocabulary(

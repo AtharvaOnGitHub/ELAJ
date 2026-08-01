@@ -20,11 +20,44 @@ Data contracts, vocabulary, and the full scRNA-seq loading pipeline.
 | File | Responsibility |
 |---|---|
 | `hierarchy.py` | `Hierarchy` — source-agnostic DAG of pathway nodes with gene roll-up |
-| `tree_cut.py` | `tree_cut` — cuts a hierarchy into ~target-size groups |
+| `frontier.py` | Frontier primitives shared by every cut: descent and most-specific assignment |
+| `tree_cut.py` | `tree_cut` — descend until no group exceeds a **ceiling** |
+| `union_cut.py` | `union_cut` — start at the roots, merge groups below a **floor** |
+| `strategies.py` | `TreeCutStrategy` / `UnionCutStrategy` — interchangeable cut policies |
 | `reactome.py` | Loads `ReactomePathwaysRelation.txt` + Enrichr gene sets → `Hierarchy` |
 | `go.py` | Parses `go-basic.obo` (BP namespace) + Enrichr gene sets → `Hierarchy` |
 | `build.py` | Two-phase orchestration: Reactome first, GO on the residual |
 | `fetch.py` | Downloads the structural files (login node only) |
+
+### Ceiling vs floor — why there are two cuts
+
+A **ceiling cannot control a median.**  `tree_cut` descends the largest node that
+exceeds `target_size`, and descending promotes *all* of that node's children at
+once.  One 600-gene node becomes fifteen 40-gene groups.  Run against the real
+corpus at `target_size=500`, the result was 202 groups with a median of 60 —
+every group under the bound, none near it.
+
+`union_cut` inverts the control.  It starts at the hierarchy roots (Reactome's
+~29 top-level categories, which are already the intended granularity) and takes
+the **set union** of groups that fall below `min_size`, pairing the two smallest
+each time so the distribution stays balanced rather than letting one group
+absorb every stray.  Because only undersized groups move, the median settles
+near 2× the floor.
+
+GO `biological_process` is single-rooted, so its roots alone give one group;
+`go_groups` descends the frontier first.  Reactome needs no descent, which is
+why `reactome_groups` defaults to `None`.
+
+Both remain available — a ceiling is the right control when group size must be
+bounded above, e.g. if per-group attention cost becomes the constraint.
+
+```bash
+# floor-controlled (default): ~29 Reactome roots + ~4 GO groups
+--grouping hierarchical --cut union --min-group-size 250 --go-groups 4
+
+# ceiling-controlled
+--grouping hierarchical --cut tree --target-group-size 500
+```
 
 **Why hierarchical.**  Real pathways are small (~15–200 genes), but the encoder
 builds one transformer per group, so group *count* drives model size.  Cutting a

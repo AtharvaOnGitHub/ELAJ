@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
+import scipy.sparse
 
 from endo_model.data.constants import (
     DISEASE_STATUS_TO_INT,
@@ -94,6 +95,53 @@ def _tissue_level_matrix(obs, study_name: str) -> np.ndarray:
         matrix[:, level_i] = coerced.fillna(0).to_numpy(dtype=np.int64)
 
     return matrix
+
+
+def _age_vector(obs) -> np.ndarray:
+    """Per-cell age as float64, NaN where missing or non-numeric."""
+    import pandas as pd
+
+    if "age" not in obs.columns:
+        return np.full(len(obs), np.nan, dtype=np.float64)
+    return pd.to_numeric(obs["age"], errors="coerce").to_numpy(dtype=np.float64)
+
+
+def _disease_status_codes(obs, study_name: str) -> np.ndarray:
+    """Per-cell disease status as int64 codes (see DISEASE_STATUS_TO_INT).
+
+    Unrecognised labels map to 3 ("other").  Because that fallback is silent,
+    the distinct labels found are logged once per study so QC can catch a study
+    whose vocabulary does not match the expected eutopic/ectopic/control/other.
+    """
+    other_code = DISEASE_STATUS_TO_INT["other"]
+    n = len(obs)
+
+    if "disease_status" not in obs.columns:
+        logger.warning(
+            "Study '%s': no 'disease_status' column — all cells coded 'other'.",
+            study_name,
+        )
+        return np.full(n, other_code, dtype=np.int64)
+
+    column = obs["disease_status"]
+    # Already-integer columns are taken as codes directly.
+    if np.issubdtype(column.dtype, np.integer):
+        return column.to_numpy(dtype=np.int64)
+
+    normalised = column.astype(str).str.strip().str.lower()
+    codes = normalised.map(DISEASE_STATUS_TO_INT).fillna(other_code)
+
+    unrecognised = sorted(set(normalised[~normalised.isin(DISEASE_STATUS_TO_INT)]))
+    if unrecognised:
+        logger.warning(
+            "Study '%s': %d cells have disease_status outside %s — coded 'other'. "
+            "Unrecognised labels: %s",
+            study_name,
+            int((~normalised.isin(DISEASE_STATUS_TO_INT)).sum()),
+            sorted(DISEASE_STATUS_TO_INT),
+            unrecognised[:10],
+        )
+    return codes.to_numpy(dtype=np.int64)
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +284,11 @@ class EndometriosisDataset:
                 study_id, n_in_vocab, len(study_gene_names),
             )
 
+            # As arrays, so the per-cell scatter below is a single vectorised
+            # numpy assignment rather than a Python loop over ~n_in_vocab genes.
+            global_idx_arr = np.asarray(global_idxs, dtype=np.int64)
+            local_idx_arr = np.asarray(study_local_idxs, dtype=np.int64)
+
             # Select cells belonging to the requested split
             cell_mask = [
                 split_assignments.get(pid, "train") == split
@@ -252,44 +305,37 @@ class EndometriosisDataset:
                 "Study %d split='%s': %d cells", study_id, split, len(cell_indices)
             )
 
-            # Coerce the tissue hierarchy columns once per study (vectorised).
+            # Coerce all obs-derived metadata once per study (vectorised), so
+            # the per-cell loop below does array indexing rather than pandas
+            # .iloc row access.
             tissue_matrix = _tissue_level_matrix(adata.obs, name)
+            age_arr = _age_vector(adata.obs)
+            disease_arr = _disease_status_codes(adata.obs, name)
+
+            x_matrix = adata.X
+            x_is_sparse = scipy.sparse.issparse(x_matrix)
 
             for local_cell_idx in cell_indices:
-                obs_row = adata.obs.iloc[local_cell_idx]
-
                 # Extract counts row
-                import scipy.sparse
-                x = adata.X[local_cell_idx]
-                if scipy.sparse.issparse(x):
+                x = x_matrix[local_cell_idx]
+                if x_is_sparse:
                     x = x.toarray()
                 row = np.asarray(x, dtype=np.float32).flatten()
 
-                # Build full-vocab count vector with DNS for unmeasured genes
+                # Build full-vocab count vector with DNS for unmeasured genes.
+                # Vectorised scatter: positions not in this study's panel keep
+                # DNS_SENTINEL, the rest are filled in one numpy assignment.
                 counts = np.full(vocab.vocab_size, float(DNS_SENTINEL), dtype=np.float32)
-                for local_i, global_i in zip(study_local_idxs, global_idxs):
-                    counts[global_i] = row[local_i]
-
-                # Tissue levels (4-vector), from the per-study coerced matrix
-                tissue_levels = tissue_matrix[local_cell_idx]
-
-                # Age
-                age = float(obs_row["age"]) if "age" in obs_row.index else float("nan")
-
-                # Disease status
-                ds_raw = obs_row.get("disease_status", "other")
-                if isinstance(ds_raw, (int, np.integer)):
-                    disease_status = int(ds_raw)
-                else:
-                    disease_status = DISEASE_STATUS_TO_INT.get(str(ds_raw).lower(), 3)
+                counts[global_idx_arr] = row[local_idx_arr]
 
                 self._records.append(
                     _CellRecord(
                         counts=counts,
                         study_id=study_id,
-                        tissue_levels=tissue_levels,
-                        age=age,
-                        disease_status=disease_status,
+                        # (4,) slice of the per-study coerced tissue matrix
+                        tissue_levels=tissue_matrix[local_cell_idx],
+                        age=float(age_arr[local_cell_idx]),
+                        disease_status=int(disease_arr[local_cell_idx]),
                         patient_id=str(study_patients[local_cell_idx]),
                     )
                 )

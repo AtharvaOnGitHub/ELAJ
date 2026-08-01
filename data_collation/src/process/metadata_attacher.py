@@ -20,6 +20,37 @@ _VALID_STATUSES = {"eutopic", "ectopic", "control", "other"}
 _GSM_FILE_PATTERN = re.compile(r"^(GSM\d+)_([^_]+)_")
 
 
+def _resolvable_in(cfg: OntologyConfig, columns) -> bool:
+    """Whether any column `cfg` names is present in `columns`.
+
+    A config naming a column the series matrix does not carry must not take the
+    series-matrix path: _resolve_mapped_values falls through to cfg.default for
+    every sample and returns a fully populated map, so the failure is
+    indistinguishable from success.  duempelmann_2026 labelled all 466,371 of
+    its cells "other" that way, silently, because EndometriosisStatus lives in
+    the Seurat meta.data rather than in GEO's six-column series matrix.
+    """
+    named = (cfg.column, cfg.fallback_column, cfg.override_column)
+    return any(col in columns for col in named if col)
+
+
+def _warn_if_column_missing(
+    cfg: OntologyConfig, study_name: str, field: str, *sources
+) -> None:
+    """Warn when cfg names a primary column that no source provides.
+
+    Without this the study still processes and every cell takes cfg.default, so
+    a typo or a wrong table costs a whole study's labels with nothing in the log.
+    """
+    if not cfg.column or any(cfg.column in cols for cols in sources):
+        return
+    logger.warning(
+        "%s: %s column %r not found in the series matrix or adata.obs; "
+        "every cell will take the default %r",
+        study_name, field, cfg.column, cfg.default,
+    )
+
+
 class MetadataAttacher:
     """Attach patient-level metadata to adata.obs.
 
@@ -99,15 +130,29 @@ class MetadataAttacher:
             return
 
         cfg = dataset.status_config
-        if cfg is not None and sample_meta is not None and not sample_meta.empty:
+        if cfg is not None:
+            _warn_if_column_missing(
+                cfg, dataset.study_name, "status_config",
+                adata.obs.columns,
+                sample_meta.columns if sample_meta is not None else (),
+            )
+
+        # Series matrix first, but only when it actually carries a column the
+        # config names — see _resolvable_in.
+        if (
+            cfg is not None
+            and sample_meta is not None
+            and not sample_meta.empty
+            and _resolvable_in(cfg, sample_meta.columns)
+        ):
             per_sample = self._resolve_mapped_values(cfg, sample_meta)
             adata.obs["disease_status"] = (
                 adata.obs["source_sample_id"].map(per_sample).fillna(cfg.default or "other")
             )
             return
 
-        # No series matrix — map directly from an existing adata.obs column (e.g. CellxGENE
-        # h5ad files that carry disease_ontology_term_id, or atlas files with a Group column).
+        # Otherwise map directly from an adata.obs column (e.g. CellxGENE h5ad
+        # files carrying disease_ontology_term_id, or a Seurat meta.data column).
         # .astype(str) strips Categorical dtype so .fillna() can introduce new values freely.
         if cfg is not None and cfg.column and cfg.column in adata.obs.columns:
             adata.obs["disease_status"] = (
@@ -174,11 +219,26 @@ class MetadataAttacher:
             )
             return
 
-        if sample_meta is not None and not sample_meta.empty and cfg.column:
+        _warn_if_column_missing(
+            cfg, dataset.study_name, "tissue_ontology",
+            adata.obs.columns,
+            sample_meta.columns if sample_meta is not None else (),
+        )
+
+        if (
+            sample_meta is not None
+            and not sample_meta.empty
+            and _resolvable_in(cfg, sample_meta.columns)
+        ):
             per_sample = self._resolve_mapped_values(cfg, sample_meta)
             adata.obs["tissue_ontology_term_id"] = (
                 adata.obs["source_sample_id"]
                 .map(per_sample)
+                .fillna(cfg.default or fallback)
+            )
+        elif cfg.column and cfg.column in adata.obs.columns:
+            adata.obs["tissue_ontology_term_id"] = (
+                adata.obs[cfg.column].astype(str).map(cfg.value_map)
                 .fillna(cfg.default or fallback)
             )
         else:
@@ -217,7 +277,17 @@ class MetadataAttacher:
             )
             return
 
-        if sample_meta is not None and not sample_meta.empty and cfg.column:
+        _warn_if_column_missing(
+            cfg, dataset.study_name, "disease_ontology",
+            adata.obs.columns,
+            sample_meta.columns if sample_meta is not None else (),
+        )
+
+        if (
+            sample_meta is not None
+            and not sample_meta.empty
+            and _resolvable_in(cfg, sample_meta.columns)
+        ):
             per_sample = self._resolve_mapped_values(cfg, sample_meta)
             adata.obs["disease_ontology_term_id"] = (
                 adata.obs["source_sample_id"]
@@ -225,7 +295,7 @@ class MetadataAttacher:
                 .fillna(cfg.default or fallback)
             )
         elif cfg.column and cfg.column in adata.obs.columns:
-            # No series matrix — map directly from an existing adata.obs column.
+            # Map directly from an adata.obs column instead.
             adata.obs["disease_ontology_term_id"] = (
                 adata.obs[cfg.column].astype(str).map(cfg.value_map).fillna(cfg.default or fallback)
             )

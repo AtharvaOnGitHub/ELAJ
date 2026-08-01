@@ -14,7 +14,11 @@ from __future__ import annotations
 import logging
 import re
 
-from endo_model.data.grouping.frontier import OTHER_SUFFIX, nearest_common_ancestor
+from endo_model.data.grouping.frontier import (
+    OTHER_SUFFIX,
+    nearest_common_ancestor,
+    node_size,
+)
 from endo_model.data.grouping.hierarchy import Hierarchy
 from endo_model.data.grouping.strategies import CutStrategy, GO_PHASE, REACTOME_PHASE
 from endo_model.data.grouping.union_cut import MERGE_SEP
@@ -24,6 +28,12 @@ logger = logging.getLogger(__name__)
 # Beyond this many constituents, a merged group's name is abbreviated rather
 # than concatenating every label into an unusable identifier.
 _MAX_NAMED_PARTS = 2
+
+# An ancestor covering this much of what its hierarchy assigns is too broad to
+# name anything.  "39 pathways somewhere in biological_process" reads as a
+# description but carries no more information than "39 pathways" — worse than
+# an obviously-vague name, because it looks precise.
+_MAX_ANCESTOR_SHARE = 0.5
 
 
 def _slug(text: str) -> str:
@@ -39,8 +49,29 @@ def _node_label(hierarchy: Hierarchy, node_id: str) -> str:
     return f"{label}_other" if is_other else label
 
 
+def _informative_ancestor(
+    hierarchy: Hierarchy, parts: list[str], universe: set[str], coverage: int
+) -> str | None:
+    """Nearest common ancestor of `parts`, unless it is too broad to mean anything.
+
+    `coverage` is how many genes this hierarchy assigns in this phase — the
+    right denominator, since a hierarchy's root covers all of its own genes but
+    only a fraction of the universe it was cut against.
+    """
+    ancestor = nearest_common_ancestor(hierarchy, parts, universe)
+    if ancestor is None or coverage <= 0:
+        return ancestor
+    if node_size(hierarchy, ancestor, universe) > _MAX_ANCESTOR_SHARE * coverage:
+        return None
+    return ancestor
+
+
 def _pretty_group_name(
-    hierarchy: Hierarchy, group_id: str, prefix: str, universe: set[str]
+    hierarchy: Hierarchy,
+    group_id: str,
+    prefix: str,
+    universe: set[str],
+    coverage: int,
 ) -> str:
     """Human-readable group name, including for merged (unioned) groups.
 
@@ -55,8 +86,10 @@ def _pretty_group_name(
     count says "thirteen pathways within immune system", which is what it is.
 
     Falls back to the first label plus a count when the constituents share no
-    ancestor, which happens in a multi-rooted hierarchy when the floor pass runs
-    out of relatives to merge with.
+    ancestor — which happens in a multi-rooted hierarchy when the floor pass runs
+    out of relatives — or when the ancestor they share is too broad to describe
+    them.  That fallback names a grab bag as a grab bag, which is the honest
+    outcome when the merge really is one.
     """
     parts = group_id.split(MERGE_SEP)
     labels = [_node_label(hierarchy, p) for p in parts]
@@ -66,7 +99,7 @@ def _pretty_group_name(
     if len(labels) <= _MAX_NAMED_PARTS:
         return f"{prefix}_{'_and_'.join(labels)}"
 
-    ancestor = nearest_common_ancestor(hierarchy, parts, universe)
+    ancestor = _informative_ancestor(hierarchy, parts, universe, coverage)
     if ancestor is not None:
         return f"{prefix}_{_slug(hierarchy.label(ancestor))}_{len(labels)}_pathways"
     return f"{prefix}_{labels[0]}_plus_{len(labels) - 1}_more"
@@ -105,10 +138,14 @@ def build_hierarchical_groups(
 
     # Phase 1 — Reactome
     reactome_cut = strategy.cut(reactome, universe, REACTOME_PHASE)
+    reactome_coverage = sum(len(g) for g in reactome_cut.values())
     reactome_assigned: set[str] = set()
     for group_id, genes in reactome_cut.items():
         name = _dedupe(
-            _pretty_group_name(reactome, group_id, "reactome", universe), used_names
+            _pretty_group_name(
+                reactome, group_id, "reactome", universe, reactome_coverage
+            ),
+            used_names,
         )
         groups[name] = sorted(genes)
         reactome_assigned |= genes
@@ -116,10 +153,12 @@ def build_hierarchical_groups(
     # Phase 2 — GO on whatever Reactome left behind
     residual = universe - reactome_assigned
     go_cut = strategy.cut(go, residual, GO_PHASE)
+    go_coverage = sum(len(g) for g in go_cut.values())
     go_assigned: set[str] = set()
     for group_id, genes in go_cut.items():
         name = _dedupe(
-            _pretty_group_name(go, group_id, "go", residual), used_names
+            _pretty_group_name(go, group_id, "go", residual, go_coverage),
+            used_names,
         )
         groups[name] = sorted(genes)
         go_assigned |= genes

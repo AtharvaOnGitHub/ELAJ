@@ -8,9 +8,14 @@
 #SBATCH --output=logs/build_vocabulary_%j.log
 
 # Builds data/processed/vocabulary.json from the union of all genes across
-# the 13 processed h5ad studies.  Using the union (not intersection) is
-# correct because the model uses a DNS sentinel for genes not measured in
-# a given study's panel.
+# the processed h5ad studies.  Using the union (not intersection) is correct
+# because the model uses a DNS sentinel for genes not measured in a given
+# study's panel.
+#
+# EXCLUDE must match data.exclude_studies in configs/data/corpus.yaml.  A gene
+# contributed only by an excluded study would sit in the vocabulary as DNS in
+# every study that actually trains — a wasted embedding row and a wasted
+# decoder output.
 
 module purge
 module load bear-apps/2024a
@@ -24,6 +29,7 @@ source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 export PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
 export GENE_LIST=${PROCESSED}/gene_list.txt
 export VOCAB_OUT=${PROCESSED}/vocabulary.json
+export EXCLUDE="wang_2022 zhang_2022"
 
 # ── Step 1: extract gene union from all processed h5ad files ──────────────
 echo "Extracting gene union from processed studies ..."
@@ -35,8 +41,13 @@ import anndata as ad
 processed = Path(os.environ["PROCESSED"])
 gene_list_path = Path(os.environ["GENE_LIST"])
 
+excluded = set(os.environ.get("EXCLUDE", "").split())
+
 all_genes: set[str] = set()
 for path in sorted(processed.glob("*.h5ad")):
+    if path.stem in excluded:
+        print(f"  {path.stem}: SKIPPED (in EXCLUDE)")
+        continue
     adata = ad.read_h5ad(path, backed="r")
     genes = set(adata.var_names)
     print(f"  {path.stem}: {len(genes):,} genes")
@@ -54,17 +65,22 @@ PYEOF
 #   python src/scripts/build_vocabulary.py --save-gene-sets src/data/gene_sets.json
 # Compute nodes are firewalled, so we read from disk instead.
 #
-# min-pathway-size is the main dial on model size: each group costs one
-# transformer (~100k params at d_token=64).  50 gives ~250 groups (~25M params).
+# Group COUNT is the dial on model size: the encoder builds one transformer per
+# group, ~25k params at d_token=32.  --min-group-size is the control — it floors
+# group size, so the group count falls out as D / (~2 x floor).  A ceiling
+# (--cut tree) cannot do this: descending a node promotes all its children at
+# once, so most groups land far below the bound.
 echo ""
-echo "Building vocabulary from Hallmark + 9 pathway libraries ..."
+echo "Building vocabulary by Reactome -> GO hierarchical roll-up ..."
 cd /rds/homes/a/axw1008/axw1008/src
 python scripts/build_vocabulary.py \
     --gene-list "${GENE_LIST}" \
     --gene-sets-file data/gene_sets.json \
-    --max-group-size 500 \
-    --min-pathway-size 50 \
-    --pathway-preference specific \
+    --hierarchy-dir data/hierarchy \
+    --grouping hierarchical \
+    --cut union \
+    --min-group-size 250 \
+    --go-groups 4 \
     --drop-unassigned \
     --out "${VOCAB_OUT}"
 

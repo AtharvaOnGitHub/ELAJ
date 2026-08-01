@@ -1,0 +1,20 @@
+name: first_run
+description: >
+  First full training run on the 11-study corpus (wang_2022 and zhang_2022
+  excluded).  Identical to full_model apart from a halved batch size and its own
+  output directory, so full_model stays the canonical reference config.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/first_run/
+seed: 24
+
+overrides:
+  # Each GroupEncoder self-attends over its group's genes, so the retained
+  # attention is (B, n_heads, G_k+1, G_k+1) per layer.  Summed over the 45
+  # groups of the current vocabulary that is ~45.7 GB at batch 256 and ~22.9 GB
+  # at 128 — the halving is headroom, not a tuning choice.  Raise it once a run
+  # has reported real peak memory.
+  training.batch_size: 128

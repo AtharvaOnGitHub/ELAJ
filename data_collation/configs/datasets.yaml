@@ -205,6 +205,22 @@ datasets:
     rds_file: GSE266265_EndoAtlas.rds    # 38.9 GB — downloaded separately
     tissue_types: [eutopic, control]
     has_cycle_phase: true
+    # 60 samples: 35 endometriosis, 25 non-endometriosis, all endometrial biopsy.
+    # EndometriosisStatus comes straight from the Seurat meta.data (Endo / CTL).
+    tissue_ontology:
+      default: "UBERON:0001295"   # endometrium — biopsy in every sample
+    disease_ontology:
+      column: "EndometriosisStatus"
+      value_map:
+        "Endo": "MONDO:0005133"
+        "CTL": "PATO:0000461"
+      default: "MONDO:0005133"
+    status_config:
+      column: "EndometriosisStatus"
+      value_map:
+        "Endo": "eutopic"
+        "CTL": "control"
+      default: "other"
 
   # ── CNGBdb / Figshare — requires manual download ────────────────────────────
   # Raw scRNA data: CNGBdb CNP0006183 (scRNA) and CNP0006170 (Stereo-seq).

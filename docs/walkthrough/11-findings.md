@@ -25,7 +25,7 @@ string path and silently coded every cell `"other"`. `_uncategorise`
 ([dataset.py:110](../../src/endo_model/data/dataset.py:110)) unwraps to the
 categories' dtype first so the integer check asks about the values.
 
-### A1 — ✅ FIXED (`c8a3f4b`) — `DataLoader` never set `num_workers`
+### A1 — ✅ FIXED (`99345e9`) — `DataLoader` never set `num_workers`
 
 [`train.py:120`](../../src/scripts/train.py:120) constructed both loaders with no
 `num_workers`, so it defaulted to **0**: all data preparation ran in the main
@@ -133,7 +133,7 @@ missing feature — it looks configured.
 The reconstruction/KL balance is the main thing you would tune in a VAE, and it
 currently requires editing `composite.py`.
 
-### B3 — ✅ FIXED (`c8a3f4b`) — `metrics.csv` dropped the per-term loss breakdown
+### B3 — ✅ FIXED (`99345e9`) — `metrics.csv` dropped the per-term loss breakdown
 
 `Trainer.fit` recorded only `train_loss` / `val_loss`; `nb`, `kl_gauss`,
 `kl_vmf`, `beta_kl`, `dab`, `cce` were computed, averaged, and discarded —

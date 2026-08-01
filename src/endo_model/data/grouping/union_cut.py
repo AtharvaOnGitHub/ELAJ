@@ -25,9 +25,10 @@ median; the ceiling only trims the tail, but that tail is expensive — the grou
 encoder runs self-attention over a group's genes, so cost is quadratic in group
 size and one oversized group can dominate the whole model's memory.
 
-Step 5 merges on **size, not biological similarity** — it pairs the two
-smallest groups so the result stays balanced, rather than dissolving small
-groups into a large one.  A merged group's id is its constituents joined by
+Step 5 merges by **hierarchy proximity**, not by size alone: the smallest group
+goes to whichever partner shares the most specific common ancestor with it, so a
+merged group remains one coherent branch and can be named after that ancestor.
+Size only breaks ties.  A merged group's id is its constituents joined by
 `MERGE_SEP`, so the caller can recover and label them.
 """
 
@@ -37,6 +38,7 @@ import logging
 from typing import Optional
 
 from endo_model.data.grouping.frontier import (
+    ancestors,
     assign_most_specific,
     expand_largest,
     node_size,
@@ -108,7 +110,7 @@ def union_cut(
             break
 
     groups = assign_most_specific(hierarchy, frontier, leftovers, universe)
-    merged = merge_undersized(groups, min_size)
+    merged = merge_undersized(groups, min_size, hierarchy, universe, max_size)
 
     logger.info(
         "union_cut(%s): %d genes -> %d groups (min_size=%s, max_size=%s, "
@@ -120,14 +122,24 @@ def union_cut(
 
 
 def merge_undersized(
-    groups: dict[str, set[str]], min_size: int
+    groups: dict[str, set[str]],
+    min_size: int,
+    hierarchy: Optional[Hierarchy] = None,
+    universe: Optional[set[str]] = None,
+    max_size: Optional[int] = None,
 ) -> dict[str, set[str]]:
     """Union groups below `min_size` into each other until all clear the floor.
 
-    Repeatedly takes the two smallest groups and unions them.  Pairing the two
-    smallest (rather than folding small groups into the largest) keeps the size
-    distribution tight — otherwise one group absorbs every stray and the median
-    barely moves.
+    Repeatedly takes the smallest group and merges it into the best partner.
+    "Best" prefers a **close relative** — the candidate whose nearest common
+    ancestor is the most specific — so a merged group stays a coherent branch of
+    the hierarchy and can be named after that ancestor.  Pairing purely on size
+    is what produced groups like "toll_like_receptor_cascades + 12 unrelated
+    pathways", whose name describes only one thirteenth of its contents.
+
+    Pass `hierarchy` (with the `universe` it was cut against) to get relatedness
+    ranking; without it the function falls back to pairing the two smallest,
+    which is still balanced but biologically arbitrary.
 
     Stops when the smallest group clears `min_size`, or when a single group
     remains — a floor larger than the whole universe cannot be satisfied, and
@@ -136,14 +148,68 @@ def merge_undersized(
     work = {gid: set(genes) for gid, genes in groups.items()}
     parts = {gid: [gid] for gid in work}
 
+    ancestry: Optional[dict[str, set[str]]] = None
+    if hierarchy is not None:
+        ancestry = {gid: ancestors(hierarchy, gid) for gid in work}
+
     while len(work) > 1:
-        order = sorted(work, key=lambda g: (len(work[g]), g))
-        smallest, next_smallest = order[0], order[1]
+        smallest = min(work, key=lambda g: (len(work[g]), g))
         if len(work[smallest]) >= min_size:
             break
-        work[next_smallest] |= work.pop(smallest)
-        parts[next_smallest] = parts.pop(next_smallest) + parts.pop(smallest)
+
+        partner = _pick_partner(
+            work, smallest, ancestry, hierarchy, universe, max_size
+        )
+        work[partner] |= work.pop(smallest)
+        parts[partner] = parts.pop(partner) + parts.pop(smallest)
+        if ancestry is not None:
+            ancestry[partner] &= ancestry.pop(smallest)
 
     return {
         MERGE_SEP.join(sorted(parts[gid])): genes for gid, genes in work.items()
     }
+
+
+def _pick_partner(
+    work: dict[str, set[str]],
+    smallest: str,
+    ancestry: Optional[dict[str, set[str]]],
+    hierarchy: Optional[Hierarchy],
+    universe: Optional[set[str]],
+    max_size: Optional[int],
+) -> str:
+    """Choose which group `smallest` merges into.
+
+    Ranked, in order:
+      1. keeps the result within `max_size` — the ceiling is a hard memory
+         constraint, relatedness is a quality preference, so this outranks it;
+      2. shares an ancestor with `smallest` at all;
+      3. that shared ancestor is as specific as possible;
+      4. is itself small, keeping the size distribution tight;
+      5. node id, for determinism.
+    """
+    candidates = [g for g in work if g != smallest]
+
+    if ancestry is None or hierarchy is None or universe is None:
+        return min(candidates, key=lambda g: (len(work[g]), g))
+
+    def rank(candidate: str) -> tuple:
+        merged_size = len(work[candidate]) + len(work[smallest])
+        overflows = max_size is not None and merged_size > max_size
+
+        shared = ancestry[smallest] & ancestry[candidate]
+        if not shared:
+            # Unrelated: sorts after every relative, and its ancestor slot is
+            # inert since the flag before it already decided the comparison.
+            return (overflows, True, 0, len(work[candidate]), candidate)
+
+        nca = min(shared, key=lambda n: (node_size(hierarchy, n, universe), n))
+        return (
+            overflows,
+            False,
+            node_size(hierarchy, nca, universe),
+            len(work[candidate]),
+            candidate,
+        )
+
+    return min(candidates, key=rank)

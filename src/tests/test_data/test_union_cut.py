@@ -184,6 +184,83 @@ def test_floor_larger_than_universe_collapses_to_one_group():
     assert len(next(iter(groups.values()))) == len(_universe())
 
 
+def _two_branches():
+    """Two disjoint branches, each with a small and a large child.
+
+    Size-only merging pairs the two smalls across branches; sibling merging
+    keeps each small with its own branch.
+    """
+    return _hierarchy(
+        "branched",
+        {"immune": ["innate", "adaptive"], "metab": ["lipid", "amino"]},
+        {
+            "innate": [f"I{i}" for i in range(3)],
+            "adaptive": [f"A{i}" for i in range(9)],
+            "lipid": [f"L{i}" for i in range(3)],
+            "amino": [f"M{i}" for i in range(9)],
+        },
+    )
+
+
+def _branch_universe():
+    return (
+        {f"I{i}" for i in range(3)} | {f"A{i}" for i in range(9)}
+        | {f"L{i}" for i in range(3)} | {f"M{i}" for i in range(9)}
+    )
+
+
+def test_merge_prefers_a_sibling_over_a_smaller_stranger():
+    """The whole point: relatives merge, even when a stranger is smaller."""
+    h, u = _two_branches(), _branch_universe()
+    groups = union_cut(h, u, min_size=6, max_size=None, expand_to=4)
+
+    merged = {frozenset(k.split(MERGE_SEP)) for k in groups}
+    assert frozenset({"innate", "adaptive"}) in merged
+    assert frozenset({"lipid", "amino"}) in merged
+
+
+def test_size_only_merge_would_have_crossed_branches():
+    """Guards the contrast: without the hierarchy, the two smalls pair up."""
+    groups = {
+        "innate": {f"I{i}" for i in range(3)},
+        "adaptive": {f"A{i}" for i in range(9)},
+        "lipid": {f"L{i}" for i in range(3)},
+        "amino": {f"M{i}" for i in range(9)},
+    }
+    merged = merge_undersized(groups, min_size=6)
+    assert any(
+        set(k.split(MERGE_SEP)) == {"innate", "lipid"} for k in merged
+    ), "size-only merging crosses branches, which is what sibling merging fixes"
+
+
+def test_merge_respects_the_ceiling_over_relatedness():
+    """A sibling that would overflow max_size loses to one that fits."""
+    h = _hierarchy(
+        "h",
+        {"root": ["huge", "small", "mid"]},
+        {
+            "huge": [f"H{i}" for i in range(20)],
+            "mid": [f"D{i}" for i in range(6)],
+            "small": ["S0"],
+        },
+    )
+    u = {f"H{i}" for i in range(20)} | {f"D{i}" for i in range(6)} | {"S0"}
+    groups = union_cut(h, u, min_size=3, max_size=10, expand_to=3)
+
+    for genes in groups.values():
+        assert len(genes) <= 10 or len(genes) == 20, "only the unsplittable leaf"
+    assert any(
+        set(k.split(MERGE_SEP)) == {"small", "mid"} for k in groups
+    ), "small merged with mid, not with the sibling it would have overflowed"
+
+
+def test_merge_falls_back_to_size_without_a_hierarchy():
+    """merge_undersized stays usable standalone."""
+    groups = {"a": {1, 2}, "b": {3, 4}, "c": set(range(10, 30))}
+    merged = merge_undersized(groups, min_size=4)
+    assert any(set(k.split(MERGE_SEP)) == {"a", "b"} for k in merged)
+
+
 def test_merge_pairs_the_two_smallest():
     """Folding strays into the largest group would leave the median unmoved."""
     groups = {

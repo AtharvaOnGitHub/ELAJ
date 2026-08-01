@@ -13,6 +13,7 @@ their handling of multi-parent overlap or of directly-annotated genes.
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Optional
 
 from endo_model.data.grouping.hierarchy import Hierarchy
 
@@ -66,6 +67,47 @@ def expand_node(
     frontier.update(children)
     if leftover:
         leftovers[f"{node}{OTHER_SUFFIX}"] = leftover
+
+
+def ancestors(hierarchy: Hierarchy, node: str) -> set[str]:
+    """`node` plus every node that reaches it — a node is its own ancestor.
+
+    A "<node>::other" residual sits at `node` itself, so it inherits that node's
+    ancestry: the leftover genes of a pathway are as closely related to that
+    pathway's siblings as any of its children are.
+    """
+    base = node[: -len(OTHER_SUFFIX)] if node.endswith(OTHER_SUFFIX) else node
+
+    seen = {base}
+    stack = list(hierarchy.parents.get(base, ()))
+    while stack:
+        parent = stack.pop()
+        if parent in seen:
+            continue
+        seen.add(parent)
+        stack.extend(hierarchy.parents.get(parent, ()))
+    return seen
+
+
+def nearest_common_ancestor(
+    hierarchy: Hierarchy, nodes: list[str], universe: set[str]
+) -> Optional[str]:
+    """Smallest node reaching every node in `nodes`, or None if they share none.
+
+    Smallest means most specific: the tightest category that still covers the
+    whole set.  Returns None for nodes under different roots, which is a real
+    outcome in a multi-rooted hierarchy and not an error.
+    """
+    shared: Optional[set[str]] = None
+    for node in nodes:
+        node_ancestors = ancestors(hierarchy, node)
+        shared = node_ancestors if shared is None else shared & node_ancestors
+        if not shared:
+            return None
+
+    if not shared:
+        return None
+    return min(shared, key=lambda n: (node_size(hierarchy, n, universe), n))
 
 
 def expand_largest(

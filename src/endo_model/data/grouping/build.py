@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 
-from endo_model.data.grouping.frontier import OTHER_SUFFIX
+from endo_model.data.grouping.frontier import OTHER_SUFFIX, nearest_common_ancestor
 from endo_model.data.grouping.hierarchy import Hierarchy
 from endo_model.data.grouping.strategies import CutStrategy, GO_PHASE, REACTOME_PHASE
 from endo_model.data.grouping.union_cut import MERGE_SEP
@@ -39,12 +39,24 @@ def _node_label(hierarchy: Hierarchy, node_id: str) -> str:
     return f"{label}_other" if is_other else label
 
 
-def _pretty_group_name(hierarchy: Hierarchy, group_id: str, prefix: str) -> str:
+def _pretty_group_name(
+    hierarchy: Hierarchy, group_id: str, prefix: str, universe: set[str]
+) -> str:
     """Human-readable group name, including for merged (unioned) groups.
 
-    A merged group id is its constituents joined by MERGE_SEP.  Naming every
-    constituent gets unwieldy past a couple of them, so longer merges are
-    abbreviated to the first label plus a count.
+    A merged group id is its constituents joined by MERGE_SEP.  Up to
+    _MAX_NAMED_PARTS the constituents are named outright.  Beyond that, the
+    group is named after its nearest common ancestor plus a pathway count —
+    "<ancestor>_13_pathways" rather than "<first_label>_plus_12_more".
+
+    The count is not decoration.  A merge of thirteen immune pathways is *part
+    of* the immune system, not the whole of it — sibling branches usually sit in
+    other groups — so naming it "immune_system" outright would overclaim.  The
+    count says "thirteen pathways within immune system", which is what it is.
+
+    Falls back to the first label plus a count when the constituents share no
+    ancestor, which happens in a multi-rooted hierarchy when the floor pass runs
+    out of relatives to merge with.
     """
     parts = group_id.split(MERGE_SEP)
     labels = [_node_label(hierarchy, p) for p in parts]
@@ -53,6 +65,10 @@ def _pretty_group_name(hierarchy: Hierarchy, group_id: str, prefix: str) -> str:
         return f"{prefix}_{labels[0]}"
     if len(labels) <= _MAX_NAMED_PARTS:
         return f"{prefix}_{'_and_'.join(labels)}"
+
+    ancestor = nearest_common_ancestor(hierarchy, parts, universe)
+    if ancestor is not None:
+        return f"{prefix}_{_slug(hierarchy.label(ancestor))}_{len(labels)}_pathways"
     return f"{prefix}_{labels[0]}_plus_{len(labels) - 1}_more"
 
 
@@ -91,7 +107,9 @@ def build_hierarchical_groups(
     reactome_cut = strategy.cut(reactome, universe, REACTOME_PHASE)
     reactome_assigned: set[str] = set()
     for group_id, genes in reactome_cut.items():
-        name = _dedupe(_pretty_group_name(reactome, group_id, "reactome"), used_names)
+        name = _dedupe(
+            _pretty_group_name(reactome, group_id, "reactome", universe), used_names
+        )
         groups[name] = sorted(genes)
         reactome_assigned |= genes
 
@@ -100,7 +118,9 @@ def build_hierarchical_groups(
     go_cut = strategy.cut(go, residual, GO_PHASE)
     go_assigned: set[str] = set()
     for group_id, genes in go_cut.items():
-        name = _dedupe(_pretty_group_name(go, group_id, "go"), used_names)
+        name = _dedupe(
+            _pretty_group_name(go, group_id, "go", residual), used_names
+        )
         groups[name] = sorted(genes)
         go_assigned |= genes
 

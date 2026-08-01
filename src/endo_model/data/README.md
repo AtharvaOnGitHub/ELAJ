@@ -39,10 +39,27 @@ every group under the bound, none near it.
 
 `union_cut` inverts the control.  It starts at the hierarchy roots (Reactome's
 top-level categories, which are already the intended granularity) and takes
-the **set union** of groups that fall below `min_size`, pairing the two smallest
-each time so the distribution stays balanced rather than letting one group
-absorb every stray.  Because only undersized groups move, the median settles
-near 2× the floor.
+the **set union** of groups that fall below `min_size`.  Because only undersized
+groups move, the median settles near 2× the floor.
+
+### Merging follows the hierarchy, not just size
+
+An undersized group merges into the partner sharing the **most specific common
+ancestor** with it; size only breaks ties, and the ceiling outranks both.
+
+Pairing purely on size — merge the two smallest, repeat — keeps the size
+distribution tight but produces biologically meaningless groups.  A real build
+gave `toll_like_receptor_cascades + 12 unrelated pathways`, a name describing
+one thirteenth of its contents.  Since a group is a unit of interpretation (one
+`[GROUP_CLS]` token, one latent), a name that misdescribes it is worse than an
+opaque one.
+
+Merged groups are named for their common ancestor plus a count —
+`reactome_immune_system_13_pathways`.  The count matters: thirteen immune
+pathways are *part of* the immune system, and sibling branches usually live in
+other groups, so the bare ancestor name would overclaim.  Two-part merges are
+named outright (`a_and_b`), and constituents sharing no ancestor fall back to
+`first_plus_N_more`.
 
 `union_cut` also takes a `max_size` ceiling, applied *before* assignment by
 descending any node that rolls up more than that.  The two bounds do different

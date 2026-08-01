@@ -355,3 +355,57 @@ def test_numeric_tissue_levels_still_load(two_study_setup):
     stacked = np.stack([ds[i]["tissue_levels"] for i in range(len(ds))])
     # Fixture draws tissue_type from range(0, 6); at least one non-zero must survive.
     assert stacked[:, 2].max() > 0
+
+
+# ---------------------------------------------------------------------------
+# disease_status dtype handling
+#
+# AnnData stores every string obs column as a pandas Categorical, so this is
+# the dtype the real corpus actually presents — not an edge case.
+# ---------------------------------------------------------------------------
+
+
+def _codes(values):
+    import pandas as pd
+    from endo_model.data.dataset import _disease_status_codes
+    return _disease_status_codes(pd.DataFrame({"disease_status": values}), "t").tolist()
+
+
+def test_categorical_disease_status_is_decoded():
+    """np.issubdtype raises TypeError on a CategoricalDtype — the real crash."""
+    import pandas as pd
+    assert _codes(pd.Categorical(["eutopic", "control", "ectopic"])) == [0, 2, 1]
+
+
+def test_single_category_disease_status():
+    """shih_2022 presents exactly this: one category across every cell."""
+    import pandas as pd
+    assert _codes(pd.Categorical(["eutopic"] * 3)) == [0, 0, 0]
+
+
+def test_categorical_of_integers_kept_as_codes():
+    """Guards the fix itself: is_integer_dtype answers False here, so relying
+    on it alone would send real codes down the string path and yield all 3s."""
+    import pandas as pd
+    assert _codes(pd.Categorical([0, 2, 1])) == [0, 2, 1]
+
+
+def test_plain_object_and_integer_columns_unchanged():
+    assert _codes(["eutopic", "control", "ectopic"]) == [0, 2, 1]
+    assert _codes(np.array([0, 2, 1], dtype=np.int64)) == [0, 2, 1]
+
+
+def test_unrecognised_category_maps_to_other():
+    import pandas as pd
+    assert _codes(pd.Categorical(["eutopic", "BOGUS", "control"])) == [0, 3, 2]
+
+
+def test_case_and_whitespace_normalised():
+    assert _codes([" Eutopic ", "CONTROL", "ectopic"]) == [0, 2, 1]
+
+
+def test_missing_column_codes_all_other():
+    import pandas as pd
+    from endo_model.data.dataset import _disease_status_codes
+    obs = pd.DataFrame(index=range(3))
+    assert _disease_status_codes(obs, "t").tolist() == [3, 3, 3]

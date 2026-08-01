@@ -106,6 +106,26 @@ def _age_vector(obs) -> np.ndarray:
     return pd.to_numeric(obs["age"], errors="coerce").to_numpy(dtype=np.float64)
 
 
+def _uncategorise(column):
+    """Return `column` with any Categorical dtype replaced by its values' dtype.
+
+    AnnData stores every string obs column as a pandas Categorical, and numpy
+    cannot interpret a CategoricalDtype — `np.issubdtype` raises TypeError on
+    one.  Unwrapping to the categories' own dtype is what lets the caller ask
+    "is this integer?" and get an answer about the *values* rather than about
+    the container.
+
+    `pandas.api.types.is_integer_dtype` is not a substitute: it answers False
+    for a Categorical of integers, which would send real codes down the string
+    path and silently map every cell to "other".
+    """
+    import pandas as pd
+
+    if isinstance(column.dtype, pd.CategoricalDtype):
+        return column.astype(column.cat.categories.dtype)
+    return column
+
+
 def _disease_status_codes(obs, study_name: str) -> np.ndarray:
     """Per-cell disease status as int64 codes (see DISEASE_STATUS_TO_INT).
 
@@ -123,7 +143,7 @@ def _disease_status_codes(obs, study_name: str) -> np.ndarray:
         )
         return np.full(n, other_code, dtype=np.int64)
 
-    column = obs["disease_status"]
+    column = _uncategorise(obs["disease_status"])
     # Already-integer columns are taken as codes directly.
     if np.issubdtype(column.dtype, np.integer):
         return column.to_numpy(dtype=np.int64)

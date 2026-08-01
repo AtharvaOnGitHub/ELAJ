@@ -11,6 +11,7 @@ Checks performed:
   2. studies.csv      — required columns, contiguous ids, resolvable paths
   3. per-study h5ad   — cell/gene counts, overlap with the vocabulary,
                         patient_id presence, disease_status label values
+  4. patient_id       — uniqueness *across* studies, not merely within one
 """
 
 from __future__ import annotations
@@ -78,14 +79,20 @@ def check_studies_csv(path: Path, root: Path) -> list:
     return studies
 
 
-def check_study_h5ad(study, root: Path, vocab: GeneVocabulary | None) -> None:
-    """Report one study's shape, vocabulary overlap, and obs label values."""
+def check_study_h5ad(
+    study, root: Path, vocab: GeneVocabulary | None
+) -> set[str]:
+    """Report one study's shape, vocabulary overlap, and obs label values.
+
+    Returns the study's patient_id set, so the caller can check for collisions
+    across studies.
+    """
     path = Path(study.path)
     if not path.is_absolute():
         path = root / study.path
     if not path.exists():
         print(f"    {study.name:<28} SKIPPED (path does not resolve)")
-        return
+        return set()
 
     import anndata
 
@@ -95,15 +102,16 @@ def check_study_h5ad(study, root: Path, vocab: GeneVocabulary | None) -> None:
     in_vocab = (
         sum(1 for g in adata.var_names if g in vocab) if vocab is not None else 0
     )
-    pct = 100.0 * in_vocab / max(n_genes, 1)
+    of_vocab = 100.0 * in_vocab / vocab.vocab_size if vocab is not None else 0.0
 
     has_pid = "patient_id" in adata.obs.columns
-    n_patients = (
-        adata.obs["patient_id"].astype(str).nunique() if has_pid else 0
+    patients = (
+        set(adata.obs["patient_id"].astype(str)) if has_pid else set()
     )
 
     print(f"    {study.name:<28} cells={n_cells:>8}  genes={n_genes:>6}  "
-          f"in_vocab={in_vocab:>6} ({pct:4.1f}%)  patients={n_patients:>4}"
+          f"in_vocab={in_vocab:>6} ({of_vocab:4.1f}% of D)  "
+          f"patients={len(patients):>4}"
           f"{'' if has_pid else '   MISSING patient_id'}")
 
     if "disease_status" in adata.obs.columns:
@@ -115,10 +123,46 @@ def check_study_h5ad(study, root: Path, vocab: GeneVocabulary | None) -> None:
         print(f"        disease_status: {summary}")
         if unknown:
             print(f"        UNRECOGNISED  : {sorted(unknown)}  -> silently 'other'")
+        declared = {t for t in study.tissue_types if t in DISEASE_STATUS_TO_INT}
+        if declared and not declared & set(counts):
+            print(f"        MISMATCH      : studies.csv declares {sorted(declared)} "
+                  f"but no cell carries any of them")
     else:
         print("        disease_status: MISSING -> every cell becomes 'other'")
 
     adata.file.close()
+    return patients
+
+
+def check_patient_id_collisions(per_study: dict[str, set[str]]) -> None:
+    """Verify patient_id is unique across studies, not merely within one.
+
+    The split pools every patient_id into one global set.  Two studies reusing
+    a label ("P1", "patient_1") would be treated as the same person: their
+    cells are forced into the same split, and the split sizes are wrong.
+    """
+    print("\n[4] patient_id uniqueness across studies")
+    total = sum(len(p) for p in per_study.values())
+    union = set().union(*per_study.values()) if per_study else set()
+
+    print(f"    sum of per-study patients : {total}")
+    print(f"    globally unique ids       : {len(union)}")
+
+    if len(union) == total:
+        print("    no collisions  OK")
+        return
+
+    print(f"    COLLISION — {total - len(union)} id(s) shared between studies")
+    names = list(per_study)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            shared = per_study[a] & per_study[b]
+            if shared:
+                sample = sorted(shared)[:5]
+                more = f" (+{len(shared) - 5} more)" if len(shared) > 5 else ""
+                print(f"      {a} & {b}: {sample}{more}")
+    print("    Prefix each study's patient_id with the study name before "
+          "training, or the split will merge distinct people.")
 
 
 def main() -> None:
@@ -146,8 +190,10 @@ def main() -> None:
 
     if studies and not args.skip_h5ad:
         print("\n[3] per-study .h5ad")
-        for study in studies:
-            check_study_h5ad(study, root, vocab)
+        per_study = {
+            s.name: check_study_h5ad(s, root, vocab) for s in studies
+        }
+        check_patient_id_collisions({k: v for k, v in per_study.items() if v})
     elif args.skip_h5ad:
         print("\n[3] per-study .h5ad — skipped (--skip-h5ad)")
 

@@ -68,6 +68,11 @@ class TrainingConfig:
     kl_annealing: KLAnnealingConfig = field(default_factory=KLAnnealingConfig)
     resume_from_checkpoint: Optional[str] = None
 
+    # DataLoader worker processes.  None auto-sizes to the job's CPU allocation
+    # (see utils/resources.py); 0 loads in the main process, which serialises
+    # data preparation against the training step.
+    num_workers: Optional[int] = None
+
     @classmethod
     def from_dict(cls, d: dict) -> "TrainingConfig":
         return cls(
@@ -80,4 +85,7 @@ class TrainingConfig:
             val_check_interval=int(d.get("val_check_interval", 1)),
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
             resume_from_checkpoint=d.get("resume_from_checkpoint"),
+            num_workers=(
+                int(d["num_workers"]) if d.get("num_workers") is not None else None
+            ),
         )

@@ -10,6 +10,13 @@ scheduler:
 
 batch_size: 256
 max_epochs: 100
+
+# DataLoader worker processes.  null auto-sizes to the job's CPU allocation
+# (cores visible to the process, minus one for the training step itself), so the
+# same config is correct whether SLURM grants 4 cores or 16.  Set 0 to load in
+# the main process — only useful for debugging, since it serialises the dense
+# per-cell count rebuild against the GPU step.
+num_workers: null
 grad_clip_norm: 1.0
 early_stop_patience: 10
 val_check_interval: 1

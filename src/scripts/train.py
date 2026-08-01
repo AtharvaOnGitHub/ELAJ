@@ -103,10 +103,17 @@ def main() -> None:
         len(train_dataset), len(val_dataset),
     )
 
+    # ── Device ────────────────────────────────────────────────────────────────
+    # Resolved before the DataLoaders so pin_memory can be set correctly —
+    # pinning is only useful for host-to-GPU transfer.
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Device: %s", device)
+
     # ── DataLoaders ───────────────────────────────────────────────────────────
     from torch.utils.data import DataLoader
     from endo_model.data.collate import make_collate_fn
     from endo_model.data.samplers import PerStudyBatchSampler
+    from endo_model.utils.resources import available_cpus, dataloader_workers
 
     collate = make_collate_fn(vocab)
     train_sampler = PerStudyBatchSampler(
@@ -117,13 +124,27 @@ def main() -> None:
         val_dataset.study_ids, train_cfg.batch_size,
         shuffle=False, seed=exp_cfg.seed,
     )
-    train_loader = DataLoader(train_dataset, batch_sampler=train_sampler, collate_fn=collate)
-    val_loader = DataLoader(val_dataset, batch_sampler=val_sampler, collate_fn=collate)
+
+    # StudyPanel keeps counts sparse and rebuilds a dense (vocab_size,) vector
+    # per cell in __getitem__, so collation is CPU-heavy.  With num_workers=0
+    # that work serialises against the training step and the GPU waits for it.
+    n_workers = dataloader_workers(train_cfg.num_workers)
+    logger.info(
+        "DataLoader workers: %d (of %d cores available)", n_workers, available_cpus()
+    )
+    loader_kwargs = dict(
+        collate_fn=collate,
+        num_workers=n_workers,
+        pin_memory=(device.type == "cuda"),
+        # Workers hold the dataset, whose per-study panels are the expensive
+        # part to re-fork; keeping them alive avoids paying that every epoch.
+        persistent_workers=n_workers > 0,
+    )
+    train_loader = DataLoader(train_dataset, batch_sampler=train_sampler, **loader_kwargs)
+    val_loader = DataLoader(val_dataset, batch_sampler=val_sampler, **loader_kwargs)
 
     # ── Model ─────────────────────────────────────────────────────────────────
     from endo_model.model.endo_model import EndoFoundationModel
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Device: %s", device)
 
     model = EndoFoundationModel(vocab, model_cfg).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

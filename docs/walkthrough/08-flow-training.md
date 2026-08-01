@@ -72,10 +72,19 @@ train_sampler = PerStudyBatchSampler(train_dataset.study_ids, batch_size, shuffl
 val_sampler   = PerStudyBatchSampler(val_dataset.study_ids,   batch_size, shuffle=False, seed=exp_cfg.seed)
 ```
 
-⚠ Neither `DataLoader` sets `num_workers`, so it defaults to **0** — all
-collation, including `StudyPanel.counts()` for every cell, runs in the main
-process, synchronously, blocking the GPU. This is probably the single biggest
-throughput problem in the run. See [11](11-findings.md).
+Worker count comes from `dataloader_workers(train_cfg.num_workers)`
+([resources.py:33](../../src/endo_model/utils/resources.py:33)). `None` — the
+default — auto-sizes to `available_cpus() - 1`.
+
+> **Decision:** `available_cpus` reads `os.sched_getaffinity`, not
+> `os.cpu_count()`. Under SLURM the former returns `--cpus-per-task`; the latter
+> reports every core on a shared 72-core node and would oversubscribe the
+> allocation, which on a busy node is slower than not parallelising at all.
+
+`pin_memory` follows the device (pinning only helps host→GPU transfer), which is
+why device resolution moved above the loaders. `persistent_workers` keeps workers
+alive across epochs so the dataset is not re-forked each time; `set_epoch` still
+works because the sampler lives in the main process and only ships index lists.
 
 ### 9. Device + model — [`:124`](../../src/scripts/train.py:124)
 
@@ -285,10 +294,18 @@ is how `evaluate.py` and `infer.py` load weights without constructing one.
 | `metrics.csv` | `_write_metrics_csv` — one row per epoch |
 | `run_config.json` | `_save_run_config` — all four resolved configs |
 
-⚠ `history` only has `train_loss` and `val_loss` — the per-term breakdown (`nb`,
-`kl_gauss`, `dab`, `beta_kl`) is computed, logged to the console, stored in the
-checkpoint `extra`, and then **dropped** from `metrics.csv`. See
-[11](11-findings.md).
+`history` carries `train_loss` / `val_loss` (the composite totals) plus every
+other loss term under `train_`/`val_` prefixes, folded in by `_record`
+([trainer.py:194](../../src/endo_model/training/trainer.py:194)). So
+`metrics.csv` has `train_nb`, `train_kl_gauss`, `train_beta_kl`, `train_dab`, and
+their `val_` counterparts.
+
+`"total"` is deliberately skipped by `_record` — it is already `train_loss`, and
+a duplicate column reads as though the two could disagree.
+
+⚠ With `val_check_interval > 1` the val columns are shorter and
+`_write_metrics_csv` pairs them **positionally**, so val row *n* is not train
+epoch *n*. Harmless at the current setting of 1. See [11](11-findings.md).
 
 ---
 

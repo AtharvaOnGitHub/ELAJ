@@ -1,7 +1,10 @@
 # 11 — Findings
 
-Defects and fragilities found while writing this walkthrough. **None are fixed.**
-Each was verified against the code, not inferred.
+Defects and fragilities found while writing this walkthrough. Each was verified
+against the code, not inferred.
+
+**Fixed so far:** A1, B3, and the categorical-`disease_status` crash (which was
+found by running, not by reading). Everything else stands.
 
 Ranked by how much they matter to the run that is queued now.
 
@@ -9,28 +12,41 @@ Ranked by how much they matter to the run that is queued now.
 
 ## A. Affects the run currently queued
 
-### A1 — `DataLoader` never sets `num_workers`; the GPU is starved
+### A0 — ✅ FIXED (`050265f`) — categorical `disease_status` crashed training
 
-[`train.py:120`](../../src/scripts/train.py:120)
+`np.issubdtype` raises `TypeError` on a `CategoricalDtype`, and AnnData stores
+every string obs column as a Categorical. Training died on the first study it
+loaded.
 
-```python
-train_loader = DataLoader(train_dataset, batch_sampler=train_sampler, collate_fn=collate)
-```
+Worth recording because the obvious fix is wrong:
+`pandas.api.types.is_integer_dtype` does not raise, but answers `False` for a
+Categorical **of integers** — which would have routed genuine codes down the
+string path and silently coded every cell `"other"`. `_uncategorise`
+([dataset.py:110](../../src/endo_model/data/dataset.py:110)) unwraps to the
+categories' dtype first so the integer check asks about the values.
 
-`num_workers` defaults to **0** — all data preparation runs in the main process,
-synchronously, between GPU steps. `grep -rn "num_workers" src/` returns nothing.
+### A1 — ✅ FIXED (`c8a3f4b`) — `DataLoader` never set `num_workers`
 
-That preparation is not trivial: `StudyPanel.counts()` allocates and fills a
+[`train.py:120`](../../src/scripts/train.py:120) constructed both loaders with no
+`num_workers`, so it defaulted to **0**: all data preparation ran in the main
+process, synchronously, between GPU steps.
+
+That preparation is not trivial — `StudyPanel.counts()` allocates and fills a
 15,495-wide float32 array **per cell**, so a batch of 128 does 128 allocations
 plus scatters, then `collate_fn` stacks them and computes 45 group masks. All of
-it while the A100 idles.
+it while the A100 idled.
 
-The sbatch script requests 8–16 CPUs and its comment explains why collation is
-CPU-bound — but nothing passes them to the DataLoader.
+Now auto-sized by [`utils/resources.py`](../../src/endo_model/utils/resources.py),
+which reads `os.sched_getaffinity` — the cpuset SLURM pinned the job to — rather
+than `os.cpu_count()`, which would report all 72 cores of a shared node and
+oversubscribe. `pin_memory` follows the device; `persistent_workers` avoids
+re-forking the dataset every epoch. Overridable via `training.num_workers`.
 
-**Fix:** `num_workers=8, pin_memory=True, persistent_workers=True`. The
-`partial`-based `make_collate_fn` is already picklable, so workers will work
-as-is. This is likely the largest single throughput win available.
+**Watch RSS on the first run.** Workers fork the dataset, and `_records` is
+~1.65 M Python objects (finding C4) whose refcount churn defeats copy-on-write.
+Bounded by roughly one extra copy of the record list across all workers, which
+should sit comfortably inside the 180 GB request — but it is the thing to check
+if the job is OOM-killed rather than crashing.
 
 ### A2 — `global_step` is not restored on resume; both schedules restart
 
@@ -117,17 +133,25 @@ missing feature — it looks configured.
 The reconstruction/KL balance is the main thing you would tune in a VAE, and it
 currently requires editing `composite.py`.
 
-### B3 — `metrics.csv` drops the per-term loss breakdown
+### B3 — ✅ FIXED (`c8a3f4b`) — `metrics.csv` dropped the per-term loss breakdown
 
-`Trainer.fit` builds `history = {"train_loss": [...], "val_loss": [...]}` only
-([trainer.py:86](../../src/endo_model/training/trainer.py:86)). `nb`,
-`kl_gauss`, `kl_vmf`, `beta_kl`, `dab`, `cce` are all computed and averaged, then
-discarded — they survive only in console logs and the checkpoint `extra` dict.
+`Trainer.fit` recorded only `train_loss` / `val_loss`; `nb`, `kl_gauss`,
+`kl_vmf`, `beta_kl`, `dab`, `cce` were computed, averaged, and discarded —
+surviving only in console logs and the checkpoint `extra` dict. You could not
+plot "did KL collapse the posterior" or "did the adversary hold", which are the
+first-run questions.
 
-You cannot plot "did KL collapse the posterior" or "did the adversary hold" from
-`metrics.csv`. Those are exactly the first-run questions.
+`_record` ([trainer.py:194](../../src/endo_model/training/trainer.py:194)) now
+folds every term into history under `train_`/`val_` prefixes. `"total"` is
+skipped — it is already `train_loss`/`val_loss`, and a duplicate column reads as
+though the two could disagree.
 
-**Fix:** append `train_metrics` and `val_metrics` wholesale into `history`.
+⚠ **Related, still open:** with `val_check_interval > 1` the val lists are
+shorter than the train lists, and `_write_metrics_csv` pairs them **by
+position** — so row *n* would show train epoch *n* beside the *n*-th validation,
+which is a different epoch. Harmless at the current `val_check_interval: 1`, and
+now more visible because there are more val columns. Fix by recording the epoch
+number alongside each val entry rather than relying on position.
 
 ### B4 — `scheduler` and `optimizer.name` config are inert
 
@@ -277,13 +301,13 @@ validated against a schema.
 
 ## Suggested order
 
-If you want to act on any of this before or during the first run:
+Remaining, after A0/A1/B3:
 
-1. **A1** (`num_workers`) — biggest win, one line, zero risk.
-2. **B3** (full metrics in CSV) — you will want this to read the first run at all.
-3. **A2** (`global_step` on resume) — one line, and you will hit it at 24 h.
-4. **A3** (empty val guard) — one `if`, prevents a crash mid-run.
-5. **C1** (cache `_build_gene_reps` by study) — largest remaining throughput win.
-6. **B1/B2** (wire the loss weights and annealing to config) — needed before any tuning.
+1. **A2** (`global_step` on resume) — one line, and you will hit it at 24 h.
+2. **A3** (empty val guard) — one `if`, prevents a crash mid-run.
+3. **C1** (cache `_build_gene_reps` by study) — largest remaining throughput win,
+   and the one to reach for if A1 alone does not saturate the GPU.
+4. **B1/B2** (wire the loss weights and annealing to config) — needed before any
+   tuning run, pointless before the first one.
 
-1–4 are all small and independent. 5 and 6 are proper changes and deserve tests.
+1 and 2 are small and independent. 3 and 4 are proper changes and deserve tests.

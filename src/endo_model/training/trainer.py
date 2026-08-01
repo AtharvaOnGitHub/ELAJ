@@ -81,7 +81,11 @@ class Trainer:
         """Run the full training loop.
 
         Returns:
-            history dict: {'train_loss': [...], 'val_loss': [...]}
+            history dict.  `train_loss` and `val_loss` are the composite totals;
+            every other loss term is also recorded, prefixed `train_`/`val_`, so
+            metrics.csv can answer which term moved.  Reading only the total
+            cannot distinguish a posterior collapse from a reconstruction
+            plateau, and both look like "val_loss stopped falling".
         """
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
 
@@ -92,11 +96,13 @@ class Trainer:
             self._set_sampler_epoch(epoch)
             train_metrics = self._train_epoch()
             history["train_loss"].append(train_metrics["total"])
+            _record(history, "train", train_metrics)
 
             if epoch % self.config.val_check_interval == 0:
                 val_metrics = self._val_epoch()
                 val_loss = val_metrics["total"]
                 history["val_loss"].append(val_loss)
+                _record(history, "val", val_metrics)
 
                 if self.ckpt_manager is not None:
                     self.ckpt_manager.save(
@@ -172,6 +178,20 @@ class Trainer:
             val_logger.log({k: v.item() for k, v in losses.items()})
 
         return val_logger.epoch_averages()
+
+
+def _record(
+    history: dict[str, list[float]], prefix: str, metrics: dict[str, float]
+) -> None:
+    """Append one epoch's metric breakdown into `history` under `prefix_<name>`.
+
+    "total" is skipped — it is already recorded as `train_loss` / `val_loss`,
+    and a duplicate column reads as though the two could disagree.
+    """
+    for name, value in metrics.items():
+        if name == "total":
+            continue
+        history.setdefault(f"{prefix}_{name}", []).append(value)
 
 
 def _to_device(batch: dict, device: torch.device) -> dict:

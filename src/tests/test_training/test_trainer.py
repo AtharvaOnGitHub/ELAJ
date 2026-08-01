@@ -202,3 +202,61 @@ class TestCheckpointManager:
         # Only 2 files should remain (the best 2: 0.4 and 0.6)
         saved = list(tmp_path.glob("*.pt"))
         assert len(saved) == 2
+
+
+# ---------------------------------------------------------------------------
+# History breakdown
+# ---------------------------------------------------------------------------
+
+
+class TestHistoryBreakdown:
+    """metrics.csv must carry each loss term, not only the composite total.
+
+    A flat val_loss curve cannot distinguish a posterior collapse from a
+    reconstruction plateau; the per-term columns are what separate them.
+
+    Reuses TestTrainer's fixture explicitly rather than by inheritance, which
+    would make pytest re-collect and re-run all of TestTrainer's own tests here.
+    """
+
+    setup_method = TestTrainer.setup_method
+    _make_trainer = TestTrainer._make_trainer
+
+    def test_record_prefixes_every_term(self):
+        from endo_model.training.trainer import _record
+        history: dict[str, list[float]] = {}
+        _record(history, "train", {"nb": 9.1, "kl_gauss": 0.4, "total": 11.9})
+        assert history["train_nb"] == [9.1]
+        assert history["train_kl_gauss"] == [0.4]
+
+    def test_record_skips_total(self):
+        """train_loss already holds it; a second column implies they can differ."""
+        from endo_model.training.trainer import _record
+        history: dict[str, list[float]] = {}
+        _record(history, "train", {"nb": 1.0, "total": 2.0})
+        assert "train_total" not in history
+
+    def test_record_accumulates_across_epochs(self):
+        from endo_model.training.trainer import _record
+        history: dict[str, list[float]] = {}
+        _record(history, "val", {"nb": 1.0})
+        _record(history, "val", {"nb": 2.0})
+        assert history["val_nb"] == [1.0, 2.0]
+
+    def test_fit_history_carries_the_breakdown(self):
+        trainer = self._make_trainer()
+        history = trainer.fit()
+        # The totals stay under their original names ...
+        assert len(history["train_loss"]) == 2
+        assert len(history["val_loss"]) == 2
+        # ... and every CompositeLoss term is now recorded too.
+        for term in ("nb", "kl_gauss", "kl_vmf", "beta_kl", "dab"):
+            assert f"train_{term}" in history, term
+            assert f"val_{term}" in history, term
+            assert len(history[f"train_{term}"]) == 2
+
+    def test_beta_kl_is_observable(self):
+        """The annealing ramp must be readable from the CSV, not just the log."""
+        trainer = self._make_trainer()
+        history = trainer.fit()
+        assert all(0.0 <= b <= 1.0 for b in history["train_beta_kl"])

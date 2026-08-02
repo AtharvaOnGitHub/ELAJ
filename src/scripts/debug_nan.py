@@ -11,9 +11,15 @@ first module whose output is non-finite *while all of its inputs were finite* �
 that module is the origin, not a victim.
 
     python scripts/debug_nan.py --config configs/experiment/first_run.yaml \
-        --root . --max-cells-per-study 2000
+        --root . --only-study shih_2022
 
-Reads only.  No optimiser is built and no weights are updated.
+Tests the first batch of every study it is given, so a fault confined to one
+study is not missed.  Runs in train() mode by default — that is the
+configuration that fails, and DSBN behaves differently under eval.
+
+Reads only.  No optimiser is built and no weights are updated.  Note the
+Dataset loads each h5ad in full during construction, so peak memory follows
+--only-study rather than --max-cells-per-study.
 """
 
 from __future__ import annotations
@@ -43,8 +49,11 @@ def parse_args() -> argparse.Namespace:
              "Default: 2000.",
     )
     p.add_argument(
-        "--batches", type=int, default=5,
-        help="How many batches to test before giving up. Default: 5.",
+        "--only-study", nargs="+", metavar="NAME", default=None,
+        help="Restrict to these studies. The Dataset loads every h5ad in full "
+             "before subsampling, so this — not --max-cells-per-study — is what "
+             "bounds peak memory. Use it to test one study at a time on a login "
+             "node; omit it under sbatch.",
     )
     p.add_argument(
         "--device", default=None, choices=["cpu", "cuda"],
@@ -53,10 +62,12 @@ def parse_args() -> argparse.Namespace:
              "CPU but reads unallocated memory on CUDA.",
     )
     p.add_argument(
-        "--train-mode", action="store_true",
-        help="Run the model in train() mode. Off by default so the stochastic "
-             "latent samplers do not confound the trace; turn it on to test "
-             "dropout- and sampling-dependent faults.",
+        "--eval-mode", action="store_true",
+        help="Run in eval() instead of train(). Train is the default because "
+             "it is the configuration that fails: DSBN normalises with *batch* "
+             "statistics in train mode and with running statistics (mean 0, "
+             "var 1 at init) in eval, so a fault in the batch statistics does "
+             "not reproduce under eval at all.",
     )
     return p.parse_args()
 
@@ -182,9 +193,11 @@ def report_batch(batch, index: int) -> bool:
 
 
 def main() -> None:
+    # Parse before importing torch so --help works without the GPU stack.
+    args = parse_args()
+
     import torch
 
-    args = parse_args()
     root = args.root or str(Path.cwd())
 
     from endo_model.configs import load_experiment
@@ -193,12 +206,28 @@ def main() -> None:
     from endo_model.data.vocabulary import GeneVocabulary
     vocab = GeneVocabulary(str(Path(root) / data_cfg.vocabulary_path))
 
+    studies = data_cfg.resolve_studies(root)
+    if args.only_study:
+        wanted = set(args.only_study)
+        unknown = wanted - {s.name for s in studies}
+        if unknown:
+            logger.error("--only-study names not in the corpus: %s", sorted(unknown))
+            sys.exit(1)
+        studies = [s for s in studies if s.name in wanted]
+
+    # Renumber after filtering.  study.id indexes the DSBN and study-embedding
+    # tables, whose width is n_studies below — keeping the original id of a
+    # single filtered study would put it out of range.
     study_configs = [
-        {"id": s.id, "name": s.name, "path": str(Path(root) / s.path)}
-        for s in data_cfg.resolve_studies(root)
+        {"id": new_id, "name": s.name, "path": str(Path(root) / s.path)}
+        for new_id, s in enumerate(studies)
     ]
     model_cfg.n_studies = len(study_configs)
     model_cfg.n_groups = len(vocab.group_names)
+    logger.info(
+        "Testing %d study/studies: %s",
+        len(study_configs), ", ".join(s["name"] for s in study_configs),
+    )
 
     from torch.utils.data import DataLoader
     from endo_model.data.collate import make_collate_fn
@@ -225,21 +254,28 @@ def main() -> None:
 
     from endo_model.model.endo_model import EndoFoundationModel
     model = EndoFoundationModel(vocab, model_cfg).to(device)
-    model.train() if args.train_mode else model.eval()
+    model.eval() if args.eval_mode else model.train()
 
-    print(f"\ndevice={device}  mode={'train' if args.train_mode else 'eval'}  "
+    print(f"\ndevice={device}  mode={'eval' if args.eval_mode else 'train'}  "
           f"batch_size={train_cfg.batch_size}")
 
     from endo_model.training.trainer import _to_device
 
-    for i, batch in enumerate(loader):
-        if i >= args.batches:
-            break
-        study = int(batch["study_id"][0].item())
-        print(f"\n── batch {i} (study_id={study}) "
-              + "─" * 40)
+    id_to_name = {s["id"]: s["name"] for s in study_configs}
+    # One batch per study rather than N batches overall: with shuffle=False the
+    # sampler is study-major, so testing the first few batches would only ever
+    # exercise one study, and a fault confined to another would be missed.
+    seen: set[int] = set()
 
-        batch_bad = report_batch(batch, i)
+    for batch in loader:
+        study = int(batch["study_id"][0].item())
+        if study in seen:
+            continue
+        seen.add(study)
+
+        print(f"\n── study {study} ({id_to_name.get(study, '?')}) " + "─" * 34)
+
+        batch_bad = report_batch(batch, study)
         batch = _to_device(batch, device)
 
         with NaNLocator(model) as locator, torch.no_grad():
@@ -247,15 +283,20 @@ def main() -> None:
                 model(batch)
             except Exception as exc:  # a raise is also a useful result
                 print(f"    forward raised {type(exc).__name__}: "
-                      f"{str(exc)[:200]}")
+                      f"{str(exc)[:300]}")
             found = locator.report()
 
         if found or batch_bad:
-            print("\nStopping at the first batch that shows a fault.")
+            print(f"\nFault found in study {study} "
+                  f"({id_to_name.get(study, '?')}) — stopping.")
             return
 
-    print("\nNo fault reproduced in the batches tested. Try --train-mode, "
-          "more --batches, or a larger --max-cells-per-study.")
+        if len(seen) == len(study_configs):
+            break
+
+    print(f"\nNo fault in the first batch of any of {len(seen)} studies. "
+          "Try --train-mode (dropout and the latent samplers are only active "
+          "there), or a larger --max-cells-per-study.")
 
 
 if __name__ == "__main__":

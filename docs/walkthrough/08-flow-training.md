@@ -81,10 +81,15 @@ default — auto-sizes to `available_cpus() - 1`.
 > reports every core on a shared 72-core node and would oversubscribe the
 > allocation, which on a busy node is slower than not parallelising at all.
 
-`pin_memory` follows the device (pinning only helps host→GPU transfer), which is
-why device resolution moved above the loaders. `persistent_workers` keeps workers
-alive across epochs so the dataset is not re-forked each time; `set_epoch` still
-works because the sampler lives in the main process and only ships index lists.
+⚠ `pin_memory` is **off**. `collate_fn` builds `group_indices` with `.expand()`,
+a stride-0 view whose rows all alias one row of memory, and pinning rejects
+that. Materialising it would cost ~16 MB of duplicated indices per batch against
+a ~12 MB real payload; the fix is to drop the redundant batch dimension from the
+schema. See [11](11-findings.md) A1b.
+
+`persistent_workers` keeps workers alive across epochs so the dataset is not
+re-forked each time; `set_epoch` still works because the sampler lives in the
+main process and only ships index lists.
 
 ### 9. Device + model — [`:124`](../../src/scripts/train.py:124)
 

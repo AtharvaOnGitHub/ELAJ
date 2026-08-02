@@ -240,6 +240,11 @@ group_dns_mask[g] = counts[:, global_idxs] == -1            # (B, G_k)
 > view, not a copy — the `(B, …)` leading dimension costs nothing. Every row is
 > identical because group membership is a property of the vocabulary, not of a
 > cell. `TokenConstructor` reads only row 0.
+>
+> ⚠ The consequence of "view, not copy" is that the tensor has **stride 0** and
+> cannot be pinned — `DataLoader(pin_memory=True)` raises on it. The batch
+> dimension is pure redundancy and should be removed rather than materialised;
+> see [11](11-findings.md) A1b.
 
 `make_collate_fn` [`:98`](../../src/endo_model/data/collate.py:98) binds the
 vocabulary via `partial` so the result is picklable for DataLoader workers — a

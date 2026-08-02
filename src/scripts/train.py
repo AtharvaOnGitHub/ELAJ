@@ -104,8 +104,7 @@ def main() -> None:
     )
 
     # ── Device ────────────────────────────────────────────────────────────────
-    # Resolved before the DataLoaders so pin_memory can be set correctly —
-    # pinning is only useful for host-to-GPU transfer.
+    # Resolved before the DataLoaders so loader settings can depend on it.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Device: %s", device)
 
@@ -135,7 +134,14 @@ def main() -> None:
     loader_kwargs = dict(
         collate_fn=collate,
         num_workers=n_workers,
-        pin_memory=(device.type == "cuda"),
+        # pin_memory stays off: collate_fn builds group_indices with .expand(),
+        # a stride-0 view whose rows all alias one row of memory, and pinning
+        # rejects that ("more than one element of the written-to tensor refers
+        # to a single memory location").  Making it contiguous would cost
+        # B x vocab_size x 8 = ~16 MB of duplicated indices per batch, more than
+        # the real payload, so the fix is to drop the redundant batch dimension
+        # from the schema rather than to materialise it.  See docs/walkthrough.
+        pin_memory=False,
         # Workers hold the dataset, whose per-study panels are the expensive
         # part to re-fork; keeping them alive avoids paying that every epoch.
         persistent_workers=n_workers > 0,

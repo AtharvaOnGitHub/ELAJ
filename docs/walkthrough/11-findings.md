@@ -48,6 +48,43 @@ Bounded by roughly one extra copy of the record list across all workers, which
 should sit comfortably inside the 180 GB request — but it is the thing to check
 if the job is OOM-killed rather than crashing.
 
+### A1b — `group_indices` carries a redundant batch dimension that blocks `pin_memory`
+
+`collate_fn` builds it as `idx_tensor.unsqueeze(0).expand(B, -1)`
+([collate.py:79](../../src/endo_model/data/collate.py:79)) — a stride-0 view in
+which all `B` rows alias one row of memory. That is exactly what makes the
+`(B, …)` shape free, and it is why enabling `pin_memory` failed with:
+
+```
+RuntimeError: unsupported operation: more than one element of the written-to
+tensor refers to a single memory location.
+```
+
+`pin_memory` is off as a result. Calling `.contiguous()` instead would cost
+`B × vocab_size × 8 B` ≈ **16 MB of duplicated indices per batch** against a real
+payload of ~12 MB (`counts` 7.9, `is_dns` 2, `group_dns_mask` 2) — more than
+doubling host→device traffic to enable a transfer optimisation. Not worth it.
+
+**The real fix is to delete the batch dimension.** Every row is identical, and
+there is exactly **one** consumer:
+[token_constructor.py:65](../../src/endo_model/model/encoders/token_constructor.py:65),
+which already discards it via `global_idxs[0]`.
+
+```python
+# collate.py
+group_indices[group_name] = idx_tensor              # (G_k,) contiguous
+
+# token_constructor.py
+B = counts.shape[0]                                 # was: B, G_k = global_idxs.shape
+G_k = global_idxs.shape[0]
+counts_k = counts[:, global_idxs]                   # was: counts[:, global_idxs[0]]
+```
+
+That makes the tensor contiguous and ~124 KB instead of 16 MB, after which
+`pin_memory=True` is a straight win. It touches `schema.py`'s documented
+contract and the batch fixtures in four test files, so it wants a proper test
+run rather than being done between queue slots.
+
 ### A2 — `global_step` is not restored on resume; both schedules restart
 
 [`train.py:162-168`](../../src/scripts/train.py:162), [`trainer.py:76`](../../src/endo_model/training/trainer.py:76)
@@ -82,12 +119,23 @@ restore.
 `epoch_averages` returns only `{"epoch_time_s": …}` (the dict comprehension
 filters empty lists), so `val_metrics["total"]` raises.
 
-Reachable: the patient split is global and unstratified, so a study can get zero
-val patients; and `drop_last=True` means a study with fewer than 128 val cells
-yields no batches. At 302 patients / `val_fraction 0.15`,
-`garcia_alonso_2021_c` (3 patients) has a ~62 % chance of contributing nothing.
+**Confirmed on the real split**, not merely predicted:
 
-This is the deferred item you asked to be reminded about **before run 2**.
+```
+Study 7 split='val': 0 cells      # garcia_alonso_2021_c
+```
+
+`garcia_alonso_2021_c` contributes **90,558 training cells and zero validation
+cells** — its 3 patients all landed in train. The overall val loader still has
+244,466 cells from the other ten studies, so `_val_epoch` does not hit the
+`KeyError`; the exposure is that val loss is silently blind to one study.
+
+Three other studies are thin enough to be fragile at a different seed:
+garcia_alonso_2021_a (1,870 val cells), garcia_alonso_2021_b (2,518),
+ferrero_2024 (2,172).
+
+This is the deferred item you asked to be reminded about **before run 2**, and
+the prediction (~62 % chance for this study) has now been borne out.
 
 **Fix (minimal):** guard `if not val_metrics: skip validation this epoch`.
 

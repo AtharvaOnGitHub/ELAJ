@@ -174,22 +174,41 @@ class NaNLocator:
         return True
 
 
-def report_batch(batch, index: int) -> bool:
-    """Report non-finite values in each batch field. True if any were found."""
+def report_batch(batch, label) -> bool:
+    """Report non-finite values in each batch field. True if any are a fault.
+
+    `age` is the one field where NaN is legal: it is the documented marker for
+    "age unknown", and AgeEncoder substitutes a zero vector for it.  Counting
+    that as a fault stops the run on healthy data — Inf in `age` is a genuine
+    fault, because torch.isnan does not catch it and sin(inf) is NaN.
+    """
     import torch
 
-    bad = False
+    faults = False
     for key, value in batch.items():
         n = nonfinite_count(value)
-        if n:
-            bad = True
-            print(f"    batch[{index}]['{key}']: {n} non-finite — {describe(value)}")
-            if isinstance(value, torch.Tensor) and value.dim() == 1:
-                rows = (~torch.isfinite(value)).nonzero().flatten()[:8].tolist()
-                print(f"        first offending positions: {rows}")
-    if not bad:
-        print(f"    batch[{index}]: all fields finite")
-    return bad
+        if not n:
+            continue
+
+        if key == "age" and isinstance(value, torch.Tensor):
+            n_inf = int(torch.isinf(value).sum().item())
+            n_nan = n - n_inf
+            note = f"{n_nan} NaN (expected: age unknown)"
+            if n_inf:
+                note += f", {n_inf} Inf  <-- FAULT, sin(inf) = NaN"
+                faults = True
+            print(f"    [{label}] age: {note}")
+            continue
+
+        faults = True
+        print(f"    [{label}] '{key}': {n} non-finite — {describe(value)}  <-- FAULT")
+        if isinstance(value, torch.Tensor) and value.dim() == 1:
+            rows = (~torch.isfinite(value)).nonzero().flatten()[:8].tolist()
+            print(f"        first offending positions: {rows}")
+
+    if not faults:
+        print(f"    [{label}] inputs OK")
+    return faults
 
 
 def main() -> None:
@@ -275,7 +294,7 @@ def main() -> None:
 
         print(f"\n── study {study} ({id_to_name.get(study, '?')}) " + "─" * 34)
 
-        batch_bad = report_batch(batch, study)
+        batch_bad = report_batch(batch, id_to_name.get(study, str(study)))
         batch = _to_device(batch, device)
 
         with NaNLocator(model) as locator, torch.no_grad():

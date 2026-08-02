@@ -32,7 +32,35 @@ set -euo pipefail
 
 module purge
 module load bear-apps/2024a
-module load PyTorch/2.7.1-foss-2024a-CUDA-12.6.0
+
+# bbdefault spans several CPU architectures and each has its own module tree,
+# so the CUDA-flavoured PyTorch that exists on the icelake GPU nodes is not
+# guaranteed here.  Try the known names in order, and if none load, print what
+# this node actually has — otherwise the failure says only "unknown module"
+# and costs another submit to learn anything.
+PYTORCH_CANDIDATES=(
+    "PyTorch/2.7.1-foss-2024a-CUDA-12.6.0"
+    "PyTorch/2.7.1-foss-2024a"
+    "PyTorch/2.1.2-foss-2023a"
+)
+loaded=""
+for candidate in "${PYTORCH_CANDIDATES[@]}"; do
+    if module load "${candidate}" >/dev/null 2>&1; then
+        loaded="${candidate}"
+        break
+    fi
+done
+if [ -z "${loaded}" ]; then
+    {
+        echo "ERROR: no known PyTorch module on $(hostname). Tried:"
+        printf '  %s\n' "${PYTORCH_CANDIDATES[@]}"
+        echo "Available on this node:"
+        module -t avail PyTorch 2>&1 | sed 's/^/  /'
+    } >&2
+    exit 1
+fi
+echo "Loaded ${loaded} on $(hostname)"
+
 module load PyYAML/6.0.2-GCCcore-13.3.0
 module load SciPy-bundle/2024.05-gfbf-2024a
 module load tqdm/4.66.5-GCCcore-13.3.0

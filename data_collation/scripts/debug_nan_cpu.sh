@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --qos=bbdefault
+#SBATCH --constraint=icelake
 #SBATCH --time=2:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
@@ -33,15 +34,17 @@ set -euo pipefail
 module purge
 module load bear-apps/2024a
 
-# bbdefault spans several CPU architectures and each has its own module tree,
-# so the CUDA-flavoured PyTorch that exists on the icelake GPU nodes is not
-# guaranteed here.  Try the known names in order, and if none load, print what
-# this node actually has — otherwise the failure says only "unknown module"
-# and costs another submit to learn anything.
+# bear-apps/2024a carries exactly one PyTorch, and only in the icelake tree
+# (/rds/bear-apps/2024a/EL8-ice/modules/all).  There is no CPU-only build, so
+# --constraint=icelake above is what makes this work: bbdefault spans several
+# architectures and a non-icelake node has no PyTorch at all.  The CUDA build
+# runs fine without a GPU — torch.cuda.is_available() simply returns False.
+#
+# The loop and the availability dump remain so that a node without the module
+# reports what it does have, rather than failing with "unknown module" and
+# costing another submit to learn anything.
 PYTORCH_CANDIDATES=(
     "PyTorch/2.7.1-foss-2024a-CUDA-12.6.0"
-    "PyTorch/2.7.1-foss-2024a"
-    "PyTorch/2.1.2-foss-2023a"
 )
 loaded=""
 for candidate in "${PYTORCH_CANDIDATES[@]}"; do

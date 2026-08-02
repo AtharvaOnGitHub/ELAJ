@@ -38,12 +38,16 @@ source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
 cd /rds/homes/a/axw1008/axw1008/src
 
-# --match-training with no subsampling reproduces the exact batches the failing
-# run saw: survey mode tests the head of each study in file order, which
-# training never constructs.
-python scripts/debug_nan.py \
-    --config configs/experiment/first_run.yaml \
-    --root . \
-    --match-training \
-    --max-cells-per-study 0 \
-    "$@"
+# With no arguments: reproduce the exact batches the failing run saw
+# (--match-training with no subsampling).  With arguments: use them verbatim, so
+# a previously-working invocation can be replayed exactly rather than merged
+# with defaults that cannot be switched off from the command line.
+ARGS=(--config configs/experiment/first_run.yaml --root .)
+if [ "$#" -gt 0 ]; then
+    ARGS+=("$@")
+else
+    ARGS+=(--match-training --max-cells-per-study 0)
+fi
+
+echo "Running: python scripts/debug_nan.py ${ARGS[*]}"
+python scripts/debug_nan.py "${ARGS[@]}"

@@ -12,6 +12,14 @@ Checks performed:
   3. per-study h5ad   — cell/gene counts, overlap with the vocabulary,
                         patient_id presence, disease_status label values
   4. patient_id       — uniqueness *across* studies, not merely within one
+  5. stored counts    — NaN / Inf / negative values, and the value range
+  6. tissue codes     — within the embedding table sizes they index
+
+Checks 5 and 6 exist because both failure modes are invisible at their source.
+DSBN normalises over the flattened (B x G) axis, so one NaN anywhere in a batch
+makes every activation NaN; and an out-of-range embedding index reads unallocated
+memory on CUDA instead of raising.  Both surface as a NaN in the latent sampler,
+modules away from the cause.
 """
 
 from __future__ import annotations
@@ -26,7 +34,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np  # noqa: E402
 
 from endo_model.configs.data_config import load_studies_csv  # noqa: E402
-from endo_model.data.constants import DISEASE_STATUS_TO_INT  # noqa: E402
+from endo_model.data.constants import (  # noqa: E402
+    DISEASE_STATUS_TO_INT,
+    TISSUE_LEVEL_SIZES,
+)
 from endo_model.data.vocabulary import GeneVocabulary  # noqa: E402
 
 
@@ -134,6 +145,108 @@ def check_study_h5ad(
     return patients
 
 
+def _scan_values(dset, chunk: int = 20_000_000) -> dict:
+    """Reduce a 1-D HDF5 float dataset to NaN/Inf/negative counts and a range.
+
+    Read in chunks: the stored values of the largest study are several GB, and
+    the whole point of this check is to run before committing a GPU job.
+    """
+    n = int(dset.shape[0])
+    stats = {"n": n, "nan": 0, "inf": 0, "neg": 0,
+             "min": float("inf"), "max": float("-inf")}
+
+    for start in range(0, n, chunk):
+        block = np.asarray(dset[start : start + chunk], dtype=np.float64)
+        is_nan = np.isnan(block)
+        # ~isfinite covers NaN and Inf both, so subtract the NaNs back out.
+        is_inf = ~np.isfinite(block) & ~is_nan
+        stats["nan"] += int(is_nan.sum())
+        stats["inf"] += int(is_inf.sum())
+
+        finite = block[np.isfinite(block)]
+        if finite.size:
+            stats["neg"] += int((finite < 0).sum())
+            stats["min"] = min(stats["min"], float(finite.min()))
+            stats["max"] = max(stats["max"], float(finite.max()))
+
+    return stats
+
+
+def check_count_matrix(study, root: Path) -> bool:
+    """Verify one study's stored counts contain nothing the model cannot consume.
+
+    NaN and Inf are the dangerous cases and they are not local: DSBN applies
+    BatchNorm over the flattened (B x G) axis, so one bad value anywhere in a
+    batch makes the batch mean and variance NaN and every activation after it
+    NaN too.  The failure then surfaces in the latent sampler, several modules
+    away from its cause.
+
+    Returns True if the study is clean.
+    """
+    path = Path(study.path)
+    if not path.is_absolute():
+        path = root / study.path
+    if not path.exists():
+        print(f"    {study.name:<28} SKIPPED (path does not resolve)")
+        return True
+
+    import h5py
+
+    with h5py.File(path, "r") as f:
+        x = f["X"]
+        # AnnData writes sparse X as a group (data/indices/indptr) and dense X
+        # as a plain dataset.
+        values = x["data"] if isinstance(x, h5py.Group) else x
+        stats = _scan_values(values)
+
+    bad = stats["nan"] or stats["inf"] or stats["neg"]
+    flag = "  <-- PROBLEM" if bad else ""
+    print(
+        f"    {study.name:<28} stored={stats['n']:>12,}  "
+        f"nan={stats['nan']:>6}  inf={stats['inf']:>6}  neg={stats['neg']:>6}  "
+        f"range=[{stats['min']:.4g}, {stats['max']:.4g}]{flag}"
+    )
+    return not bad
+
+
+def check_tissue_levels(study, root: Path) -> bool:
+    """Verify tissue hierarchy codes fall inside their embedding tables.
+
+    An out-of-range index raises IndexError on CPU but can read unallocated
+    memory on CUDA, which surfaces as NaN rather than as an error.
+
+    Returns True if the study is clean.
+    """
+    import anndata
+    import pandas as pd
+
+    columns = ("tissue_compartment", "tissue_organ", "tissue_type", "tissue_microsite")
+
+    path = Path(study.path)
+    if not path.is_absolute():
+        path = root / study.path
+    if not path.exists():
+        return True
+
+    adata = anndata.read_h5ad(path, backed="r")
+    problems: list[str] = []
+    for level, (col, size) in enumerate(zip(columns, TISSUE_LEVEL_SIZES)):
+        if col not in adata.obs.columns:
+            continue
+        coerced = pd.to_numeric(adata.obs[col], errors="coerce")
+        if coerced.isna().all():
+            continue  # treated as absent by the Dataset; not a range problem
+        top = coerced.max()
+        if top >= size:
+            problems.append(f"{col} max={top:g} >= table size {size} (level {level})")
+    adata.file.close()
+
+    if problems:
+        print(f"    {study.name:<28} " + "; ".join(problems) + "   <-- PROBLEM")
+        return False
+    return True
+
+
 def check_patient_id_collisions(per_study: dict[str, set[str]]) -> None:
     """Verify patient_id is unique across studies, not merely within one.
 
@@ -180,6 +293,11 @@ def main() -> None:
         "--skip-h5ad", action="store_true",
         help="Skip check 3 (reads every .h5ad header; slow on a cold filesystem).",
     )
+    parser.add_argument(
+        "--skip-counts", action="store_true",
+        help="Skip check 5 (streams every stored count value; several GB of "
+             "sequential read, but the only way to catch NaN/Inf before a job).",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -197,7 +315,21 @@ def main() -> None:
     elif args.skip_h5ad:
         print("\n[3] per-study .h5ad — skipped (--skip-h5ad)")
 
-    print("\nDone.")
+    clean = True
+    if studies and not args.skip_counts:
+        print("\n[5] stored count values (NaN / Inf / negative / range)")
+        for s in studies:
+            clean &= check_count_matrix(s, root)
+
+        print("\n[6] tissue hierarchy codes vs embedding table sizes")
+        for s in studies:
+            clean &= check_tissue_levels(s, root)
+        if clean:
+            print("    all levels within range  OK")
+    elif args.skip_counts:
+        print("\n[5] stored count values — skipped (--skip-counts)")
+
+    print("\nDone." if clean else "\nDone — PROBLEMS found above.")
 
 
 if __name__ == "__main__":

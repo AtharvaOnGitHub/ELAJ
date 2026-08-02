@@ -5,12 +5,14 @@ import torch.nn as nn
 from torch import Tensor
 
 
-# Maximum number of categories at each tissue hierarchy level.
-# Generous defaults; actual data typically uses far fewer categories.
-_N_COMPARTMENTS = 8
-_N_ORGANS = 16
-_N_TISSUE_TYPES = 32
-_N_MICROSITES = 16
+from endo_model.data.constants import TISSUE_LEVEL_SIZES
+
+# Maximum number of categories at each tissue hierarchy level, in level order.
+# Sourced from data.constants so preflight_check can validate the corpus against
+# the same bounds without importing torch.  An index at or above its bound is an
+# IndexError on CPU but can read unallocated memory on CUDA, surfacing far
+# downstream as NaN rather than as an error here.
+_N_COMPARTMENTS, _N_ORGANS, _N_TISSUE_TYPES, _N_MICROSITES = TISSUE_LEVEL_SIZES
 
 
 class TissueHierarchyEncoder(nn.Module):

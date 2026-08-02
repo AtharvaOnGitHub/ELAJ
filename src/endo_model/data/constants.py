@@ -13,6 +13,14 @@ DNS positions are excluded from reconstruction loss but included in encoding."""
 N_TISSUE_LEVELS: int = 4
 """Four-level tissue hierarchy: compartment → organ → tissue_type → microsite."""
 
+TISSUE_LEVEL_SIZES: tuple[int, ...] = (8, 16, 32, 16)
+"""Category count allowed at each tissue level, in level order.
+
+These size the embedding tables in TissueHierarchyEncoder, so they are also the
+valid range of the corresponding obs columns.  Kept here, with the other data
+contracts, rather than beside the tables: preflight_check validates the corpus
+against them and must not import torch to do it."""
+
 N_DISEASE_STATUSES: int = 4
 """Integer codes: 0=eutopic, 1=ectopic, 2=control, 3=other."""
 

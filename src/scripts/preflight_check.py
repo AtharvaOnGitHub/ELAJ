@@ -13,7 +13,8 @@ Checks performed:
                         patient_id presence, disease_status label values
   4. patient_id       — uniqueness *across* studies, not merely within one
   5. stored counts    — NaN / Inf / negative values, and the value range
-  6. tissue codes     — within the embedding table sizes they index
+  6. obs values       — tissue codes within their embedding tables (both ends),
+                        age finite
 
 Checks 5 and 6 exist because both failure modes are invisible at their source.
 DSBN normalises over the flattened (B x G) axis, so one NaN anywhere in a batch
@@ -209,11 +210,16 @@ def check_count_matrix(study, root: Path) -> bool:
     return not bad
 
 
-def check_tissue_levels(study, root: Path) -> bool:
-    """Verify tissue hierarchy codes fall inside their embedding tables.
+def check_obs_values(study, root: Path) -> bool:
+    """Verify the obs columns the model consumes are inside what it can accept.
 
-    An out-of-range index raises IndexError on CPU but can read unallocated
-    memory on CUDA, which surfaces as NaN rather than as an error.
+    Two failure modes, both invisible where they originate:
+
+    * A tissue code outside its embedding table.  Checked at **both** ends —
+      "unknown" is often encoded -1, and a negative index reads unallocated
+      memory on CUDA rather than raising as it would on CPU.
+    * A non-finite age.  AgeEncoder guards with torch.isnan, which is False for
+      inf, and the value then reaches torch.sin — sin(inf) is NaN.
 
     Returns True if the study is clean.
     """
@@ -230,15 +236,26 @@ def check_tissue_levels(study, root: Path) -> bool:
 
     adata = anndata.read_h5ad(path, backed="r")
     problems: list[str] = []
+
     for level, (col, size) in enumerate(zip(columns, TISSUE_LEVEL_SIZES)):
         if col not in adata.obs.columns:
             continue
         coerced = pd.to_numeric(adata.obs[col], errors="coerce")
         if coerced.isna().all():
             continue  # treated as absent by the Dataset; not a range problem
-        top = coerced.max()
+        top, bottom = coerced.max(), coerced.min()
         if top >= size:
             problems.append(f"{col} max={top:g} >= table size {size} (level {level})")
+        if bottom < 0:
+            problems.append(f"{col} min={bottom:g} < 0 (level {level})")
+
+    if "age" in adata.obs.columns:
+        age = pd.to_numeric(adata.obs["age"], errors="coerce")
+        # NaN is the documented "unknown" marker and is handled; inf is not.
+        n_inf = int(np.isinf(age.to_numpy(dtype=np.float64)).sum())
+        if n_inf:
+            problems.append(f"age has {n_inf} infinite value(s) -> sin(inf) = NaN")
+
     adata.file.close()
 
     if problems:
@@ -321,11 +338,13 @@ def main() -> None:
         for s in studies:
             clean &= check_count_matrix(s, root)
 
-        print("\n[6] tissue hierarchy codes vs embedding table sizes")
+        print("\n[6] obs values the model consumes (tissue codes, age)")
+        obs_clean = True
         for s in studies:
-            clean &= check_tissue_levels(s, root)
-        if clean:
-            print("    all levels within range  OK")
+            obs_clean &= check_obs_values(s, root)
+        if obs_clean:
+            print("    all within range  OK")
+        clean &= obs_clean
     elif args.skip_counts:
         print("\n[5] stored count values — skipped (--skip-counts)")
 

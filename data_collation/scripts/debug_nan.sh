@@ -38,8 +38,12 @@ source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
 cd /rds/homes/a/axw1008/axw1008/src
 
+# --match-training with no subsampling reproduces the exact batches the failing
+# run saw: survey mode tests the head of each study in file order, which
+# training never constructs.
 python scripts/debug_nan.py \
     --config configs/experiment/first_run.yaml \
     --root . \
-    --max-cells-per-study 2000 \
+    --match-training \
+    --max-cells-per-study 0 \
     "$@"

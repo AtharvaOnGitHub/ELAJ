@@ -45,8 +45,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--root", default=None, help="Project root.")
     p.add_argument(
         "--max-cells-per-study", type=int, default=2000,
-        help="Subsample each study so setup takes seconds, not minutes. "
+        help="Subsample each study so setup is quick. 0 means no limit. "
              "Default: 2000.",
+    )
+    p.add_argument(
+        "--match-training", action="store_true",
+        help="Reproduce the batches training actually sees: shuffle=True with "
+             "the experiment seed at epoch 0, scanning up to --batches of them. "
+             "Without this the script tests the first 128 cells of each study in "
+             "file order — a batch the training run never constructs — so a "
+             "fault carried by particular cells is invisible.",
+    )
+    p.add_argument(
+        "--batches", type=int, default=500, metavar="N",
+        help="With --match-training, how many batches to scan. Default: 500.",
     )
     p.add_argument(
         "--only-study", nargs="+", metavar="NAME", default=None,
@@ -253,16 +265,31 @@ def main() -> None:
     from endo_model.data.dataset import EndometriosisDataset
     from endo_model.data.samplers import PerStudyBatchSampler
 
+    if args.match_training and args.max_cells_per_study:
+        logger.warning(
+            "--match-training with --max-cells-per-study %d: subsampling changes "
+            "which cells exist, so the batches will not be the ones training "
+            "saw. Pass --max-cells-per-study 0 for an exact reproduction.",
+            args.max_cells_per_study,
+        )
+
     dataset = EndometriosisDataset(
         study_configs=study_configs, vocab=vocab, split="train",
         val_fraction=data_cfg.splits.val_fraction,
         test_fraction=data_cfg.splits.test_fraction,
         seed=data_cfg.splits.seed,
-        max_cells_per_study=args.max_cells_per_study,
+        max_cells_per_study=args.max_cells_per_study or None,
     )
+
+    # Training shuffles with the experiment seed; survey mode does not shuffle
+    # at all, which is why it only ever sees the head of each study.
     sampler = PerStudyBatchSampler(
-        dataset.study_ids, train_cfg.batch_size, shuffle=False, seed=0
+        dataset.study_ids, train_cfg.batch_size,
+        shuffle=args.match_training,
+        seed=exp_cfg.seed if args.match_training else 0,
     )
+    if args.match_training:
+        sampler.set_epoch(0)  # Trainer calls this before epoch 0
     loader = DataLoader(
         dataset, batch_sampler=sampler, collate_fn=make_collate_fn(vocab)
     )
@@ -281,11 +308,50 @@ def main() -> None:
     from endo_model.training.trainer import _to_device
 
     id_to_name = {s["id"]: s["name"] for s in study_configs}
-    # One batch per study rather than N batches overall: with shuffle=False the
-    # sampler is study-major, so testing the first few batches would only ever
-    # exercise one study, and a fault confined to another would be missed.
-    seen: set[int] = set()
 
+    def test(batch, label: str, verbose: bool) -> bool:
+        """Run one batch through the hooked model. True if a fault appeared."""
+        batch_bad = report_batch(batch, label) if verbose else False
+        moved = _to_device(batch, device)
+
+        with NaNLocator(model) as locator, torch.no_grad():
+            try:
+                model(moved)
+            except Exception as exc:  # a raise is also a useful result
+                print(f"\n── {label} " + "─" * 40)
+                print(f"    forward raised {type(exc).__name__}: {str(exc)[:300]}")
+                locator.report()
+                return True
+            if locator.events:
+                if not verbose:
+                    print(f"\n── {label} " + "─" * 40)
+                    report_batch(batch, label)
+                locator.report()
+                return True
+            if verbose:
+                locator.report()
+        return batch_bad
+
+    if args.match_training:
+        print(f"\nScanning up to {args.batches} shuffled batches "
+              f"(seed={exp_cfg.seed}, epoch 0) — the order training uses.\n")
+        for i, batch in enumerate(loader):
+            if i >= args.batches:
+                break
+            study = int(batch["study_id"][0].item())
+            label = f"batch {i} — study {study} ({id_to_name.get(study, '?')})"
+            if test(batch, label, verbose=False):
+                print(f"\nFault reproduced at {label} — stopping.")
+                return
+            if i % 25 == 0:
+                print(f"    ... {i} batches clean")
+        print(f"\nNo fault in {args.batches} shuffled batches. The fault may need "
+              "a gradient step; run training with torch.autograd.set_detect_anomaly.")
+        return
+
+    # Survey mode: one batch per study.  With shuffle=False the sampler is
+    # study-major, so scanning batches in order would only exercise one study.
+    seen: set[int] = set()
     for batch in loader:
         study = int(batch["study_id"][0].item())
         if study in seen:
@@ -293,29 +359,17 @@ def main() -> None:
         seen.add(study)
 
         print(f"\n── study {study} ({id_to_name.get(study, '?')}) " + "─" * 34)
-
-        batch_bad = report_batch(batch, id_to_name.get(study, str(study)))
-        batch = _to_device(batch, device)
-
-        with NaNLocator(model) as locator, torch.no_grad():
-            try:
-                model(batch)
-            except Exception as exc:  # a raise is also a useful result
-                print(f"    forward raised {type(exc).__name__}: "
-                      f"{str(exc)[:300]}")
-            found = locator.report()
-
-        if found or batch_bad:
+        if test(batch, id_to_name.get(study, str(study)), verbose=True):
             print(f"\nFault found in study {study} "
                   f"({id_to_name.get(study, '?')}) — stopping.")
             return
-
         if len(seen) == len(study_configs):
             break
 
     print(f"\nNo fault in the first batch of any of {len(seen)} studies. "
-          "Try --train-mode (dropout and the latent samplers are only active "
-          "there), or a larger --max-cells-per-study.")
+          "Those are the first 128 cells of each study in file order, which "
+          "training never sees — rerun with --match-training "
+          "--max-cells-per-study 0.")
 
 
 if __name__ == "__main__":

@@ -147,7 +147,7 @@ Then `trainer.fit()`, then `_write_metrics_csv` [`:210`](../../src/scripts/train
 
 ---
 
-## 2. `Trainer.__init__` — [`trainer.py:45`](../../src/endo_model/training/trainer.py:45)
+## 2. `Trainer.__init__` — [`trainer.py:50`](../../src/endo_model/training/trainer.py:50)
 
 Constructs `CheckpointManager` (if a dir was given), `EarlyStopping`,
 `MetricLogger`, and sets:
@@ -167,7 +167,7 @@ compounding the resume problem above.
 
 ---
 
-## 3. `fit` — [`trainer.py:80`](../../src/endo_model/training/trainer.py:80)
+## 3. `fit` — [`trainer.py:87`](../../src/endo_model/training/trainer.py:87)
 
 ```python
 for epoch in range(self.current_epoch, self.config.max_epochs):
@@ -199,7 +199,7 @@ Four ordering decisions worth noticing:
 ⚠ `val_check_interval` is used as an **epoch modulus**, not a step interval,
 despite a name that suggests otherwise in most frameworks.
 
-### `_set_sampler_epoch` — [`:117`](../../src/endo_model/training/trainer.py:117)
+### `_set_sampler_epoch` — [`:117`](../../src/endo_model/training/trainer.py:143)
 
 ```python
 sampler = getattr(train_loader, "batch_sampler", None) or getattr(train_loader, "sampler", None)
@@ -208,31 +208,51 @@ if hasattr(sampler, "set_epoch"): sampler.set_epoch(epoch)
 
 Duck-typed, so a plain `DataLoader` in a test does not crash.
 
-### `_train_epoch` — [`:130`](../../src/endo_model/training/trainer.py:130)
+### `_train_epoch` — [`:130`](../../src/endo_model/training/trainer.py:143)
 
 ```python
 self.model.train(); self.logger.reset()
 for batch in self.train_loader:
     batch = _to_device(batch, self.device)
     self.optimizer.zero_grad()
-    output1 = self.model(batch)
-    output2 = self.model(batch) if self.cce_enabled else None
-    losses  = self.composite_loss(output1, batch, self.global_step, self.total_steps, output2)
+    self.monitor.begin_step(self.current_epoch, self.global_step)
+
+    try:
+        output1 = self.model(batch)
+        output2 = self.model(batch) if self.cce_enabled else None
+        losses  = self.composite_loss(output1, batch, self.global_step, self.total_steps, output2)
+    except Exception as exc:
+        self.monitor.forward_failed(batch, exc)   # raises with a location
+        raise
+
+    self.monitor.check_losses(batch, losses)      # raises if total is non-finite
+
     losses["total"].backward()
-    nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip_norm)
-    self.optimizer.step()
+    grad_norm = nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip_norm)
+    if self.monitor.check_gradients(batch, grad_norm, losses):
+        self.optimizer.step()                     # skipped if grads are non-finite
     self.global_step += 1
+
+    self.monitor.end_step(losses, grad_norm)
     self.logger.log({k: v.item() for k, v in losses.items()})
 ```
 
 - The **second forward** shares no state with the first; different dropout masks
   give the two CCE views.
-- ⚠ `clip_grad_norm_` receives `self.model.parameters()` **only** — the DAB
-  classifier's gradients are never clipped.
+- `clip_grad_norm_` **returns the pre-clip total norm**, which the loop used to
+  discard. It is the only cheap early warning of a divergence, and clipping is
+  precisely what hides that climb from the loss curve. It is now logged as `|g|`.
+- A non-finite gradient **must not reach `optimizer.step()`**. AdamW would write
+  NaN weights, and every subsequent forward would then fail on healthy data —
+  which is exactly how the original NaN presented as a forward-pass error one
+  step after the real damage. Skipping leaves the model as it was before the batch.
+- ⚠ `clip_grad_norm_` still receives `self.model.parameters()` **only** — the DAB
+  classifier's gradients are never clipped, though the optimiser does update
+  them. See finding D1.
 - `.item()` on every loss forces a **GPU sync every step**. Correct for logging,
   but it removes any CPU/GPU overlap.
 
-### `_val_epoch` — [`:159`](../../src/endo_model/training/trainer.py:159)
+### `_val_epoch` — [`:159`](../../src/endo_model/training/trainer.py:190)
 
 `@torch.no_grad()`, `model.eval()`, fresh `MetricLogger`, single forward, no
 `model_output2`.
@@ -247,10 +267,60 @@ reachable: the global unstratified split can leave a study with no val cells,
 and with `drop_last=True` a study with fewer than `batch_size` val cells yields
 nothing. See [11](11-findings.md).
 
-### `_to_device` — [`:177`](../../src/endo_model/training/trainer.py:177)
+### `_to_device` — [`:177`](../../src/endo_model/training/trainer.py:221)
 
 Handles the nested `group_indices` / `group_dns_mask` dicts. Three near-identical
 copies of this helper exist (`trainer.py`, `evaluator.py`, `infer.py`).
+
+---
+
+## `TrainingMonitor` — `endo_model/training/diagnostics/`
+
+Added in `e23b97d` after the first real run died with an error that named the
+victim of a NaN rather than its cause. Full detail in
+[`diagnostics/README.md`](../../src/endo_model/training/diagnostics/README.md);
+what matters for reading the loop:
+
+**The design rule is: pay nothing until something breaks.** The normal path
+checks exactly one scalar per step (the total loss) plus the gradient norm the
+clipping call already computed. Neither adds a device sync that was not
+happening anyway. All per-module instrumentation is deferred until a step has
+*already* failed, at which point the monitor **rewinds the RNG** and replays the
+identical forward with a hook on every module.
+
+Rewinding is not optional. The Power Spherical sampler draws per cell, so a
+replay on fresh randomness is a different forward pass and may not fail at all.
+
+**Why the report leads with the parameter audit.** Two situations produce the
+same visible error and need opposite investigations:
+
+| What you see | What it means |
+| --- | --- |
+| Parameters **finite**, forward non-finite | The fault entered on this batch. Look at the data. |
+| Parameters **non-finite** at step start | The fault was an **earlier** step. This batch is a bystander. |
+
+The second is what actually happened, and without the audit there is no way to
+tell them apart from the traceback. Seven diagnostic runs were spent searching
+for a bad cell that did not exist.
+
+| Call | When | Effect |
+| --- | --- | --- |
+| `begin_step` | before forward | snapshots RNG for replay |
+| `forward_failed` | on exception | replays; raises `NonFiniteFault` **only** if a NaN is actually involved, so a CUDA OOM re-raises unchanged |
+| `check_losses` | before backward | a non-finite loss makes every gradient non-finite, losing which term broke |
+| `check_gradients` | after backward | returns `False` to skip the update; aborts on `max_consecutive_skips` in a row |
+| `end_step` | after step | progress line + 20-step ring buffer for the fault report |
+
+**On the skip.** Isolated skips are boundary draws in a reparameterised sampler
+— unavoidable in principle, and not worth losing a 12-hour run to. *Consecutive*
+skips are a genuine divergence and abort with a full report. With the `b419257`
+sampler fixes in place the expected skip count is **zero**, so any
+`skipping the update` warning in a log means a hazard that has not been found yet.
+
+`scripts/debug_nan.py` remains the offline reproducer, with one structural limit
+worth stating plainly: it builds a **fresh** model and takes **no optimiser
+step**, so any fault that only appears once the weights have moved is invisible
+to it regardless of which batch it is given.
 
 ---
 
@@ -301,7 +371,7 @@ is how `evaluate.py` and `infer.py` load weights without constructing one.
 
 `history` carries `train_loss` / `val_loss` (the composite totals) plus every
 other loss term under `train_`/`val_` prefixes, folded in by `_record`
-([trainer.py:194](../../src/endo_model/training/trainer.py:194)). So
+([trainer.py:221](../../src/endo_model/training/trainer.py:221)). So
 `metrics.csv` has `train_nb`, `train_kl_gauss`, `train_beta_kl`, `train_dab`, and
 their `val_` counterparts.
 

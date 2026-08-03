@@ -3,14 +3,45 @@
 Defects and fragilities found while writing this walkthrough. Each was verified
 against the code, not inferred.
 
-**Fixed so far:** A1, B3, and the categorical-`disease_status` crash (which was
-found by running, not by reading). Everything else stands.
+**Fixed so far:** A1, B3, and — found by running rather than by reading — the
+categorical-`disease_status` crash (A0) and the Power Spherical boundary
+singularities (A5). Everything else stands.
 
 Ranked by how much they matter to the run that is queued now.
 
 ---
 
 ## A. Affects the run currently queued
+
+### A5 — ✅ FIXED (`b419257`) — NaN gradients from boundary draws in the sampler
+
+The one that actually stopped training, at step 173 of run 49810351.
+
+**Reading this walkthrough would not have found it, and one section actively
+pointed away from it.** [06](06-flow-model-forward.md) described the
+`(1 − loc₀)` division as a float32 *precision* issue — right line, wrong
+conclusion. It has been corrected; the full mechanism lives there.
+
+Summary: at `d = 2` the Beta has a pole at each endpoint, float32 draws land
+exactly on `0`/`1` at a low rate, and the model takes 1024 draws per step. Three
+separate hazards then produce a **NaN gradient from a finite forward pass** —
+Dirichlet's reparameterised gradient dividing by the sample, `sqrt'(0)`, and a
+`clamp_min` guard yielding `0 × ∞`.
+
+Three things worth carrying forward:
+
+1. **The signature is diagnostic.** Finite forward + healthy loss + NaN gradient
+   means a boundary singularity, *not* bad data. Recognising that immediately
+   would have saved most of the investigation.
+2. **`clamp_min` is not a NaN guard.** It gives the guarded region a zero
+   derivative, and `0 × ∞ = NaN`. It can manufacture the fault it is written to
+   prevent. Prefer a double `torch.where`.
+3. **Testing that a *sample* is finite tests nothing here.** Every existing test
+   in `test_power_spherical.py` passed throughout. Assert on gradients, at the
+   draw volume training actually uses.
+
+Unaudited candidates of the same class: `lgamma`/`digamma` in the losses, and
+the softmax over 15,495 genes.
 
 ### A0 — ✅ FIXED (`050265f`) — categorical `disease_status` crashed training
 
@@ -87,7 +118,7 @@ run rather than being done between queue slots.
 
 ### A2 — `global_step` is not restored on resume; both schedules restart
 
-[`train.py:162-168`](../../src/scripts/train.py:162), [`trainer.py:76`](../../src/endo_model/training/trainer.py:76)
+[`train.py:162-168`](../../src/scripts/train.py:162), [`trainer.py:83`](../../src/endo_model/training/trainer.py:83)
 
 ```python
 payload     = CheckpointManager.load(...)      # payload contains "step"
@@ -113,7 +144,7 @@ restore.
 
 ### A3 — An empty validation loader raises `KeyError: 'total'`
 
-[`trainer.py:98`](../../src/endo_model/training/trainer.py:98)
+[`trainer.py:108`](../../src/endo_model/training/trainer.py:108)
 
 `_val_epoch` returns `val_logger.epoch_averages()`. With no batches,
 `epoch_averages` returns only `{"epoch_time_s": …}` (the dict comprehension
@@ -189,7 +220,7 @@ surviving only in console logs and the checkpoint `extra` dict. You could not
 plot "did KL collapse the posterior" or "did the adversary hold", which are the
 first-run questions.
 
-`_record` ([trainer.py:194](../../src/endo_model/training/trainer.py:194)) now
+`_record` ([trainer.py:221](../../src/endo_model/training/trainer.py:221)) now
 folds every term into history under `train_`/`val_` prefixes. `"total"` is
 skipped — it is already `train_loss`/`val_loss`, and a duplicate column reads as
 though the two could disagree.
@@ -307,9 +338,22 @@ arrays indexed by position is the real fix.
 
 ### D1 — `clip_grad_norm_` misses the DAB classifier
 
-[`trainer.py:149`](../../src/endo_model/training/trainer.py:149) passes
+[`trainer.py:172`](../../src/endo_model/training/trainer.py:172) passes
 `self.model.parameters()` only. `composite_loss.parameters()` — the adversary —
-is optimised but never clipped. Probably harmless; inconsistent.
+is optimised but never clipped.
+
+Promoted from "probably harmless; inconsistent" after A5. Two consequences now
+that the gradient norm is a live signal:
+
+- The adversary can diverge without the clip restraining it.
+- `grad_norm` is computed over the clipped set only, so `check_gradients` cannot
+  see a non-finite gradient that exists **only** in the discriminator. It would
+  still be caught one step later by `check_losses`, and `_fill_and_raise` audits
+  both module trees, so the report would name the `dab_*` parameter — but a step
+  later than it should.
+
+Fixing it changes training dynamics, so it is deliberately left for a run
+boundary rather than folded into the NaN fix.
 
 ### D2 — `CheckpointManager._history` is not persisted
 

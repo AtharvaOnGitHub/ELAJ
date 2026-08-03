@@ -243,19 +243,61 @@ Density `p(x; μ, κ) ∝ (1 + μ·x)^κ` on `S^{d-1}`.
 
 **`rsample`** [`:69`](../../src/endo_model/model/latent/power_spherical.py:69):
 
-1. `t = 2·Beta(α, β).rsample() − 1` where `α = (d−1)/2 + κ`, `β = (d−1)/2`.
+1. `t = 2·Beta(α, β).rsample() − 1` where `α = (d−1)/2 + κ`, `β = (d−1)/2`,
+   then **clamped** to `[−1+ε, 1−ε]` with `ε = 1e-6`.
    `Beta.rsample` is reparameterised, so gradients reach `κ`.
 2. Draw `v` uniform on `S^{d−2}` (normalised Gaussian).
-3. Build `y` centred on `e₁`.
+3. Build `y = (t, √((1−t)(1+t))·v)`, centred on `e₁`.
 4. `_reflect_e1_to_loc` — a Householder reflection mapping `e₁` onto `loc`, so
    gradients reach `loc`.
-5. **Renormalise** [`:99`](../../src/endo_model/model/latent/power_spherical.py:99).
+5. **Renormalise** — float32 drift off the sphere is ~1e-3, and `z_vmf`'s
+   components are used directly as `cos θ` and `sin θ`.
 
-Step 5 is not defensive padding. The reflection divides by `(1 − loc₀)`, which
-is small exactly when `loc` is near `e₁` — a common case for a directional
-prior — and float32 rounding there drifts the result off the sphere by ~1e-3.
-Since `z_vmf`'s components are used directly as `cos θ` and `sin θ`, downstream
-code needs exact unit norm.
+The `1` in `√(1 − t²)` is **not a free parameter**. `|y|² = t² + (1−t²) = 1` is
+what puts the sample on the unit circle: `t` is the cosine of the angle from the
+mean direction and `√(1−t²)` is the sine. Changing the constant produces a
+different distribution, not a safer one.
+
+### The boundary singularities — fixed in `b419257`
+
+> **This is the bug that cost run 49810351 (and seven diagnostic runs before
+> it).** An earlier version of this document described the `(1 − loc₀)`
+> division as a float32 *precision* issue. It identified the right line and drew
+> the wrong conclusion. Read this section as the correction.
+
+At `d = 2` the Beta is `Beta(½+κ, ½)`, which has a **pole at each endpoint**, so
+float32 draws land exactly on `0` or `1` at a low but non-zero rate. The model
+takes `batch × n_vMF = 1024` draws per step. Three hazards followed, and all
+three produce a **NaN gradient from a completely finite forward pass** — the
+value at the boundary is well defined, only its derivative is not:
+
+| # | Where | Why it broke |
+| --- | --- | --- |
+| 1 | `Beta.rsample` backward | torch implements Beta through Dirichlet, whose reparameterised gradient **divides by the sample**. At an endpoint that is `0/0`. |
+| 2 | `√(1 − t²)` | `sqrt'(0)` is infinite. `clamp_min(0)` does **not** help — the derivative is infinite however the argument reached zero. |
+| 3 | `dot / (1 − loc₀)` | `loc₀ = cos(mu_angle)` rounds to exactly `1.0` for any angle within ~3e-4 of zero. The `clamp_min` guard gave that case a **zero** derivative times a `1/ε`-sized quotient, and `0 × ∞ = NaN`. The guard created the NaN it was meant to prevent. |
+
+Fixes, in the same order:
+
+1. `alpha.register_hook(_drop_nonfinite)` — the sample is usable; only its
+   sensitivity to `κ` is undefined at an endpoint. A clamp downstream **cannot**
+   reach this: the NaN is built inside torch's backward from the sample it saved
+   before the clamp ran.
+2. Clamp `t` strictly inside the interval, and factor the radicand as
+   `(1−t)(1+t)` to avoid cancellation when `|t|` is near 1.
+3. A double `torch.where`. This singularity is **removable**: as `loc₀ → 1` the
+   reflection degenerates to the identity, and both numerator and denominator
+   vanish at rate `|w|²`. Returning `y` unchanged is the exact limit, not an
+   approximation.
+
+The tests that existed asserted the *sample* was finite — which was always true.
+`tests/test_model/test_power_spherical.py` now asserts the *gradient* is finite
+at training's draw volume.
+
+**Generalise this.** The failure signature — finite forward, healthy loss, NaN
+gradient — means a boundary singularity, not bad data. Other candidates in this
+model that have not been audited: `lgamma`/`digamma` in the losses, and the
+softmax over 15,495 genes.
 
 `power_spherical_kl_uniform` [`:42`](../../src/endo_model/model/latent/power_spherical.py:42)
 is the closed-form KL to uniform, independent of `μ`, zero at `κ = 0`. Both it

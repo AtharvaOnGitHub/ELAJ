@@ -121,7 +121,8 @@ They agree because both read the same field.
 
 ### `TrainingConfig` — [`training_config.py:60`](../../src/endo_model/configs/training_config.py:60)
 
-Nests `OptimizerConfig`, `SchedulerConfig`, `KLAnnealingConfig`.
+Nests `OptimizerConfig`, `SchedulerConfig`, `KLAnnealingConfig`,
+`DiagnosticsConfig`.
 
 `OptimizerConfig.from_dict` converts `betas` from a YAML list to a tuple
 ([`:21`](../../src/endo_model/configs/training_config.py:21)) — `torch.optim.AdamW`
@@ -139,6 +140,24 @@ in a YAML does nothing at all. See [11](11-findings.md).
 ⚠ `SchedulerConfig` is likewise inert: `train.py:157` constructs
 `CosineAnnealingLR` directly with `T_max=max(train_cfg.max_epochs, 1)`, ignoring
 `scheduler.name` and `scheduler.T_max`.
+
+**`DiagnosticsConfig`** (added `e23b97d`, extended `b419257`) is *not* inert —
+`train.py` reads every field when it builds `TrainingMonitor`. See
+[08](08-flow-training.md).
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `log_every` | `50` | Steps between progress lines. `0` silences them but still fills the fault report's ring buffer. |
+| `detect_anomaly` | `false` | torch autograd anomaly mode. 2–4× slower; answers nothing when the fault is in the forward pass. |
+| `dump_faults` | `true` | Write the failing batch to `output_dir/faults/` for offline replay without rebuilding a `Dataset`. |
+| `skip_nonfinite_steps` | `true` | Drop an update with non-finite gradients instead of ending the run. |
+| `max_consecutive_skips` | `5` | Consecutive skips before aborting. Isolated skips are boundary draws; a run of them is a divergence. |
+
+`first_run.yaml` overrides `training.diagnostics.log_every: 10`. Note that
+`apply_override` indexes into nested dicts with `d[head]`, so a dotted override
+**raises `KeyError` if the parent key is absent** from the base YAML — the
+`diagnostics:` block must exist in `configs/training/base.yaml` for that
+override to resolve.
 
 ### `DataConfig` — [`data_config.py:158`](../../src/endo_model/configs/data_config.py:158)
 

@@ -37,5 +37,11 @@ diagnostics:
   # Write the failing batch to output_dir/faults/ so it can be replayed offline
   # without rebuilding a Dataset.
   dump_faults: true
+  # Drop an update whose gradients are non-finite instead of ending the run.
+  # The Power Spherical sampler draws once per cell per circular latent, and a
+  # boundary draw has an undefined derivative; losing a run to one draw in 10^5
+  # is the wrong trade.  Consecutive skips mean a real divergence and abort.
+  skip_nonfinite_steps: true
+  max_consecutive_skips: 5
 
 resume_from_checkpoint: null    # path to a checkpoint; null = train from scratch

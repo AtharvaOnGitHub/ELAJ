@@ -172,9 +172,13 @@ class Trainer:
             grad_norm = nn.utils.clip_grad_norm_(
                 self.model.parameters(), self.config.grad_clip_norm
             )
-            self.monitor.check_gradients(batch, grad_norm, losses)
 
-            self.optimizer.step()
+            # A non-finite gradient must not reach the optimiser: AdamW would
+            # write NaN weights, and every later step would then fail on data
+            # that is perfectly healthy.  Dropping the update leaves the model
+            # exactly as it was before the batch.
+            if self.monitor.check_gradients(batch, grad_norm, losses):
+                self.optimizer.step()
             self.global_step += 1
 
             self.monitor.end_step(losses, grad_norm)

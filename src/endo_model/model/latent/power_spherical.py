@@ -21,6 +21,29 @@ import torch
 from torch import Tensor
 from torch.distributions import Beta
 
+# How far the sampler keeps its intermediates away from the boundaries at which
+# a derivative blows up.  1e-6 is comfortably above float32 resolution near 1
+# (~1.2e-7) while costing about a part in 10^6 of the sampled angle.
+_BOUNDARY_EPS = 1e-6
+
+
+def _drop_nonfinite(grad: Tensor) -> Tensor:
+    """Zero any non-finite entry of a gradient, leaving the rest untouched.
+
+    Used on the concentration flowing into Beta.rsample.  torch implements Beta
+    through Dirichlet, whose reparameterised gradient divides by the sample; a
+    draw that lands exactly on 0 or 1 in float32 makes that 0/0, and the NaN
+    then spreads through the shared aggregation trunk to every parameter in the
+    model on that step.
+
+    Zeroing is the correct response rather than a papering-over.  The forward
+    value at an endpoint is well defined, so the sample is usable; it is only
+    the sensitivity of that sample to the concentration that is undefined
+    there.  Contributing nothing from a measure-zero draw is what the gradient
+    of a correctly-behaved estimator would do anyway.
+    """
+    return torch.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
+
 
 def _log_normalizer(kappa: Tensor, dim: int) -> Tensor:
     """log of the density's normalizing constant N(k, d)."""
@@ -77,17 +100,34 @@ class PowerSpherical:
         alpha = (d - 1) / 2 + kappa
         beta = torch.full_like(kappa, (d - 1) / 2)
 
+        # At d=2 the second concentration is 1/2, so the Beta density has a
+        # pole at *each* endpoint and float32 draws land exactly on 0 or 1 often
+        # enough to matter at ~10^3 draws per step.  Two independent hazards
+        # follow, and both produce a NaN gradient from a completely finite
+        # forward pass — which is why this surfaces hundreds of steps in, on no
+        # particular batch, with a healthy loss right up to the failure.
+        if alpha.requires_grad:
+            alpha.register_hook(_drop_nonfinite)
+
         z = Beta(alpha, beta).rsample()                      # (...)
-        t = 2 * z - 1                                         # (...) ∈ [-1, 1]
+
+        # Hazard two: sqrt(1 - t^2) has an infinite derivative at t = ±1, and
+        # clamp_min(0) does not help — sqrt'(0) is infinite whether or not the
+        # argument was clamped to get there.  Keeping t strictly inside the
+        # interval bounds the derivative at ~1/sqrt(2*eps) instead.
+        t = (2 * z - 1).clamp(-1 + _BOUNDARY_EPS, 1 - _BOUNDARY_EPS)
 
         v = torch.randn(
             *self.loc.shape[:-1], d - 1, dtype=self.loc.dtype, device=self.loc.device
         )
         v = v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)  # uniform on S^{d-2}
 
+        # (1-t)(1+t) rather than 1-t^2: algebraically identical, but it avoids
+        # the cancellation that leaves only a couple of significant bits when
+        # |t| is near 1, which is exactly the regime this sampler lives in.
+        sin_part = ((1 - t) * (1 + t)).sqrt()
         y = torch.cat(
-            [t.unsqueeze(-1), (1 - t**2).clamp_min(0).sqrt().unsqueeze(-1) * v],
-            dim=-1,
+            [t.unsqueeze(-1), sin_part.unsqueeze(-1) * v], dim=-1,
         )                                                    # (..., d), centred on e1
         x = self._reflect_e1_to_loc(y)
 
@@ -101,8 +141,17 @@ class PowerSpherical:
     def _reflect_e1_to_loc(self, y: Tensor) -> Tensor:
         """Householder reflection mapping e1 = (1, 0, …) onto loc.
 
-        Uses the stable form x = y − ((e1−loc)·y / (1 − loc₀)) (e1 − loc); the
-        clamp handles loc → e1 (reflection → identity).
+        Uses the stable form x = y − ((e1−loc)·y / (1 − loc₀)) (e1 − loc).  As
+        loc → e1 the reflection degenerates to the identity, which is the
+        branch taken below.
+
+        The guard is a double `where` rather than `clamp_min` on the
+        denominator.  loc₀ is cos(mu_angle), which rounds to exactly 1.0 in
+        float32 for any angle within ~3e-4 of zero — common, not exotic.
+        clamp_min would give that case a zero derivative multiplied by a
+        1/eps-sized quotient, and 0 * inf is NaN.  Substituting a dummy
+        denominator before the division keeps the untaken branch finite, which
+        is what stops `where` from propagating a NaN gradient through it.
         """
         loc = self.loc
         e1 = torch.zeros_like(loc)
@@ -110,7 +159,11 @@ class PowerSpherical:
         w = e1 - loc                                         # (..., d)
         mu0 = loc[..., :1]                                   # (..., 1)
         dot = (w * y).sum(dim=-1, keepdim=True)              # (..., 1)
-        return y - (dot / (1 - mu0).clamp_min(1e-12)) * w
+
+        denom = 1 - mu0                                      # (..., 1)
+        degenerate = denom.abs() < _BOUNDARY_EPS
+        safe_denom = torch.where(degenerate, torch.ones_like(denom), denom)
+        return torch.where(degenerate, y, y - (dot / safe_denom) * w)
 
     @property
     def mean_direction(self) -> Tensor:

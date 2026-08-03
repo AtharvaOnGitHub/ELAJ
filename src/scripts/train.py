@@ -208,6 +208,8 @@ def main() -> None:
         detect_anomaly=diag_cfg.detect_anomaly,
         dump_dir=(out_dir / "faults") if diag_cfg.dump_faults else None,
         id_to_name={s["id"]: s["name"] for s in study_configs},
+        skip_nonfinite_steps=diag_cfg.skip_nonfinite_steps,
+        max_consecutive_skips=diag_cfg.max_consecutive_skips,
     )
 
     # ── Trainer ───────────────────────────────────────────────────────────────
@@ -247,6 +249,11 @@ def main() -> None:
 
     # ── Write metrics CSV ─────────────────────────────────────────────────────
     _write_metrics_csv(out_dir / "metrics.csv", history)
+    if monitor.skipped_steps:
+        logger.warning(
+            "%d update(s) were skipped for non-finite gradients over the run.",
+            monitor.skipped_steps,
+        )
     logger.info("Training complete. Outputs written to %s", out_dir)
 
 

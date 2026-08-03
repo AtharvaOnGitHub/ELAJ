@@ -76,6 +76,13 @@ class DiagnosticsConfig:
     # Write the failing batch and a full report to output_dir/faults/, so the
     # exact input can be replayed later without rebuilding a Dataset.
     dump_faults: bool = True
+    # Drop an update whose gradients are non-finite and carry on.  A
+    # reparameterised sampler has draws at which the derivative is undefined,
+    # and at ~10^3 draws per step one of those is a certainty over a long run —
+    # but it is not a reason to lose the run.  Consecutive skips are a genuine
+    # divergence and still abort with a full report.
+    skip_nonfinite_steps: bool = True
+    max_consecutive_skips: int = 5
 
     @classmethod
     def from_dict(cls, d: dict) -> "DiagnosticsConfig":
@@ -83,6 +90,8 @@ class DiagnosticsConfig:
             log_every=int(d.get("log_every", 50)),
             detect_anomaly=bool(d.get("detect_anomaly", False)),
             dump_faults=bool(d.get("dump_faults", True)),
+            skip_nonfinite_steps=bool(d.get("skip_nonfinite_steps", True)),
+            max_consecutive_skips=int(d.get("max_consecutive_skips", 5)),
         )
 
 

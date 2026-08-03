@@ -52,6 +52,16 @@ class TrainingMonitor:
                         already shown the fault to arrive through the gradients.
         dump_dir:       Where fault reports and the offending batch are written.
         id_to_name:     study id → study name, so a report can name the .h5ad.
+        skip_nonfinite_steps:
+                        Drop an update whose gradients are non-finite and carry
+                        on, rather than ending the run.  Reparameterised
+                        samplers have draws at which the derivative is
+                        undefined, and at ~10^3 draws per step a rare one is a
+                        certainty over a long run — but not a reason to lose it.
+        max_consecutive_skips:
+                        How many *consecutive* skips to tolerate before
+                        aborting.  Isolated skips are boundary draws; a run of
+                        them is a real divergence and gets the full report.
     """
 
     def __init__(
@@ -62,18 +72,29 @@ class TrainingMonitor:
         detect_anomaly: bool = False,
         dump_dir: str | Path | None = None,
         id_to_name: dict[int, str] | None = None,
+        skip_nonfinite_steps: bool = True,
+        max_consecutive_skips: int = 5,
     ) -> None:
         self.model = model
-        self.modules = [model, *(extra_modules or [])]
+        self.audited_modules = [model, *(extra_modules or [])]
         self.detect_anomaly = detect_anomaly
         self.dump_dir = Path(dump_dir) if dump_dir else None
         self.id_to_name = id_to_name or {}
+        self.skip_nonfinite_steps = skip_nonfinite_steps
+        self.max_consecutive_skips = max_consecutive_skips
         self.reporter = StepReporter(log_every=log_every)
 
         self._epoch = 0
         self._step = 0
+        self._skipped_steps = 0
+        self._consecutive_skips = 0
         self._rng_cpu: torch.Tensor | None = None
         self._rng_cuda: torch.Tensor | None = None
+
+    @property
+    def skipped_steps(self) -> int:
+        """Total updates dropped for non-finite gradients over the run."""
+        return self._skipped_steps
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -119,7 +140,7 @@ class TrainingMonitor:
         send the next session looking for a bad cell that does not exist.
         """
         trace, saw_nonfinite = self._replay(batch)
-        if not saw_nonfinite and not nonfinite_parameters(self.modules):
+        if not saw_nonfinite and not nonfinite_parameters(self.audited_modules):
             logger.error(
                 "Forward raised %s, but replaying it produced no non-finite "
                 "activation and every parameter is finite — this is not a NaN "
@@ -150,16 +171,38 @@ class TrainingMonitor:
 
     def check_gradients(
         self, batch: dict, grad_norm: torch.Tensor, losses: dict[str, torch.Tensor]
-    ) -> None:
-        """Verify the gradient norm is finite before the optimiser consumes it.
+    ) -> bool:
+        """Whether this step's gradients are safe for the optimiser to apply.
 
-        This is the earliest point at which a divergence is visible.  AdamW
-        applied to a NaN gradient writes NaN parameters, and from then on every
-        forward fails regardless of the data — so a run that stops here still
-        has healthy weights and an intact history of how it got here.
+        This is the earliest point at which a fault is visible.  AdamW applied
+        to a NaN gradient writes NaN parameters, and from then on every forward
+        fails regardless of the data — so catching it here leaves the weights
+        healthy and the history intact.
+
+        Returns False to skip the step rather than aborting the run, when
+        skipping is enabled.  A reparameterised sampler can produce an
+        undefined derivative on an individual draw at a low but non-zero rate,
+        and losing a whole run to one of ~10^3 draws per step would be the
+        wrong trade.  Consecutive skips are a different thing entirely — that
+        is a genuine divergence, and it aborts with a full report.
         """
         if torch.isfinite(grad_norm).all():
-            return
+            self._consecutive_skips = 0
+            return True
+
+        self._skipped_steps += 1
+        self._consecutive_skips += 1
+        if self.skip_nonfinite_steps and (
+            self._consecutive_skips <= self.max_consecutive_skips
+        ):
+            logger.warning(
+                "step %d: non-finite gradient (|g|=%s) — skipping the update. "
+                "%d skipped so far, %d in a row; aborting at %d in a row.",
+                self._step, float(grad_norm), self._skipped_steps,
+                self._consecutive_skips, self.max_consecutive_skips + 1,
+            )
+            return False
+
         report = self._new_report("backward")
         report.add(
             "LOSS TERMS",
@@ -167,10 +210,12 @@ class TrainingMonitor:
         )
         report.add("GRADIENT NORM", [f"    |g| = {float(grad_norm)}"])
         report.add(
-            "NON-FINITE GRADIENTS",
-            [f"    {fault.as_row()}" for fault in nonfinite_gradients(self.modules)[:20]],
+            "SKIPS",
+            [f"    {self._consecutive_skips} consecutive, {self._skipped_steps} total"],
         )
+        report.add("NON-FINITE GRADIENTS", _rows(nonfinite_gradients(self.audited_modules)))
         self._fill_and_raise(report, batch)
+        return False
 
     def end_step(
         self, losses: dict[str, torch.Tensor], grad_norm: torch.Tensor
@@ -198,12 +243,12 @@ class TrainingMonitor:
         rather than replaying a second time — the two runs would consume
         different RNG and need not agree.
         """
-        parameter_faults = nonfinite_parameters(self.modules)
+        parameter_faults = nonfinite_parameters(self.audited_modules)
         if parameter_faults:
             report.stage = "parameters"
             report.add(
                 "NON-FINITE PARAMETERS  (the fault is from an EARLIER step)",
-                [f"    {fault.as_row()}" for fault in parameter_faults[:20]],
+                _rows(parameter_faults),
             )
         else:
             report.add(
@@ -250,6 +295,22 @@ class TrainingMonitor:
                 lines = [f"    replay raised {type(exc).__name__}", *guard.lines()]
                 return lines, bool(guard.events)
             return guard.lines(), bool(guard.events)
+
+
+def _rows(faults: list, limit: int = 20) -> list[str]:
+    """Render an audit result, stating the total before truncating.
+
+    The count matters more than the rows.  A report that silently showed the
+    first 20 of 300 affected tensors would read as "only the gene embeddings
+    broke" purely because of `named_parameters()` ordering, which is a
+    conclusion about the model rather than about the truncation.
+    """
+    if not faults:
+        return []
+    head = f"    {len(faults)} parameter tensor(s) affected"
+    if len(faults) > limit:
+        head += f"; first {limit} by declaration order"
+    return [head, ""] + [f"    {fault.as_row()}" for fault in faults[:limit]]
 
 
 def _as_floats(losses: dict[str, torch.Tensor]) -> dict[str, float]:

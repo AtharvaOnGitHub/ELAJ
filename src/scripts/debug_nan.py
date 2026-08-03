@@ -84,106 +84,16 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def nonfinite_count(obj) -> int:
-    """Total non-finite elements in a tensor, or nested in a dict/tuple/list."""
-    import torch
-
-    if isinstance(obj, torch.Tensor):
-        if not obj.is_floating_point():
-            return 0
-        return int((~torch.isfinite(obj)).sum().item())
-    if isinstance(obj, dict):
-        return sum(nonfinite_count(v) for v in obj.values())
-    if isinstance(obj, (tuple, list)):
-        return sum(nonfinite_count(v) for v in obj)
-    return 0
-
-
-def describe(obj) -> str:
-    """Shape and finite range summary, for the report."""
-    import torch
-
-    if isinstance(obj, torch.Tensor) and obj.is_floating_point():
-        finite = obj[torch.isfinite(obj)]
-        if finite.numel() == 0:
-            return f"shape={tuple(obj.shape)} all non-finite"
-        return (
-            f"shape={tuple(obj.shape)} "
-            f"range=[{finite.min().item():.4g}, {finite.max().item():.4g}]"
-        )
-    if isinstance(obj, torch.Tensor):
-        return f"shape={tuple(obj.shape)} dtype={obj.dtype}"
-    if isinstance(obj, dict):
-        return f"dict[{len(obj)}]"
-    return type(obj).__name__
-
-
-class NaNLocator:
-    """Records, in execution order, which modules emit non-finite output.
-
-    A module whose inputs were all finite but whose output is not is where the
-    fault begins.  Everything downstream of it is a consequence.
-    """
-
-    def __init__(self, model) -> None:
-        self._model = model
-        self._handles: list = []
-        self.events: list[dict] = []
-
-    def __enter__(self) -> "NaNLocator":
-        for name, module in self._model.named_modules():
-            if name:  # skip the root, whose output is the whole result dict
-                self._handles.append(
-                    module.register_forward_hook(self._make_hook(name))
-                )
-        return self
-
-    def __exit__(self, *exc) -> None:
-        for h in self._handles:
-            h.remove()
-        self._handles.clear()
-
-    def _make_hook(self, name: str):
-        def hook(module, inputs, output):
-            n_out = nonfinite_count(output)
-            if n_out == 0:
-                return
-            self.events.append({
-                "name": name,
-                "type": type(module).__name__,
-                "n_in": nonfinite_count(inputs),
-                "n_out": n_out,
-                "in_desc": ", ".join(describe(i) for i in inputs),
-                "out_desc": describe(output),
-            })
-        return hook
-
-    def report(self) -> bool:
-        """Print the trace. Returns True if a non-finite value was seen."""
-        if not self.events:
-            print("    no non-finite values in any module output  OK")
-            return False
-
-        origins = [e for e in self.events if e["n_in"] == 0]
-        print(f"    {len(self.events)} module(s) emitted non-finite output\n")
-
-        if origins:
-            first = origins[0]
-            print(f"    ORIGIN: {first['name']}  ({first['type']})")
-            print(f"      inputs  : all finite — {first['in_desc']}")
-            print(f"      output  : {first['n_out']} non-finite — {first['out_desc']}")
-            print("\n    Everything below is downstream of it:")
-        else:
-            print("    No module had finite inputs and non-finite output, so the "
-                  "fault entered with the batch itself — see the batch report above.")
-
-        for e in self.events[:15]:
-            marker = "  <-- ORIGIN" if origins and e is origins[0] else ""
-            print(f"      {e['name']:<52} {e['type']:<22} "
-                  f"in={e['n_in']:>8} out={e['n_out']:>10}{marker}")
-        if len(self.events) > 15:
-            print(f"      ... and {len(self.events) - 15} more")
-        return True
+# The hook machinery and the finiteness helpers live in the package, not
+# here, because the live training monitor uses the identical code.  Two
+# copies would let this script and the training run disagree about what
+# counts as a fault, which is the one thing a reproduction tool cannot do.
+from endo_model.training.diagnostics import NaNGuard  # noqa: E402
+from endo_model.utils.tensors import (  # noqa: E402
+    describe,
+    nonfinite_count,
+    nonfinite_positions,
+)
 
 
 def report_batch(batch, label) -> bool:
@@ -214,9 +124,8 @@ def report_batch(batch, label) -> bool:
 
         faults = True
         print(f"    [{label}] '{key}': {n} non-finite — {describe(value)}  <-- FAULT")
-        if isinstance(value, torch.Tensor) and value.dim() == 1:
-            rows = (~torch.isfinite(value)).nonzero().flatten()[:8].tolist()
-            print(f"        first offending positions: {rows}")
+        if isinstance(value, torch.Tensor):
+            print(f"        first offending positions: {nonfinite_positions(value)}")
 
     if not faults:
         print(f"    [{label}] inputs OK")
@@ -224,7 +133,6 @@ def report_batch(batch, label) -> bool:
 
 
 def main() -> None:
-    # Parse before importing torch so --help works without the GPU stack.
     args = parse_args()
 
     import torch
@@ -314,22 +222,22 @@ def main() -> None:
         batch_bad = report_batch(batch, label) if verbose else False
         moved = _to_device(batch, device)
 
-        with NaNLocator(model) as locator, torch.no_grad():
+        with NaNGuard(model) as guard, torch.no_grad():
             try:
                 model(moved)
             except Exception as exc:  # a raise is also a useful result
                 print(f"\n── {label} " + "─" * 40)
                 print(f"    forward raised {type(exc).__name__}: {str(exc)[:300]}")
-                locator.report()
+                print("\n".join(guard.lines()))
                 return True
-            if locator.events:
+            if guard.events:
                 if not verbose:
                     print(f"\n── {label} " + "─" * 40)
                     report_batch(batch, label)
-                locator.report()
+                print("\n".join(guard.lines()))
                 return True
             if verbose:
-                locator.report()
+                print("\n".join(guard.lines()))
         return batch_bad
 
     if args.match_training:
@@ -345,8 +253,11 @@ def main() -> None:
                 return
             if i % 25 == 0:
                 print(f"    ... {i} batches clean")
-        print(f"\nNo fault in {args.batches} shuffled batches. The fault may need "
-              "a gradient step; run training with torch.autograd.set_detect_anomaly.")
+        print(f"\nNo fault in {args.batches} shuffled batches. This model is "
+              "freshly initialised and takes no optimiser step, so a fault that "
+              "only appears once the weights have moved cannot show up here at "
+              "all — run training itself, where TrainingMonitor reports the same "
+              "trace at whichever step it happens.")
         return
 
     # Survey mode: one batch per study.  With shuffle=False the sampler is

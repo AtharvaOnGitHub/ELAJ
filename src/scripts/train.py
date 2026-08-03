@@ -194,6 +194,22 @@ def main() -> None:
         payload = CheckpointManager.load(str(resume_path), model, optimizer, map_location=str(device))
         start_epoch = payload.get("epoch", 0) + 1
 
+    # ── Diagnostics ───────────────────────────────────────────────────────────
+    # Watches every step for non-finite values.  The normal path costs one
+    # extra scalar check per step; the expensive per-module instrumentation is
+    # installed only to replay a step that has already failed, which is what
+    # turns "a distribution rejected a NaN" into "this module made it".
+    from endo_model.training.diagnostics import NonFiniteFault, TrainingMonitor
+    diag_cfg = train_cfg.diagnostics
+    monitor = TrainingMonitor(
+        model=model,
+        extra_modules=[composite_loss],
+        log_every=diag_cfg.log_every,
+        detect_anomaly=diag_cfg.detect_anomaly,
+        dump_dir=(out_dir / "faults") if diag_cfg.dump_faults else None,
+        id_to_name={s["id"]: s["name"] for s in study_configs},
+    )
+
     # ── Trainer ───────────────────────────────────────────────────────────────
     from endo_model.training.trainer import Trainer
     trainer = Trainer(
@@ -207,6 +223,7 @@ def main() -> None:
         checkpoint_dir=str(ckpt_dir),
         device=device,
         cce_enabled=model_cfg.cce.enabled,
+        monitor=monitor,
     )
     trainer.current_epoch = start_epoch
 
@@ -215,7 +232,18 @@ def main() -> None:
 
     # ── Train ─────────────────────────────────────────────────────────────────
     logger.info("Starting training — max_epochs=%d", train_cfg.max_epochs)
-    history = trainer.fit()
+    try:
+        with monitor:
+            history = trainer.fit()
+    except NonFiniteFault:
+        # The report is already logged and written; re-raising it verbatim
+        # would bury it under a traceback pointing at this line, which is not
+        # where anything went wrong.
+        logger.error(
+            "Training stopped on a non-finite value. Report and failing batch "
+            "are in %s", out_dir / "faults",
+        )
+        sys.exit(1)
 
     # ── Write metrics CSV ─────────────────────────────────────────────────────
     _write_metrics_csv(out_dir / "metrics.csv", history)

@@ -18,3 +18,9 @@ overrides:
   # at 128 — the halving is headroom, not a tuning choice.  Raise it once a run
   # has reported real peak memory.
   training.batch_size: 128
+
+  # Denser than the default 50 because this run's job is to produce evidence,
+  # not a model.  The previous attempt died without recording which step it
+  # reached, which left "bad cell in the corpus" and "optimisation diverged"
+  # equally consistent with the log — and those need opposite investigations.
+  training.diagnostics.log_every: 10

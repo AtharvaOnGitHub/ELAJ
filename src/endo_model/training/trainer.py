@@ -24,6 +24,7 @@ from endo_model.configs.training_config import TrainingConfig
 from endo_model.model.objectives.composite import CompositeLoss
 from endo_model.training.callbacks import EarlyStopping, MetricLogger
 from endo_model.training.checkpointing import CheckpointManager
+from endo_model.training.diagnostics import TrainingMonitor
 
 
 class Trainer:
@@ -40,6 +41,10 @@ class Trainer:
         checkpoint_dir:  Where to save checkpoints (None = no saving).
         device:          torch.device for training.
         cce_enabled:     Whether to run two forward passes per batch for CCE.
+        monitor:         TrainingMonitor watching for non-finite values.  None
+                         builds a default one, so a Trainer constructed directly
+                         (in a test, say) still reports where a NaN came from
+                         rather than raising from inside a distribution.
     """
 
     def __init__(
@@ -54,6 +59,7 @@ class Trainer:
         checkpoint_dir: str | None = None,
         device: torch.device | None = None,
         cce_enabled: bool = False,
+        monitor: TrainingMonitor | None = None,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -72,6 +78,7 @@ class Trainer:
             patience=config.early_stop_patience
         )
         self.logger = MetricLogger()
+        self.monitor = monitor or TrainingMonitor(model, [composite_loss])
 
         self.global_step = 0
         self.current_epoch = 0
@@ -140,24 +147,37 @@ class Trainer:
         for batch in self.train_loader:
             batch = _to_device(batch, self.device)
             self.optimizer.zero_grad()
+            self.monitor.begin_step(self.current_epoch, self.global_step)
 
-            output1 = self.model(batch)
-            output2 = self.model(batch) if self.cce_enabled else None
+            try:
+                output1 = self.model(batch)
+                output2 = self.model(batch) if self.cce_enabled else None
+                losses = self.composite_loss(
+                    output1, batch,
+                    current_step=self.global_step,
+                    total_steps=self.total_steps,
+                    model_output2=output2,
+                )
+            except Exception as exc:  # noqa: BLE001 — re-raised with a location
+                self.monitor.forward_failed(batch, exc)
+                raise
 
-            losses = self.composite_loss(
-                output1, batch,
-                current_step=self.global_step,
-                total_steps=self.total_steps,
-                model_output2=output2,
-            )
+            self.monitor.check_losses(batch, losses)
 
             losses["total"].backward()
-            nn.utils.clip_grad_norm_(
+            # clip_grad_norm_ returns the *pre-clip* total norm, which is the
+            # only cheap early warning of a divergence: it climbs for several
+            # steps before anything goes non-finite.  Discarding it threw that
+            # away, and clipping hides the climb from the loss curve.
+            grad_norm = nn.utils.clip_grad_norm_(
                 self.model.parameters(), self.config.grad_clip_norm
             )
+            self.monitor.check_gradients(batch, grad_norm, losses)
+
             self.optimizer.step()
             self.global_step += 1
 
+            self.monitor.end_step(losses, grad_norm)
             self.logger.log({k: v.item() for k, v in losses.items()})
 
         return self.logger.epoch_averages()

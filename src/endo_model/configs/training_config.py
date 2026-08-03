@@ -57,6 +57,36 @@ class KLAnnealingConfig:
 
 
 @dataclass
+class DiagnosticsConfig:
+    """Non-finite detection and progress reporting for a training run.
+
+    `log_every` is the one setting that should essentially never be 0.  Without
+    per-step lines the log cannot distinguish a run that died on its first
+    batch from one that died after nine hundred, and those call for opposite
+    investigations — a bad cell in the corpus versus an optimisation that
+    diverged.
+    """
+
+    log_every: int = 50
+    # torch's autograd anomaly mode, which attributes a NaN produced during
+    # backward to the forward op that created the graph node.  Costs 2-4x step
+    # time, so it stays off until a run has shown the fault arriving through
+    # the gradients rather than the forward pass.
+    detect_anomaly: bool = False
+    # Write the failing batch and a full report to output_dir/faults/, so the
+    # exact input can be replayed later without rebuilding a Dataset.
+    dump_faults: bool = True
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DiagnosticsConfig":
+        return cls(
+            log_every=int(d.get("log_every", 50)),
+            detect_anomaly=bool(d.get("detect_anomaly", False)),
+            dump_faults=bool(d.get("dump_faults", True)),
+        )
+
+
+@dataclass
 class TrainingConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -66,6 +96,7 @@ class TrainingConfig:
     early_stop_patience: int = 10
     val_check_interval: int = 1
     kl_annealing: KLAnnealingConfig = field(default_factory=KLAnnealingConfig)
+    diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     resume_from_checkpoint: Optional[str] = None
 
     # DataLoader worker processes.  None auto-sizes to the job's CPU allocation
@@ -84,6 +115,7 @@ class TrainingConfig:
             early_stop_patience=int(d.get("early_stop_patience", 10)),
             val_check_interval=int(d.get("val_check_interval", 1)),
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
+            diagnostics=DiagnosticsConfig.from_dict(d.get("diagnostics", {})),
             resume_from_checkpoint=d.get("resume_from_checkpoint"),
             num_workers=(
                 int(d["num_workers"]) if d.get("num_workers") is not None else None

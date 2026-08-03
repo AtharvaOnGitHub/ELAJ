@@ -84,4 +84,9 @@ else
 fi
 
 echo "Running: python scripts/debug_nan.py ${ARGS[*]}"
-python scripts/debug_nan.py "${ARGS[@]}"
+# PYTHONUNBUFFERED: SLURM sends SIGKILL at the walltime limit, and a killed
+# process never flushes its stdout buffer.  A job that hits its limit would
+# otherwise lose every print() it made — including a fault report it had
+# already produced — while stderr survived, which reads as "it hung".
+export PYTHONUNBUFFERED=1
+python -u scripts/debug_nan.py "${ARGS[@]}"

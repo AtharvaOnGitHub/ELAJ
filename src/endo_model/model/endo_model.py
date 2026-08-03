@@ -32,6 +32,7 @@ from endo_model.model.embeddings.value_encoder import ValueEncoder
 from endo_model.model.encoders.aggregation import AggregationEncoder
 from endo_model.model.encoders.group_encoder import HierarchicalEncoder
 from endo_model.model.encoders.token_constructor import TokenConstructor
+from endo_model.model.gene_layout import MeasuredGeneLayoutCache
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace
 
 
@@ -84,19 +85,19 @@ class EndoFoundationModel(nn.Module):
         self.dispersion = PerGeneDispersion(vocabulary.vocab_size)
 
         # ── Pre-computed index maps for _build_gene_reps ─────────────────────
-        self._group_name_to_seq_pos: dict[str, int] = {
-            name: i for i, name in enumerate(vocabulary.group_names)
-        }
         # For each gene group: list of global indices and within-group indices
         self._group_global_idxs: dict[str, list[int]] = {
             name: vocabulary.global_indices_for_group(name)
             for name in vocabulary.group_names
         }
-        # Map global_idx → (group_name, within_idx) for fast lookup
-        self._global_to_group: dict[int, tuple[str, int]] = {}
-        for name in vocabulary.group_names:
-            for within_i, global_i in enumerate(self._group_global_idxs[name]):
-                self._global_to_group[global_i] = (name, within_i)
+        # Which measured genes belong to which group, and where each one lands
+        # in the packed (G_meas,) axis.  Keyed by study, because that mapping
+        # depends only on the study's DNS pattern and PerStudyBatchSampler
+        # guarantees one study per batch — 11 layouts for the whole run rather
+        # than one rebuild per step.  See gene_layout.py.
+        self._gene_layouts = MeasuredGeneLayoutCache(
+            list(vocabulary.group_names), self._group_global_idxs
+        )
 
     def forward(self, batch: dict) -> dict[str, Tensor]:
         """Full forward pass.
@@ -169,53 +170,28 @@ class EndoFoundationModel(nn.Module):
         device = group_cls_out.device
         d_gene_rep = self.config.d_token + self.config.d_agg
 
-        # Global measured mask (same for all cells — use row 0)
-        measured_mask = ~batch["is_dns"][0]                         # (vocab_size,)
-        measured_global_idxs = measured_mask.nonzero(as_tuple=True)[0]  # (G_meas,)
-        G_meas = measured_global_idxs.shape[0]
+        # One .item() on a scalar, against the ~15 000-element .tolist() this
+        # replaces.  Both synchronise, but this one neither copies an array back
+        # to the host nor builds a Python dict the next step discards.
+        study_id = int(batch["study_id"][0].item())
+        layout = self._gene_layouts.get(study_id, batch["is_dns"][0])
 
-        gene_reps = torch.zeros(B, G_meas, d_gene_rep, device=device)
+        gene_reps = torch.zeros(B, layout.n_measured, d_gene_rep, device=device)
 
-        # O(G_meas) dict: global_idx → position in measured_global_idxs.
-        # Replaces the O(G_k × G_meas) per-gene tensor scan in the inner loop.
-        global_to_meas_pos: dict[int, int] = {
-            int(g): pos for pos, g in enumerate(measured_global_idxs.tolist())
-        }
-
-        for group_name in self.vocabulary.group_names:
-            global_idxs_all = self._group_global_idxs[group_name]  # list[int]
-            seq_pos = self._group_name_to_seq_pos[group_name]       # int
-
-            # Within-group indices and their positions in measured_global_idxs
-            within_idxs_sel: list[int] = []
-            positions_in_meas: list[int] = []
-
-            for within_i, global_i in enumerate(global_idxs_all):
-                if global_i in global_to_meas_pos:
-                    within_idxs_sel.append(within_i)
-                    positions_in_meas.append(global_to_meas_pos[global_i])
-
-            if not within_idxs_sel:
-                continue
-
-            n_sel = len(within_idxs_sel)
-            pos_t = torch.tensor(positions_in_meas, device=device, dtype=torch.long)
-            within_t = (
-                torch.tensor(within_idxs_sel, device=device, dtype=torch.long)
-                .unsqueeze(0)
-                .expand(B, -1)
-            )                                                       # (B, n_sel)
+        for group in layout.slices:
+            n_sel = group.n_selected
 
             # Identity embeddings from group table: (B, n_sel, d_token)
-            identity = self.gene_embedding(group_name, within_t)
+            within_t = group.within_idxs.unsqueeze(0).expand(B, -1)  # (B, n_sel)
+            identity = self.gene_embedding(group.name, within_t)
 
             # Group CLS from aggregation output: (B, d_agg) → (B, n_sel, d_agg)
             group_cls_g = (
-                group_cls_out[:, seq_pos, :].unsqueeze(1).expand(-1, n_sel, -1)
+                group_cls_out[:, group.seq_pos, :].unsqueeze(1).expand(-1, n_sel, -1)
             )
 
             # Concatenate and place into output
             gene_rep_group = torch.cat([identity, group_cls_g], dim=-1)  # (B, n_sel, d_gene_rep)
-            gene_reps[:, pos_t, :] = gene_rep_group
+            gene_reps[:, group.meas_positions, :] = gene_rep_group
 
-        return gene_reps, measured_global_idxs
+        return gene_reps, layout.measured_global_idxs

@@ -1,6 +1,10 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
-#SBATCH --gres=gpu:a100:1
+# a100_80, not a100: the bare `a100` constraint resolves to a 40 GB card, and
+# run 49817807 measured 18.3 GB in use at batch 128 — enough headroom to matter
+# but not enough to raise the batch, which is the cheapest throughput win when
+# the GPU is only 70% busy.
+#SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=24:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1

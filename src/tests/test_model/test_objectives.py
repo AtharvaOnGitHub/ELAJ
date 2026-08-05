@@ -184,7 +184,10 @@ class TestCompositeLoss:
             _make_fake_batch(),
             current_step=0, total_steps=100,
         )
-        expected = {"nb", "kl_gauss", "kl_vmf", "dab", "cce", "total"}
+        # beta_kl is the KL annealing weight, reported so metrics.csv records
+        # which objective each epoch was actually optimising — the weights ramp,
+        # so two epochs' totals are not otherwise comparable.
+        expected = {"nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce", "total"}
         assert expected == set(out.keys())
 
     def test_total_is_scalar_finite(self):

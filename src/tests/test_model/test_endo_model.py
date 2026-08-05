@@ -143,18 +143,50 @@ class TestEndoFoundationModel:
         assert (out["kappa"] > 0).all()
 
     def test_backward_through_loss(self):
+        """Gradient must reach every component on the reconstruction path.
+
+        The proxy loss is *weighted* deliberately. A plain `mu_hat.sum()` is
+        `library_size.sum()` — see test_mu_hat_rows_sum_to_library_size, which
+        asserts each row sums to its library size — so it is constant with
+        respect to every parameter and its true gradient is exactly zero. That
+        version of this test passed only on float32 rounding noise in the
+        softmax backward, and stopped passing the moment the graph got shorter.
+        Non-uniform weights break the constancy, so the gradient is real.
+
+        Checked per component rather than "some parameter somewhere", so a
+        severed path is named rather than masked by the others.
+        """
         batch = make_batch(self.vocab)
         out = self.model(batch)
-        # Simple reconstruction proxy loss
-        loss = out["mu_hat"].sum()
-        loss.backward()
-        # Check that at least some parameter has a gradient
-        has_grad = any(
-            p.grad is not None and p.grad.abs().sum().item() > 0
-            for p in self.model.parameters()
-            if p.requires_grad
-        )
-        assert has_grad
+
+        weights = torch.linspace(0.5, 1.5, out["mu_hat"].shape[-1])
+        (out["mu_hat"] * weights).sum().backward()
+
+        def grad_mass(prefix: str) -> float:
+            params = [p for n, p in self.model.named_parameters()
+                      if n.startswith(prefix + ".") and p.requires_grad]
+            assert params, f"no parameters found under {prefix!r}"
+            return sum(
+                p.grad.abs().sum().item() for p in params if p.grad is not None
+            )
+
+        for component in [
+            "gene_embedding",       # both as encoder input and decoder gene side
+            "value_encoder",
+            "dsbn",
+            "metadata_encoder",
+            "hierarchical_encoder",
+            "aggregation_encoder",
+            "latent_space",
+            "gene_query",           # the per-group decoder projections
+            "decoder",
+        ]:
+            assert grad_mass(component) > 0, f"no gradient reached {component}"
+
+        # theta is returned but mu_hat does not use it — only the NB loss does.
+        # A gradient here would mean the reconstruction path picked up a
+        # dependency it should not have.
+        assert grad_mass("dispersion") == 0, "dispersion should not affect mu_hat"
 
     def test_two_forward_passes_different_z_in_train(self):
         """Two forward passes should produce different z (due to dropout/reparameterisation)."""

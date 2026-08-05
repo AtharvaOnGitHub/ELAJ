@@ -8,15 +8,29 @@ class EarlyStopping:
     """Stop training if validation loss does not improve for `patience` epochs.
 
     Args:
-        patience:  Number of epochs to tolerate no improvement.
-        min_delta: Minimum absolute improvement to count as progress.
+        patience:       Epochs to tolerate no improvement.
+        min_delta:      Minimum absolute improvement to count as progress.
+        warmup_epochs:  Epochs to ignore entirely before stopping is allowed.
+                        val_loss is a *moving* objective while beta_kl and
+                        lambda_dab ramp, so an epoch late in the ramp is scored
+                        more harshly than epoch 0 and looks worse even when the
+                        model improved. Run 49817807 stopped at epoch 10 on
+                        exactly that artefact, having genuinely learned nothing
+                        — the stop was spurious even though the verdict was not.
     """
 
-    def __init__(self, patience: int = 10, min_delta: float = 0.0) -> None:
+    def __init__(
+        self,
+        patience: int = 10,
+        min_delta: float = 0.0,
+        warmup_epochs: int = 0,
+    ) -> None:
         self.patience = patience
         self.min_delta = min_delta
+        self.warmup_epochs = warmup_epochs
         self._best = float("inf")
         self._counter = 0
+        self._seen = 0
         self.should_stop = False
 
     def step(self, val_loss: float) -> bool:
@@ -28,18 +42,23 @@ class EarlyStopping:
         Returns:
             True if training should stop.
         """
+        self._seen += 1
         if val_loss < self._best - self.min_delta:
             self._best = val_loss
             self._counter = 0
         else:
             self._counter += 1
-            if self._counter >= self.patience:
-                self.should_stop = True
+
+        # During warmup, track the best value but never act on it: the losses
+        # being compared are not the same function of the parameters.
+        if self._seen > self.warmup_epochs and self._counter >= self.patience:
+            self.should_stop = True
         return self.should_stop
 
     def reset(self) -> None:
         self._best = float("inf")
         self._counter = 0
+        self._seen = 0
         self.should_stop = False
 
 

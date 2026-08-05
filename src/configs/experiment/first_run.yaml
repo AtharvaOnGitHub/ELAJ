@@ -12,15 +12,15 @@ output_dir: outputs/first_run/
 seed: 24
 
 overrides:
-  # Each GroupEncoder self-attends over its group's genes, so the retained
-  # attention is (B, n_heads, G_k+1, G_k+1) per layer.  Summed over the 45
-  # groups of the current vocabulary that is ~45.7 GB at batch 256 and ~22.9 GB
-  # at 128 — the halving is headroom, not a tuning choice.  Raise it once a run
-  # has reported real peak memory.
-  training.batch_size: 128
+  # Raised from 128. Closing the decoder bypass removed ~1.1 GB of activations
+  # per forward (688 MB of gene_reps, 459 MB of decoder intermediate), and the
+  # job now requests an 80 GB card rather than the 40 GB one `--gres=gpu:a100`
+  # was resolving to. Against that, BatchedGroupEncoder pads every group to the
+  # largest (494 tokens), which adds roughly 43% to encoder activations.
+  # Run 49817807 used 18.3 GB at batch 128 on the old architecture — so this
+  # should land near half of an 80 GB card. If it OOMs, drop to 192.
+  training.batch_size: 256
 
   # Denser than the default 50 because this run's job is to produce evidence,
-  # not a model.  The previous attempt died without recording which step it
-  # reached, which left "bad cell in the corpus" and "optimisation diverged"
-  # equally consistent with the log — and those need opposite investigations.
+  # not a model.
   training.diagnostics.log_every: 10

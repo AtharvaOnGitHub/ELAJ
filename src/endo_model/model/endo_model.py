@@ -2,7 +2,7 @@
 
 Forward pass (one call):
   1. TokenConstructor  → per-group gene tokens  (B, G_k, d_token) per group
-  2. HierarchicalEncoder → group CLS dict       (B, d_token) per group
+  2. BatchedGroupEncoder → group CLS dict       (B, d_token) per group
   3. MetadataEncoder   → metadata token seq     (B, 3, d_agg)
   4. AggregationEncoder → cell_cls  (the only per-cell tensor it returns)
   5. BifurcatedLatentSpace → z, z_proj, ...
@@ -33,7 +33,7 @@ from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
 from endo_model.model.embeddings.value_encoder import ValueEncoder
 from endo_model.model.encoders.aggregation import AggregationEncoder
-from endo_model.model.encoders.group_encoder import HierarchicalEncoder
+from endo_model.model.encoders.batched import BatchedGroupEncoder
 from endo_model.model.encoders.token_constructor import TokenConstructor
 from endo_model.model.gene_layout import MeasuredGeneLayoutCache
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace
@@ -64,8 +64,12 @@ class EndoFoundationModel(nn.Module):
         self.token_constructor = TokenConstructor(
             self.gene_embedding, self.value_encoder, self.dsbn, config.d_token
         )
-        self.hierarchical_encoder = HierarchicalEncoder(
-            vocabulary.group_names, config.d_token,
+        # Same 45 independent encoders as before, executed as grouped matmuls
+        # rather than 45 Python calls.  Identical parameters and outputs — see
+        # tests/test_model/test_batched_encoder.py, which checks it against real
+        # nn.TransformerEncoderLayer stacks holding the same weights.
+        self.hierarchical_encoder = BatchedGroupEncoder(
+            vocabulary.group_names, group_sizes, config.d_token,
             n_heads=config.group_encoder.n_heads,
             n_layers=config.group_encoder.n_layers,
             dropout=config.group_encoder.dropout,

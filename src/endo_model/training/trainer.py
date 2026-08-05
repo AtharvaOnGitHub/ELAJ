@@ -75,7 +75,8 @@ class Trainer:
             CheckpointManager(checkpoint_dir) if checkpoint_dir else None
         )
         self.early_stopping = EarlyStopping(
-            patience=config.early_stop_patience
+            patience=config.early_stop_patience,
+            warmup_epochs=config.early_stop_warmup_epochs,
         )
         self.logger = MetricLogger()
         self.monitor = monitor or TrainingMonitor(model, [composite_loss])

@@ -9,7 +9,7 @@ scheduler:
   T_max: 100           # matches max_epochs
 
 batch_size: 256
-max_epochs: 100
+max_epochs: 50
 
 # DataLoader worker processes.  null auto-sizes to the job's CPU allocation
 # (cores visible to the process, minus one for the training step itself), so the
@@ -19,6 +19,13 @@ max_epochs: 100
 num_workers: null
 grad_clip_norm: 1.0
 early_stop_patience: 10
+# Do not early-stop while the loss weights are still ramping.  val_loss includes
+# beta_kl * kl and lambda_dab * dab, and both schedules are derived from
+# total_steps = steps_per_epoch * max_epochs — so an epoch late in the ramp is
+# scored by a *heavier* objective than epoch 0 and looks worse even when the
+# model improved.  Run 49817807 stopped at epoch 10 for exactly this reason.
+# lambda_dab completes at 50% of training, so nothing before then is comparable.
+early_stop_warmup_epochs: 25
 val_check_interval: 1
 
 kl_annealing:

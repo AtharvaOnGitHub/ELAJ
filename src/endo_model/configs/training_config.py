@@ -103,6 +103,7 @@ class TrainingConfig:
     max_epochs: int = 100
     grad_clip_norm: float = 1.0
     early_stop_patience: int = 10
+    early_stop_warmup_epochs: int = 0
     val_check_interval: int = 1
     kl_annealing: KLAnnealingConfig = field(default_factory=KLAnnealingConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
@@ -122,6 +123,7 @@ class TrainingConfig:
             max_epochs=int(d.get("max_epochs", 100)),
             grad_clip_norm=float(d.get("grad_clip_norm", 1.0)),
             early_stop_patience=int(d.get("early_stop_patience", 10)),
+            early_stop_warmup_epochs=int(d.get("early_stop_warmup_epochs", 0)),
             val_check_interval=int(d.get("val_check_interval", 1)),
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
             diagnostics=DiagnosticsConfig.from_dict(d.get("diagnostics", {})),

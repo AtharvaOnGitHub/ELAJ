@@ -126,6 +126,62 @@ def _uncategorise(column):
     return column
 
 
+def _disease_codes_to_keep(statuses: Optional[list[str]]) -> Optional[set[int]]:
+    """Integer codes to retain, or None to keep every cell.
+
+    Args:
+        statuses: Status names to keep, e.g. ["eutopic", "ectopic",
+                  "adenomyosis"]. None or empty keeps everything.
+
+    Raises:
+        ValueError: on a name that is not a known status. A typo would
+            otherwise silently drop the entire corpus, and the first symptom
+            would be an empty dataset several minutes into a job.
+    """
+    if not statuses:
+        return None
+    unknown = [s for s in statuses if s not in DISEASE_STATUS_TO_INT]
+    if unknown:
+        raise ValueError(
+            f"Unknown disease_status values {unknown}. "
+            f"Known statuses: {sorted(DISEASE_STATUS_TO_INT)}."
+        )
+    return {DISEASE_STATUS_TO_INT[s] for s in statuses}
+
+
+def _select_disease_cells(
+    cell_indices: list[int],
+    disease_codes: np.ndarray,
+    keep_codes: Optional[set[int]],
+    study_name: str,
+    split: str,
+) -> list[int]:
+    """Drop cells whose disease status is not being kept.
+
+    Applied per study and per split, so a study that contributes nothing to a
+    split says so in the log rather than disappearing without comment.
+    """
+    if keep_codes is None:
+        return cell_indices
+
+    kept = [i for i in cell_indices if int(disease_codes[i]) in keep_codes]
+    dropped = len(cell_indices) - len(kept)
+    if dropped:
+        logger.info(
+            "Study '%s' split='%s': disease filter dropped %d of %d cells, "
+            "%d remain",
+            study_name, split, dropped, len(cell_indices), len(kept),
+        )
+    if cell_indices and not kept:
+        logger.warning(
+            "Study '%s' split='%s': the disease filter removed every cell. "
+            "The study still contributes a study id and DSBN parameters that "
+            "will never receive a gradient in this split.",
+            study_name, split,
+        )
+    return kept
+
+
 def _disease_status_codes(obs, study_name: str) -> np.ndarray:
     """Per-cell disease status as int64 codes (see DISEASE_STATUS_TO_INT).
 
@@ -223,9 +279,12 @@ class EndometriosisDataset:
         test_fraction: float = 0.15,
         seed: int = 24,
         max_cells_per_study: Optional[int] = None,
+        include_disease_statuses: Optional[list[str]] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
+
+        keep_codes = _disease_codes_to_keep(include_disease_statuses)
 
         self._vocab = vocab
         self._split = split
@@ -313,12 +372,26 @@ class EndometriosisDataset:
             global_idx_arr = np.asarray(global_idxs, dtype=np.int64)
             local_idx_arr = np.asarray(study_local_idxs, dtype=np.int64)
 
+            # Coerce all obs-derived metadata once per study (vectorised), so
+            # the per-cell loop below does array indexing rather than pandas
+            # .iloc row access.
+            tissue_matrix = _tissue_level_matrix(adata.obs, name)
+            age_arr = _age_vector(adata.obs)
+            disease_arr = _disease_status_codes(adata.obs, name)
+
             # Select cells belonging to the requested split
             cell_mask = [
                 split_assignments.get(pid, "train") == split
                 for pid in study_patients
             ]
             cell_indices = [i for i, m in enumerate(cell_mask) if m]
+
+            # Disease filter before the subsample cap, so the cap applies to
+            # the cells actually being kept rather than to a pool the filter is
+            # about to shrink.
+            cell_indices = _select_disease_cells(
+                cell_indices, disease_arr, keep_codes, name, split
+            )
 
             if max_cells_per_study is not None and len(cell_indices) > max_cells_per_study:
                 cell_indices = rng_subsample.choice(
@@ -328,13 +401,6 @@ class EndometriosisDataset:
             logger.info(
                 "Study %d split='%s': %d cells", study_id, split, len(cell_indices)
             )
-
-            # Coerce all obs-derived metadata once per study (vectorised), so
-            # the per-cell loop below does array indexing rather than pandas
-            # .iloc row access.
-            tissue_matrix = _tissue_level_matrix(adata.obs, name)
-            age_arr = _age_vector(adata.obs)
-            disease_arr = _disease_status_codes(adata.obs, name)
 
             # Slice once, to this split's cells and this study's in-vocabulary
             # genes, and keep the result sparse.  Densification happens per

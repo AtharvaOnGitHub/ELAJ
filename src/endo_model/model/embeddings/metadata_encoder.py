@@ -1,9 +1,26 @@
-"""MetadataEncoder: assembles tissue, age, and disease status tokens.
+"""MetadataEncoder: the metadata tokens the aggregation encoder reads.
 
-Wraps three sub-encoders into a single module whose output is used as the
-metadata token sequence for the AggregationEncoder.  The three tokens are
-always in the order: tissue, age, disease_status — this ordering is a fixed
-convention (n_metadata = 3).
+Currently one token: age.
+
+Two fields were removed from here deliberately, and both removals change what
+the trained model can be used to claim.
+
+**disease_status.** The project's output is a disease atlas, and its headline
+result is whether the latent organises cells by disease.  If the encoder is
+*told* which cells are diseased it will separate them, and that separation is
+evidence of nothing — the answer was an input.  Disease status is now held out
+of the model entirely and used only to colour the UMAP, which is the only
+arrangement in which the picture supports a claim.
+
+**tissue.** Moved to the decoder rather than dropped; see
+decoder/bilinear_decoder.py.  Conditioning a decoder on a known covariate is
+standard, and it changes what the latent represents: the latent no longer has
+to spend capacity encoding "this cell came from myometrium", because the
+decoder is told separately.  What remains in the latent is the variation tissue
+does not explain.
+
+Age stays.  It is continuous, often missing, and not a label anyone will read
+off the UMAP as a finding.
 """
 
 import torch
@@ -11,14 +28,12 @@ import torch.nn as nn
 from torch import Tensor
 
 from .age_encoder import AgeEncoder
-from .disease_encoder import DiseaseStatusEncoder
-from .tissue_encoder import TissueHierarchyEncoder
 
-N_METADATA = 3  # tissue + age + disease_status
+N_METADATA = 1  # age
 
 
 class MetadataEncoder(nn.Module):
-    """Encodes tissue, age, and disease status into a shared token space.
+    """Encodes per-cell metadata into aggregation-encoder tokens.
 
     Args:
         d_agg: Token dimension for the aggregation encoder.
@@ -26,28 +41,15 @@ class MetadataEncoder(nn.Module):
 
     def __init__(self, d_agg: int) -> None:
         super().__init__()
-        self.tissue_encoder = TissueHierarchyEncoder(d_agg)
         self.age_encoder = AgeEncoder(d_agg)
-        self.disease_encoder = DiseaseStatusEncoder(d_agg)
 
-    def forward(
-        self,
-        tissue_levels: Tensor,
-        age: Tensor,
-        disease_status: Tensor,
-    ) -> Tensor:
-        """Encode all metadata fields into a sequence of tokens.
+    def forward(self, age: Tensor) -> Tensor:
+        """Encode metadata into a token sequence.
 
         Args:
-            tissue_levels:  (B, 4) long — tissue hierarchy levels.
-            age:            (B,) float — age in years, NaN if unknown.
-            disease_status: (B,) long — integer disease status code.
+            age: (B,) float — age in years, NaN if unknown.
 
         Returns:
-            (B, N_METADATA, d_agg) — stacked metadata token sequence.
-            Order: [tissue, age, disease_status].
+            (B, N_METADATA, d_agg) — metadata token sequence.
         """
-        tissue = self.tissue_encoder(tissue_levels)     # (B, d_agg)
-        age_enc = self.age_encoder(age)                 # (B, d_agg)
-        disease = self.disease_encoder(disease_status)  # (B, d_agg)
-        return torch.stack([tissue, age_enc, disease], dim=1)  # (B, 3, d_agg)
+        return torch.stack([self.age_encoder(age)], dim=1)  # (B, 1, d_agg)

@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 
 from endo_model.configs.training_config import TrainingConfig
 from endo_model.model.objectives.composite import CompositeLoss
+from endo_model.precision import PrecisionPolicy
 from endo_model.training.callbacks import EarlyStopping, MetricLogger
 from endo_model.training.checkpointing import CheckpointManager
 from endo_model.training.diagnostics import TrainingMonitor
@@ -62,6 +63,7 @@ class Trainer:
         monitor: TrainingMonitor | None = None,
         reporter=None,
         extra_val_metrics=None,
+        precision: PrecisionPolicy | None = None,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -88,6 +90,11 @@ class Trainer:
         # optimised — see evaluation/metrics.py for why it lives outside
         # CompositeLoss.
         self.extra_val_metrics = extra_val_metrics
+        # Autocast policy for both passes. Validation uses the same one as
+        # training on purpose: a val loss measured in a different precision
+        # from the train loss is not comparable to it, and the two curves are
+        # drawn on the same axes.
+        self.precision = precision or PrecisionPolicy("off")
         self._collector = None
 
         self.global_step = 0
@@ -175,20 +182,29 @@ class Trainer:
             self.monitor.begin_step(self.current_epoch, self.global_step)
 
             try:
-                output1 = self.model(batch)
-                output2 = self.model(batch) if self.cce_enabled else None
-                losses = self.composite_loss(
-                    output1, batch,
-                    current_step=self.global_step,
-                    total_steps=self.total_steps,
-                    model_output2=output2,
-                )
+                with self.precision.autocast(self.device):
+                    output1 = self.model(batch)
+                    output2 = self.model(batch) if self.cce_enabled else None
+                    losses = self.composite_loss(
+                        output1, batch,
+                        current_step=self.global_step,
+                        total_steps=self.total_steps,
+                        model_output2=output2,
+                    )
             except Exception as exc:  # noqa: BLE001 — re-raised with a location
                 self.monitor.forward_failed(batch, exc)
                 raise
 
             self.monitor.check_losses(batch, losses)
 
+            # Backward runs outside the autocast context, which is what the
+            # torch docs require: autocast records the dtype each op ran in
+            # during forward and replays that on the way back. Wrapping the
+            # backward too would re-enter autocast and can pick different
+            # kernels from the ones whose gradients are being computed.
+            #
+            # No GradScaler: that exists to rescue fp16 gradients that underflow
+            # to zero, and bf16 has fp32's exponent range.
             losses["total"].backward()
             # clip_grad_norm_ returns the *pre-clip* total norm, which is the
             # only cheap early warning of a divergence: it climbs for several
@@ -218,12 +234,13 @@ class Trainer:
 
         for batch in self.val_loader:
             batch = _to_device(batch, self.device)
-            output = self.model(batch)
-            losses = self.composite_loss(
-                output, batch,
-                current_step=self.global_step,
-                total_steps=self.total_steps,
-            )
+            with self.precision.autocast(self.device):
+                output = self.model(batch)
+                losses = self.composite_loss(
+                    output, batch,
+                    current_step=self.global_step,
+                    total_steps=self.total_steps,
+                )
             val_logger.log({k: v.item() for k, v in losses.items()})
             if self.extra_val_metrics is not None:
                 val_logger.log(self.extra_val_metrics(output, batch))

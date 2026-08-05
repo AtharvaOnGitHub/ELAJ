@@ -1,4 +1,19 @@
-"""DiseaseStatusEncoder: learnable embedding for disease status categories."""
+"""DiseaseStatusEncoder: learnable embedding for disease status categories.
+
+**Deliberately not wired into the model.** Kept because it is correct and
+because the question of conditioning on disease will come back, not because
+anything calls it.
+
+The reason it is unwired: this project's output is a disease atlas, and the
+result it exists to produce is whether the latent space organises cells by
+disease. A model told which cells are diseased will separate them, and that
+separation demonstrates nothing — the answer was supplied as an input.
+disease_status is therefore held out of the model entirely and used only to
+colour the UMAP after training.
+
+If you are about to wire this back in, the thing to check first is what claim
+the resulting figure would support.
+"""
 
 import torch.nn as nn
 from torch import Tensor

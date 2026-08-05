@@ -188,10 +188,20 @@ class BatchedGroupEncoder(nn.Module):
         # Which positions are real, per group. Fixed by the vocabulary, so it is
         # a buffer rather than something rebuilt every step — and it moves with
         # .to(device) automatically.
-        key_valid = torch.zeros(n_groups, self.seq_len, dtype=torch.bool)
-        for k, size in enumerate(self._sizes):
-            key_valid[k, : size + 1] = True
-        self.register_buffer("key_valid", key_valid, persistent=False)
+        #
+        # When every group here is the same size there is no padding, so there
+        # is nothing for the mask to hide — and FlashAttention refuses any
+        # non-null attn_mask, so passing one anyway would cost the fast kernel
+        # for no reason. Measured, one call forward+backward in bf16 at the
+        # real shapes: 174.87 ms with a mask, 62.60 ms without.
+        uniform = len(set(self._sizes)) == 1
+        if uniform:
+            self.register_buffer("key_valid", None, persistent=False)
+        else:
+            key_valid = torch.zeros(n_groups, self.seq_len, dtype=torch.bool)
+            for k, size in enumerate(self._sizes):
+                key_valid[k, : size + 1] = True
+            self.register_buffer("key_valid", key_valid, persistent=False)
 
     def forward(self, group_tokens: dict[str, Tensor]) -> dict[str, Tensor]:
         """Args: group_tokens {name: (B, G_k, d_token)}.

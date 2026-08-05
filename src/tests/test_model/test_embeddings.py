@@ -128,12 +128,25 @@ def test_disease_encoder_shape():
 
 def test_metadata_encoder_shape():
     enc = MetadataEncoder(D)
-    tissue = torch.zeros(B, 4, dtype=torch.long)
     age = torch.tensor([30.0, 45.0, 52.0, 28.0])
-    disease = torch.zeros(B, dtype=torch.long)
-    out = enc(tissue, age, disease)
+    out = enc(age)
     assert out.shape == (B, N_METADATA, D)
 
 
 def test_metadata_encoder_n_metadata_constant():
-    assert N_METADATA == 3
+    assert N_METADATA == 1
+
+
+def test_metadata_encoder_holds_no_disease_or_tissue():
+    """Both are deliberately absent, and both for a stated reason.
+
+    disease_status is what the atlas exists to reveal, so feeding it to the
+    encoder would make any separation in the latent circular. tissue moved to
+    the decoder so the latent is not obliged to encode anatomy. Re-adding
+    either here would quietly invalidate the UMAP without failing anything
+    else, which is why it is pinned.
+    """
+    enc = MetadataEncoder(D)
+    children = dict(enc.named_children())
+    assert "disease_encoder" not in children
+    assert "tissue_encoder" not in children

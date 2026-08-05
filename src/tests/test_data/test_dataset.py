@@ -426,3 +426,60 @@ def test_adenomyosis_is_its_own_status_not_other():
 
     assert _codes(["adenomyosis"]) != [DISEASE_STATUS_TO_INT["other"]]
     assert _codes(["adenomyosis"]) == [DISEASE_STATUS_TO_INT["adenomyosis"]]
+
+
+# ── Disease filter ───────────────────────────────────────────────────────────
+
+def test_disease_filter_none_keeps_everything():
+    from endo_model.data.dataset import _disease_codes_to_keep
+    assert _disease_codes_to_keep(None) is None
+    assert _disease_codes_to_keep([]) is None
+
+
+def test_disease_filter_resolves_names_to_codes():
+    from endo_model.data.constants import DISEASE_STATUS_TO_INT
+    from endo_model.data.dataset import _disease_codes_to_keep
+
+    got = _disease_codes_to_keep(["eutopic", "adenomyosis"])
+    assert got == {
+        DISEASE_STATUS_TO_INT["eutopic"],
+        DISEASE_STATUS_TO_INT["adenomyosis"],
+    }
+
+
+def test_disease_filter_raises_on_a_typo():
+    """A typo would otherwise drop the whole corpus, and the first symptom
+    would be an empty dataset several minutes into a job."""
+    import pytest as _pytest
+    from endo_model.data.dataset import _disease_codes_to_keep
+
+    with _pytest.raises(ValueError, match="endometriosis"):
+        _disease_codes_to_keep(["endometriosis"])
+
+
+def test_disease_filter_selects_the_right_cells():
+    import numpy as np
+    from endo_model.data.constants import DISEASE_STATUS_TO_INT
+    from endo_model.data.dataset import _select_disease_cells
+
+    codes = np.array([
+        DISEASE_STATUS_TO_INT["control"],
+        DISEASE_STATUS_TO_INT["eutopic"],
+        DISEASE_STATUS_TO_INT["control"],
+        DISEASE_STATUS_TO_INT["ectopic"],
+    ])
+    keep = {DISEASE_STATUS_TO_INT["eutopic"], DISEASE_STATUS_TO_INT["ectopic"]}
+    assert _select_disease_cells([0, 1, 2, 3], codes, keep, "s", "train") == [1, 3]
+
+
+def test_disease_filter_preserves_original_row_indices():
+    """The returned values index the study's obs, not the filtered subset —
+    everything downstream slices the count matrix with them."""
+    import numpy as np
+    from endo_model.data.constants import DISEASE_STATUS_TO_INT
+    from endo_model.data.dataset import _select_disease_cells
+
+    codes = np.full(10, DISEASE_STATUS_TO_INT["control"])
+    codes[7] = DISEASE_STATUS_TO_INT["ectopic"]
+    keep = {DISEASE_STATUS_TO_INT["ectopic"]}
+    assert _select_disease_cells(list(range(10)), codes, keep, "s", "train") == [7]

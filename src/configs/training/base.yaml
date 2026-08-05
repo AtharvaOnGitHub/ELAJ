@@ -11,6 +11,15 @@ scheduler:
 batch_size: 256
 max_epochs: 50
 
+# "off" or "bf16".  Measured on an A100 at the real training shapes, one SDPA
+# call forward+backward: fp32 449.97 ms, bf16 174.87 ms, bf16 without the
+# padding mask 62.60 ms.  FlashAttention has no fp32 kernel — bf16 is the only
+# way to reach it, and it additionally refuses a non-null attn_mask, which is
+# what the size bucketing below is for.
+# The Power Spherical sampler and the NB loss force fp32 back on regardless of
+# this setting; see endo_model/precision.py for why each one has to.
+precision: bf16
+
 # DataLoader worker processes.  null auto-sizes to the job's CPU allocation
 # (cores visible to the process, minus one for the training step itself), so the
 # same config is correct whether SLURM grants 4 cores or 16.  Set 0 to load in

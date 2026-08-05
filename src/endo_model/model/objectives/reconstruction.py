@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from endo_model.precision import as_fp32, force_fp32
+
 
 class NegativeBinomialLoss(nn.Module):
     """Mean NB log-likelihood loss over measured genes.
@@ -34,7 +36,21 @@ class NegativeBinomialLoss(nn.Module):
 
         Returns:
             Scalar loss (mean over B and G_meas).
+
+        Always computed in float32, whatever the surrounding autocast. The
+        expression below is three lgamma terms of similar magnitude subtracted
+        from one another, then two log differences of similar magnitude: the
+        answer is small relative to the terms that produce it, so precision
+        lost in those terms lands directly on the result. bf16 carries about
+        three decimal digits, which is not enough for a difference of lgammas
+        at counts in the thousands.
         """
+        with force_fp32():
+            x, mu, theta = as_fp32(x, mu, theta)
+            return self._nll_fp32(x, mu, theta)
+
+    def _nll_fp32(self, x: Tensor, mu: Tensor, theta: Tensor) -> Tensor:
+        """The likelihood proper. Callers go through `forward`."""
         theta = theta.unsqueeze(0)  # (1, G_meas) for broadcasting
         eps = 1e-8
 

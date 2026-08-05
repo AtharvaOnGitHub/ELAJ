@@ -85,3 +85,67 @@ class TestPerGeneDispersion:
         idxs = torch.tensor([0, 5, 10, 15])
         out = disp(idxs)
         assert out.shape == (4,)
+
+
+# ── Tissue conditioning ──────────────────────────────────────────────────────
+
+D_TISSUE = 8
+
+
+class TestTissueConditioning:
+    """Tissue reaches the decoder so the latent need not encode anatomy.
+
+    The risk this guards is not that conditioning fails to work — it is that it
+    silently does nothing, which would look identical on every loss curve while
+    leaving the latent doing the job it was supposed to be relieved of.
+    """
+
+    def _make(self):
+        return BilinearDecoder(D_AGG, D_DEC, d_tissue=D_TISSUE)
+
+    def test_output_shape_is_unchanged(self):
+        dec = self._make()
+        out = dec(
+            torch.randn(G_MEAS, D_DEC),
+            torch.randn(B, D_AGG),
+            torch.randn(B, D_TISSUE),
+        )
+        assert out.shape == (B, G_MEAS)
+
+    def test_tissue_changes_the_prediction(self):
+        """If this fails, conditioning is wired but inert."""
+        dec = self._make()
+        queries = torch.randn(G_MEAS, D_DEC)
+        z_proj = torch.randn(B, D_AGG)
+        torch.manual_seed(0)
+        a = dec(queries, z_proj, torch.randn(B, D_TISSUE))
+        b = dec(queries, z_proj, torch.randn(B, D_TISSUE))
+        assert not torch.allclose(a, b), "decoder ignored the tissue embedding"
+
+    def test_latent_still_changes_the_prediction(self):
+        """Conditioning must not let the decoder stop reading the latent."""
+        dec = self._make()
+        queries = torch.randn(G_MEAS, D_DEC)
+        tissue = torch.randn(B, D_TISSUE)
+        z_proj = torch.randn(B, D_AGG)
+        a = dec(queries, z_proj, tissue)
+        b = dec(queries, z_proj + 1.0, tissue)
+        assert not torch.allclose(a, b), "decoder output is independent of z"
+
+    def test_missing_tissue_raises_rather_than_falling_back(self):
+        """A silent fallback would train a different model with no error."""
+        dec = self._make()
+        with pytest.raises(ValueError, match="d_tissue"):
+            dec(torch.randn(G_MEAS, D_DEC), torch.randn(B, D_AGG), None)
+
+    def test_zero_width_keeps_the_latent_only_decoder(self):
+        dec = BilinearDecoder(D_AGG, D_DEC, d_tissue=0)
+        out = dec(torch.randn(G_MEAS, D_DEC), torch.randn(B, D_AGG))
+        assert out.shape == (B, G_MEAS)
+
+    def test_gradients_reach_the_tissue_path(self):
+        dec = self._make()
+        tissue = torch.randn(B, D_TISSUE, requires_grad=True)
+        dec(torch.randn(G_MEAS, D_DEC), torch.randn(B, D_AGG), tissue).sum().backward()
+        assert tissue.grad is not None
+        assert tissue.grad.abs().sum() > 0

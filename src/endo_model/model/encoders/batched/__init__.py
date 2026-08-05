@@ -11,6 +11,7 @@ Same parameters, same independence, same outputs — verified against
 `nn.TransformerEncoderLayer` in tests/test_model/test_batched_encoder.py.
 """
 
+from .bucketing import BucketedGroupEncoder, SizeBucket, plan_buckets
 from .encoder import BatchedEncoderLayer, BatchedGroupEncoder, BatchedSelfAttention
 from .primitives import BatchedLayerNorm, BatchedLinear
 
@@ -20,4 +21,7 @@ __all__ = [
     "BatchedLayerNorm",
     "BatchedLinear",
     "BatchedSelfAttention",
+    "BucketedGroupEncoder",
+    "SizeBucket",
+    "plan_buckets",
 ]

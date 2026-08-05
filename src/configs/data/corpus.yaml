@@ -30,3 +30,17 @@ max_cells_per_study: null      # null = use all; integer = cap for debugging
 # "adenomyosis".  Re-included.
 exclude_studies:
   - zhang_2022
+
+# Keep only cells with these disease_status values; empty keeps every cell.
+# Unlike exclude_studies this drops cells, not studies, so study ids are
+# untouched and a study reduced to nothing still holds its DSBN parameters.
+#
+# Controls are out for now, as a deadline decision rather than a scientific
+# one — halving the corpus roughly halves the epoch.  The cost is real and
+# worth writing down: a model that has never seen normal endometrium has no
+# internal reference for what "different in endometriosis" means, so that
+# comparison has to be made outside the model until controls come back.
+include_disease_statuses:
+  - eutopic
+  - ectopic
+  - adenomyosis

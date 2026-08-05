@@ -8,6 +8,11 @@ d_agg: 64
 d_gauss: 32
 n_vMF: 8
 d_dec: 64
+# Tissue conditions the decoder instead of the encoder, so the latent does
+# not have to spend capacity on which site a cell came from.  Kept narrow:
+# it carries four categorical levels, and a wide one would let the decoder
+# lean on tissue for structure the latent should be learning.
+d_tissue: 16
 n_groups: null      # populated from vocabulary.json at runtime
 n_studies: null     # populated from data config at runtime
 
@@ -15,6 +20,9 @@ group_encoder:
   n_layers: 2
   n_heads: 4         # 32 / 4 = 8 dims per head
   dropout: 0.1
+  # Size buckets for the 45 group encoders.  Real gene counts run 253-493,
+  # and one padded block spends 49% of its attention arithmetic on padding.
+  n_buckets: 4
 
 aggregation_encoder:
   n_layers: 2

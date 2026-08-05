@@ -95,6 +95,7 @@ def main() -> None:
         test_fraction=data_cfg.splits.test_fraction,
         seed=data_cfg.splits.seed,
         max_cells_per_study=data_cfg.max_cells_per_study,
+        include_disease_statuses=data_cfg.include_disease_statuses,
     )
     train_dataset = EndometriosisDataset(split="train", **split_kwargs)
     val_dataset = EndometriosisDataset(split="val", **split_kwargs)
@@ -249,6 +250,11 @@ def main() -> None:
         max_consecutive_skips=diag_cfg.max_consecutive_skips,
     )
 
+    # ── Precision ─────────────────────────────────────────────────────────────
+    from endo_model.precision import PrecisionPolicy
+    precision = PrecisionPolicy(train_cfg.precision)
+    logger.info("Precision: %s", precision.describe())
+
     # ── Trainer ───────────────────────────────────────────────────────────────
     from endo_model.training.trainer import Trainer
     trainer = Trainer(
@@ -265,6 +271,7 @@ def main() -> None:
         monitor=monitor,
         reporter=reporter,
         extra_val_metrics=hvg_metric,
+        precision=precision,
     )
     trainer.current_epoch = start_epoch
 

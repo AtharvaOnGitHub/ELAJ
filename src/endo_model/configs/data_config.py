@@ -164,6 +164,11 @@ class DataConfig:
     dns_sentinel: int = -1
     max_cells_per_study: Optional[int] = None
     exclude_studies: List[str] = field(default_factory=list)
+    # Keep only cells with these disease_status values.  Empty keeps every
+    # cell.  Distinct from exclude_studies: that drops whole studies and
+    # renumbers study ids, this drops cells within the studies that remain, so
+    # a study id is never invalidated by it.
+    include_disease_statuses: List[str] = field(default_factory=list)
 
     def resolve_studies(self, root: str = ".") -> List[StudyConfig]:
         """Return the study list, loading from CSV if studies_csv is configured.
@@ -200,4 +205,7 @@ class DataConfig:
                 else None
             ),
             exclude_studies=[str(s) for s in d.get("exclude_studies", [])],
+            include_disease_statuses=[
+                str(s) for s in d.get("include_disease_statuses", [])
+            ],
         )

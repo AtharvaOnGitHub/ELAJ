@@ -21,9 +21,16 @@ import torch
 from torch import Tensor
 from torch.distributions import Beta
 
+from endo_model.precision import as_fp32, force_fp32
+
 # How far the sampler keeps its intermediates away from the boundaries at which
 # a derivative blows up.  1e-6 is comfortably above float32 resolution near 1
 # (~1.2e-7) while costing about a part in 10^6 of the sampled angle.
+#
+# It is *below* bf16 resolution near 1 (~4e-3) by three orders of magnitude,
+# which is why rsample forces float32 rather than inheriting the caller's
+# autocast.  In bf16 every guard sized by this constant silently becomes a
+# no-op.
 _BOUNDARY_EPS = 1e-6
 
 
@@ -94,9 +101,21 @@ class PowerSpherical:
 
         Gradients flow to both loc (via the reflection) and scale (via the Beta
         concentration), so both encoder heads train from the reconstruction loss.
+
+        Always computed in float32, whatever the surrounding autocast. Every
+        boundary guard below is sized in units bf16 cannot represent: the
+        nearest bf16 value below 1.0 is about 1 - 0.004, so clamping to
+        1 - 1e-6 would round straight back to 1.0 and do nothing at all. The
+        clamp would still be there, still look correct, and the NaN it exists
+        to prevent would be back.
         """
+        with force_fp32():
+            return self._rsample_fp32()
+
+    def _rsample_fp32(self) -> Tensor:
+        """The sampler proper. Callers go through `rsample`."""
         d = self.dim
-        kappa = self.scale
+        kappa, = as_fp32(self.scale)
         alpha = (d - 1) / 2 + kappa
         beta = torch.full_like(kappa, (d - 1) / 2)
 
@@ -118,7 +137,8 @@ class PowerSpherical:
         t = (2 * z - 1).clamp(-1 + _BOUNDARY_EPS, 1 - _BOUNDARY_EPS)
 
         v = torch.randn(
-            *self.loc.shape[:-1], d - 1, dtype=self.loc.dtype, device=self.loc.device
+            *self.loc.shape[:-1], d - 1,
+            dtype=torch.float32, device=self.loc.device,
         )
         v = v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)  # uniform on S^{d-2}
 
@@ -129,7 +149,8 @@ class PowerSpherical:
         y = torch.cat(
             [t.unsqueeze(-1), sin_part.unsqueeze(-1) * v], dim=-1,
         )                                                    # (..., d), centred on e1
-        x = self._reflect_e1_to_loc(y)
+        loc, = as_fp32(self.loc)
+        x = self._reflect_e1_to_loc(y, loc)
 
         # The Householder reflection divides by (1 − loc₀), which is small
         # whenever loc is near e1 — a real, non-negligible case for a directional
@@ -138,8 +159,12 @@ class PowerSpherical:
         # (z_vmf's components are used directly as cos θ, sin θ).
         return x / x.norm(dim=-1, keepdim=True).clamp_min(1e-12)
 
-    def _reflect_e1_to_loc(self, y: Tensor) -> Tensor:
+    def _reflect_e1_to_loc(self, y: Tensor, loc: Tensor) -> Tensor:
         """Householder reflection mapping e1 = (1, 0, …) onto loc.
+
+        `loc` is passed rather than read from `self` so the caller can hand in
+        a float32 copy: under autocast `self.loc` may be bf16, and _BOUNDARY_EPS
+        below is three orders of magnitude finer than bf16 resolves near 1.
 
         Uses the stable form x = y − ((e1−loc)·y / (1 − loc₀)) (e1 − loc).  As
         loc → e1 the reflection degenerates to the identity, which is the
@@ -153,7 +178,6 @@ class PowerSpherical:
         denominator before the division keeps the untaken branch finite, which
         is what stops `where` from propagating a NaN gradient through it.
         """
-        loc = self.loc
         e1 = torch.zeros_like(loc)
         e1[..., 0] = 1.0
         w = e1 - loc                                         # (..., d)

@@ -128,13 +128,15 @@ def test_reconstruction_depends_on_the_latent():
         z = model.latent_space(
             model.aggregation_encoder(
                 model.hierarchical_encoder(model.token_constructor(batch)),
-                model.metadata_encoder(
-                    batch["tissue_levels"], batch["age"], batch["disease_status"]
-                ),
+                model.metadata_encoder(batch["age"]),
             )
         )["z_proj"]
-        base = model.decoder(queries, z)
-        moved = model.decoder(queries, z + 1.0)
+        # Tissue is held fixed across both calls: the decoder is conditioned on
+        # it, so varying it too would leave the test unable to say which input
+        # moved the output.
+        tissue = model.decoder_tissue(batch["tissue_levels"])
+        base = model.decoder(queries, z, tissue)
+        moved = model.decoder(queries, z + 1.0, tissue)
     assert not torch.allclose(base, moved), "decoder output is independent of z"
 
 

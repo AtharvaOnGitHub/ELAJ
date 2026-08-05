@@ -117,6 +117,12 @@ class TrainingConfig:
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     resume_from_checkpoint: Optional[str] = None
 
+    # "off" or "bf16".  bf16 is what puts the group encoder's attention on the
+    # FlashAttention kernel, which has no fp32 implementation at all.  The
+    # Power Spherical sampler and the NB loss force fp32 back on regardless —
+    # see endo_model/precision.py.
+    precision: str = "off"
+
     # DataLoader worker processes.  None auto-sizes to the job's CPU allocation
     # (see utils/resources.py); 0 loads in the main process, which serialises
     # data preparation against the training step.
@@ -136,6 +142,7 @@ class TrainingConfig:
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
             diagnostics=DiagnosticsConfig.from_dict(d.get("diagnostics", {})),
             resume_from_checkpoint=d.get("resume_from_checkpoint"),
+            precision=str(d.get("precision", "off")),
             num_workers=(
                 int(d["num_workers"]) if d.get("num_workers") is not None else None
             ),

@@ -14,8 +14,8 @@ model/
 │   ├── dsbn.py               — DSBN: Domain-Specific Batch Normalisation (per-study affine)
 │   ├── tissue_encoder.py     — TissueHierarchyEncoder: 4-level tissue hierarchy
 │   ├── age_encoder.py        — AgeEncoder: sinusoidal age features → d_agg
-│   ├── disease_encoder.py    — DiseaseStatusEncoder: learnable disease status embedding
-│   └── metadata_encoder.py   — MetadataEncoder: wraps tissue/age/disease → (B, 3, d_agg)
+│   ├── disease_encoder.py    — DiseaseStatusEncoder: UNWIRED (see below)
+│   └── metadata_encoder.py   — MetadataEncoder: age → (B, 1, d_agg)
 ├── encoders/
 │   ├── token_constructor.py  — TokenConstructor: assembles per-group gene token sequences
 │   ├── group_encoder.py      — GroupEncoder + HierarchicalEncoder: per-group transformers
@@ -44,7 +44,7 @@ model/
 batch
   → TokenConstructor       (B, G_k, d_token) per group
   → HierarchicalEncoder    (B, d_token) per group  [GROUP_CLS only]
-  → MetadataEncoder        (B, 3, d_agg)
+  → MetadataEncoder        (B, 1, d_agg)
   → AggregationEncoder     cell_cls (B, d_agg) + group_cls_out (B, K, d_agg)
   → BifurcatedLatentSpace  z (B, d_z), z_proj (B, d_agg)
   → _build_gene_reps       (B, G_meas, d_gene_rep)

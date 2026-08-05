@@ -3,7 +3,7 @@
 Forward pass (one call):
   1. TokenConstructor  → per-group gene tokens  (B, G_k, d_token) per group
   2. BatchedGroupEncoder → group CLS dict       (B, d_token) per group
-  3. MetadataEncoder   → metadata token seq     (B, 3, d_agg)
+  3. MetadataEncoder   → metadata token seq     (B, 1, d_agg) — age only
   4. AggregationEncoder → cell_cls  (the only per-cell tensor it returns)
   5. BifurcatedLatentSpace → z, z_proj, ...
   6. _build_gene_queries → per-gene decoder queries (G_meas, d_dec)
@@ -31,9 +31,10 @@ from endo_model.model.decoder.dispersion import PerGeneDispersion
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
+from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
 from endo_model.model.embeddings.value_encoder import ValueEncoder
 from endo_model.model.encoders.aggregation import AggregationEncoder
-from endo_model.model.encoders.batched import BatchedGroupEncoder
+from endo_model.model.encoders.batched import BucketedGroupEncoder
 from endo_model.model.encoders.token_constructor import TokenConstructor
 from endo_model.model.gene_layout import MeasuredGeneLayoutCache
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace
@@ -68,11 +69,12 @@ class EndoFoundationModel(nn.Module):
         # rather than 45 Python calls.  Identical parameters and outputs — see
         # tests/test_model/test_batched_encoder.py, which checks it against real
         # nn.TransformerEncoderLayer stacks holding the same weights.
-        self.hierarchical_encoder = BatchedGroupEncoder(
+        self.hierarchical_encoder = BucketedGroupEncoder(
             vocabulary.group_names, group_sizes, config.d_token,
             n_heads=config.group_encoder.n_heads,
             n_layers=config.group_encoder.n_layers,
             dropout=config.group_encoder.dropout,
+            n_buckets=config.group_encoder.n_buckets,
         )
         self.aggregation_encoder = AggregationEncoder(
             vocabulary.group_names, config.d_token, config.d_agg,
@@ -95,7 +97,15 @@ class EndoFoundationModel(nn.Module):
             d_token=config.d_token,
             d_dec=config.d_dec,
         )
-        self.decoder = BilinearDecoder(config.d_agg, config.d_dec)
+        # Tissue conditions the decoder rather than the encoder, so the latent
+        # is not obliged to encode anatomy.  Its own embedding tables, not the
+        # metadata encoder's: this one answers "what does this site express on
+        # average", which is a different question from anything on the encoder
+        # side, and sharing weights would tie the two together for no reason.
+        self.decoder_tissue = TissueHierarchyEncoder(config.d_tissue)
+        self.decoder = BilinearDecoder(
+            config.d_agg, config.d_dec, d_tissue=config.d_tissue
+        )
         self.dispersion = PerGeneDispersion(vocabulary.vocab_size)
 
         # ── Pre-computed index maps for _build_gene_queries ──────────────────
@@ -129,9 +139,10 @@ class EndoFoundationModel(nn.Module):
         group_cls_dict = self.hierarchical_encoder(group_tokens)  # {name: (B,D)}
 
         # ── Metadata encoding ─────────────────────────────────────────────────
-        meta_tokens = self.metadata_encoder(
-            batch["tissue_levels"], batch["age"], batch["disease_status"]
-        )                                                          # (B, 3, d_agg)
+        # Age only.  disease_status is held out of the model entirely (it is the
+        # thing the atlas is meant to reveal, so feeding it in would make any
+        # separation circular) and tissue now conditions the decoder instead.
+        meta_tokens = self.metadata_encoder(batch["age"])           # (B, 1, d_agg)
 
         # ── Aggregation ───────────────────────────────────────────────────────
         cell_cls = self.aggregation_encoder(group_cls_dict, meta_tokens)
@@ -145,7 +156,10 @@ class EndoFoundationModel(nn.Module):
         # gene_queries: (G_meas, d_dec) — no batch dimension, by construction
 
         # ── Decode ────────────────────────────────────────────────────────────
-        log_mu = self.decoder(gene_queries, latent["z_proj"])  # (B, G_meas)
+        tissue = self.decoder_tissue(batch["tissue_levels"])   # (B, d_tissue)
+        log_mu = self.decoder(
+            gene_queries, latent["z_proj"], tissue
+        )                                                       # (B, G_meas)
         mu_hat = (
             F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)
         )                                                       # (B, G_meas)

@@ -9,6 +9,10 @@ class GroupEncoderConfig:
     n_layers: int = 2
     n_heads: int = 4
     dropout: float = 0.1
+    # Groups are sorted by gene count and run in this many size buckets, so a
+    # 253-gene group is not padded to the 493-gene group's length.  1 restores
+    # the single-block behaviour.  See encoders/batched/bucketing.py.
+    n_buckets: int = 4
 
     @classmethod
     def from_dict(cls, d: dict) -> "GroupEncoderConfig":
@@ -16,6 +20,7 @@ class GroupEncoderConfig:
             n_layers=d.get("n_layers", 2),
             n_heads=d.get("n_heads", 4),
             dropout=d.get("dropout", 0.1),
+            n_buckets=int(d.get("n_buckets", 4)),
         )
 
 
@@ -93,6 +98,12 @@ class ModelConfig:
     d_gauss: int = 32          # Gaussian latent dimensions
     n_vMF: int = 8             # number of circular latent dimensions
     d_dec: int = 64            # decoder internal dimension
+    # Tissue hierarchy embedding concatenated onto z_proj at the decoder, so
+    # the latent is not obliged to encode anatomy.  Small on purpose: it
+    # carries four categorical levels, and widening it would let the decoder
+    # lean on tissue for structure the latent should be learning.  0 disables
+    # conditioning.  See model/decoder/bilinear_decoder.py.
+    d_tissue: int = 16
     n_groups: Optional[int] = None    # populated from vocabulary at runtime
     n_studies: Optional[int] = None   # populated from data config at runtime
     group_encoder: GroupEncoderConfig = field(default_factory=GroupEncoderConfig)
@@ -138,6 +149,7 @@ class ModelConfig:
             d_gauss=d.get("d_gauss", 32),
             n_vMF=d.get("n_vMF", 8),
             d_dec=d.get("d_dec", 64),
+            d_tissue=int(d.get("d_tissue", 16)),
             n_groups=d.get("n_groups"),
             n_studies=d.get("n_studies"),
             group_encoder=GroupEncoderConfig.from_dict(d.get("group_encoder", {})),

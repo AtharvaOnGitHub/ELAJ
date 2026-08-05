@@ -137,3 +137,50 @@ def test_hvg_mask_size_and_measured_restriction():
     mask = base.hvg_mask
     assert int(mask.sum()) <= 5
     assert not mask[:10].any(), "a gene no study measured was called highly variable"
+
+
+# --- HVG metric -------------------------------------------------------------
+
+
+def test_hvg_metric_matches_the_baseline_gene_set():
+    """The model must be scored on exactly the genes the baseline was.
+
+    Two curves on the same axes computed over different gene sets would be a
+    comparison in appearance only, and nothing in the figure would say so.
+    """
+    from endo_model.evaluation.metrics import HvgReconstructionMetric
+
+    batches = constant_corpus()
+    base = MeanProfileBaseline(N_STUDIES, D, n_hvg=5).fit(batches)
+    metric = HvgReconstructionMetric(base.hvg_mask)
+
+    batch = batches[0]
+    measured = (~batch["is_dns"][0]).nonzero(as_tuple=True)[0]
+    output = {
+        "measured_global_idxs": measured,
+        "mu_hat": batch["counts"][:, measured].clamp_min(0.1).float(),
+        "theta": torch.full((measured.numel(),), 5.0),
+    }
+    result = metric(output, batch)
+    assert "nb_hvg" in result
+    assert torch.isfinite(torch.tensor(result["nb_hvg"]))
+
+
+def test_hvg_metric_returns_empty_when_no_hvgs_measured():
+    """Empty, not zero: a zero would pull the epoch average down and read as
+    excellent reconstruction from a study that contributed nothing."""
+    from endo_model.evaluation.metrics import HvgReconstructionMetric
+
+    batches = constant_corpus()
+    base = MeanProfileBaseline(N_STUDIES, D, n_hvg=5).fit(batches)
+    metric = HvgReconstructionMetric(base.hvg_mask)
+
+    # A study measuring only genes the HVG set excludes.
+    excluded = (~base.hvg_mask).nonzero(as_tuple=True)[0][:3]
+    batch = batches[0]
+    output = {
+        "measured_global_idxs": excluded,
+        "mu_hat": torch.ones(B, excluded.numel()),
+        "theta": torch.full((excluded.numel(),), 5.0),
+    }
+    assert metric(output, batch) == {}

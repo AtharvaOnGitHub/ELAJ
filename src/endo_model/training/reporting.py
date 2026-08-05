@@ -125,6 +125,11 @@ class EpochReporter:
         self.latent_every = latent_every
         self.max_latent_cells = max_latent_cells
         self.seed = seed
+        # Compute nodes have no display. matplotlib usually detects that,
+        # but a figure backend guessing wrong on a 24-hour job is not worth
+        # the risk when one line removes the question.
+        import matplotlib
+        matplotlib.use("Agg", force=True)
         apply_theme()
 
     def wants_latents(self, epoch: int) -> bool:
@@ -150,7 +155,8 @@ class EpochReporter:
             self._draw(
                 "baseline",
                 lambda: baseline_comparison(
-                    history, self.baseline_all, self.baseline_hvg
+                    history, self.baseline_all, self.baseline_hvg,
+                    model_hvg=history.get("val_nb_hvg"),
                 ),
             )
         self._draw("adversarial", lambda: adversarial_panel(history, self.n_studies))

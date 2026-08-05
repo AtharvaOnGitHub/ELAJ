@@ -61,6 +61,7 @@ class Trainer:
         cce_enabled: bool = False,
         monitor: TrainingMonitor | None = None,
         reporter=None,
+        extra_val_metrics=None,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -83,6 +84,10 @@ class Trainer:
         self.monitor = monitor or TrainingMonitor(model, [composite_loss])
         # EpochReporter, or None to run without figures.
         self.reporter = reporter
+        # callable(output, batch) -> dict[str, float]. Reported, never
+        # optimised — see evaluation/metrics.py for why it lives outside
+        # CompositeLoss.
+        self.extra_val_metrics = extra_val_metrics
         self._collector = None
 
         self.global_step = 0
@@ -220,6 +225,8 @@ class Trainer:
                 total_steps=self.total_steps,
             )
             val_logger.log({k: v.item() for k, v in losses.items()})
+            if self.extra_val_metrics is not None:
+                val_logger.log(self.extra_val_metrics(output, batch))
             # Latents are collected here rather than in a second pass: the
             # forward has already run, and re-running it would both cost an
             # extra pass and sample different dropout.

@@ -212,6 +212,11 @@ def main() -> None:
         baseline_scores.nb_all_genes, baseline_scores.nb_hvg, baseline_scores.n_hvg,
     )
 
+    # The model scored on the same gene set as the baseline's HVG number, so
+    # the two curves on that panel are comparable rather than merely adjacent.
+    from endo_model.evaluation.metrics import HvgReconstructionMetric
+    hvg_metric = HvgReconstructionMetric(baseline.hvg_mask)
+
     # ── Figures ───────────────────────────────────────────────────────────────
     from endo_model.training.reporting import EpochReporter
 
@@ -259,6 +264,7 @@ def main() -> None:
         cce_enabled=model_cfg.cce.enabled,
         monitor=monitor,
         reporter=reporter,
+        extra_val_metrics=hvg_metric,
     )
     trainer.current_epoch = start_epoch
 

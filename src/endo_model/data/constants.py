@@ -21,14 +21,28 @@ valid range of the corresponding obs columns.  Kept here, with the other data
 contracts, rather than beside the tables: preflight_check validates the corpus
 against them and must not import torch to do it."""
 
-N_DISEASE_STATUSES: int = 4
-"""Integer codes: 0=eutopic, 1=ectopic, 2=control, 3=other."""
+N_DISEASE_STATUSES: int = 5
+"""Integer codes: 0=eutopic, 1=ectopic, 2=control, 3=adenomyosis, 4=other."""
 
 DISEASE_STATUS_TO_INT: dict[str, int] = {
     "eutopic": 0,
     "ectopic": 1,
     "control": 2,
-    "other": 3,
+    "adenomyosis": 3,
+    "other": 4,
 }
+"""String -> integer code for the disease embedding table.
+
+Must stay in step with VALID_STATUSES in
+data_collation/src/process/metadata_attacher.py, which is what decides the
+strings that survive into the h5ad files.  A status valid there but missing
+here is silently re-coded to "other" at load time.
+
+"adenomyosis" is its own code rather than "other" because wang_2022
+(GSE218044, MONDO:0010888) is a disease contrast, not an unclassifiable
+leftover -- collapsing it into "other" would put it in the same bucket as
+tissue that is simply out of scope.  Note this renumbers "other" from 3 to 4:
+h5ad files written before this change carry strings, not codes, so they are
+unaffected, but any checkpoint trained before it is not loadable."""
 
 INT_TO_DISEASE_STATUS: dict[int, str] = {v: k for k, v in DISEASE_STATUS_TO_INT.items()}

@@ -15,7 +15,15 @@ from src.utils.patient_registry import PatientRegistry
 
 logger = get_logger(__name__)
 
-_VALID_STATUSES = {"eutopic", "ectopic", "control", "other"}
+# The disease_status vocabulary.  Must stay in step with DISEASE_STATUS_TO_INT
+# in src/endo_model/data/constants.py, which turns these strings into the
+# integer codes the model's disease embedding table is sized for.  Adding a
+# value here without adding it there sends every cell of the new status to
+# "other" at load time, silently.
+VALID_STATUSES = frozenset(
+    {"eutopic", "ectopic", "control", "adenomyosis", "other"}
+)
+_VALID_STATUSES = VALID_STATUSES  # retained for existing internal references
 
 _GSM_FILE_PATTERN = re.compile(r"^(GSM\d+)_([^_]+)_")
 

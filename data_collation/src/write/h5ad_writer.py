@@ -6,6 +6,7 @@ import anndata as ad
 import pandas as pd
 import scipy.sparse as sp
 
+from src.process.metadata_attacher import VALID_STATUSES
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -41,8 +42,7 @@ class H5adWriter:
         if "disease_status" not in adata.obs.columns:
             logger.warning("VALIDATION: %s missing recommended obs column 'disease_status'", path.name)
         else:
-            valid = {"eutopic", "ectopic", "control", "other"}
-            bad = set(adata.obs["disease_status"].unique()) - valid
+            bad = set(adata.obs["disease_status"].unique()) - VALID_STATUSES
             if bad:
                 logger.warning(
                     "VALIDATION: %s has invalid disease_status values: %s", path.name, bad

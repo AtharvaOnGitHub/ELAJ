@@ -18,10 +18,15 @@ max_cells_per_study: null      # null = use all; integer = cap for debugging
 # Surviving studies are renumbered 0..N-1 so study id stays a valid index into
 # the DSBN / study-embedding tables.  An unmatched name raises rather than
 # silently keeping the study.
-#   wang_2022   GSE218044 — adenomyosis (MONDO:0010888), myometrium
-#   zhang_2022  GSE174399 — chorionic villus / decidua, not endometrial tissue
-# Neither is an endometriosis tissue study; both carried disease_status="other"
-# for every cell.  Excluded for the first run — revisit if the scope widens.
+#   zhang_2022  GSE174399 — chorionic villus / decidua, not endometrial tissue.
+#     Out of scope for an endometrial atlas, so excluded permanently rather
+#     than parked.  Kept named here rather than deleted from studies.csv so the
+#     exclusion stays visible and auditable, and so a typo still raises.
+#
+# wang_2022 (GSE218044) was excluded alongside it for the first run, on the
+# grounds that both carried disease_status="other".  That was true of wang_2022
+# only because its status_config said so — it is adenomyosis (MONDO:0010888),
+# a disease contrast worth having, and it now carries disease_status
+# "adenomyosis".  Re-included.
 exclude_studies:
-  - wang_2022
   - zhang_2022

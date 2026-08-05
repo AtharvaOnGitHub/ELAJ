@@ -397,7 +397,10 @@ def test_plain_object_and_integer_columns_unchanged():
 
 def test_unrecognised_category_maps_to_other():
     import pandas as pd
-    assert _codes(pd.Categorical(["eutopic", "BOGUS", "control"])) == [0, 3, 2]
+    from endo_model.data.constants import DISEASE_STATUS_TO_INT
+
+    other = DISEASE_STATUS_TO_INT["other"]
+    assert _codes(pd.Categorical(["eutopic", "BOGUS", "control"])) == [0, other, 2]
 
 
 def test_case_and_whitespace_normalised():
@@ -406,6 +409,20 @@ def test_case_and_whitespace_normalised():
 
 def test_missing_column_codes_all_other():
     import pandas as pd
+    from endo_model.data.constants import DISEASE_STATUS_TO_INT
     from endo_model.data.dataset import _disease_status_codes
+
+    # Read the code rather than hard-coding it: adding a status renumbers
+    # "other", and a literal here would fail for a reason unrelated to what
+    # this test is about.
+    other = DISEASE_STATUS_TO_INT["other"]
     obs = pd.DataFrame(index=range(3))
-    assert _disease_status_codes(obs, "t").tolist() == [3, 3, 3]
+    assert _disease_status_codes(obs, "t").tolist() == [other] * 3
+
+
+def test_adenomyosis_is_its_own_status_not_other():
+    """wang_2022 is a disease contrast, so it must not collapse into "other"."""
+    from endo_model.data.constants import DISEASE_STATUS_TO_INT
+
+    assert _codes(["adenomyosis"]) != [DISEASE_STATUS_TO_INT["other"]]
+    assert _codes(["adenomyosis"]) == [DISEASE_STATUS_TO_INT["adenomyosis"]]

@@ -113,7 +113,10 @@ datasets:
     disease_ontology:
       default: "MONDO:0010888"   # adenomyosis
     status_config:
-      default: "other"
+      # Its own status, not "other": adenomyosis is a disease contrast we want
+      # the model to be able to represent, whereas "other" is the bucket for
+      # tissue that is out of scope entirely (see zhang_2022 below).
+      default: "adenomyosis"
 
   - study_name: zhang_2022
     source: geo

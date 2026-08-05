@@ -5,8 +5,19 @@ Sequence layout (fixed):
     positions:  0            1                   K        K+1          K+M
 
 CELL_CLS at position 0 is the cell-level representation used for the latent
-space.  The updated group CLS tokens at positions 1..K are used by the
-BilinearDecoder to construct gene representations.
+space, and it is the *only* thing this encoder returns.
+
+The updated group CLS tokens at positions 1..K used to be returned as well and
+fed to the decoder.  That was the defect behind run 49817807: they are per-cell
+summaries of the very genes the decoder is asked to predict, so the model
+reconstructed from them and ignored the latent entirely.  Both latent branches
+collapsed — kl_vmf reached 5e-7, meaning zero information.
+
+They are not returned now, so nothing downstream can reach them.  Keeping them
+as an unused return value would be an invitation to wire them back in; the
+narrower signature is what enforces "the latent is the only route".  The tokens
+are still computed inside the transformer, because the groups must attend to
+each other for CELL_CLS to summarise them.
 
 Input tokens are first projected from d_token → d_agg if d_token != d_agg.
 """
@@ -75,7 +86,7 @@ class AggregationEncoder(nn.Module):
         self,
         group_cls_dict: dict[str, Tensor],
         metadata_tokens: Tensor,
-    ) -> tuple[Tensor, Tensor]:
+    ) -> Tensor:
         """Run cross-module aggregation.
 
         Args:
@@ -84,9 +95,8 @@ class AggregationEncoder(nn.Module):
             metadata_tokens: (B, n_metadata, d_agg) — from MetadataEncoder.
 
         Returns:
-            (cell_cls_out, group_cls_out):
-                cell_cls_out:  (B, d_agg) — updated CELL_CLS (latent input).
-                group_cls_out: (B, K, d_agg) — updated group CLS (decoder input).
+            cell_cls_out: (B, d_agg) — updated CELL_CLS, the latent's input and
+            the only per-cell tensor that leaves this encoder.
         """
         B = metadata_tokens.shape[0]
 
@@ -103,7 +113,4 @@ class AggregationEncoder(nn.Module):
 
         out = self.transformer(seq)            # (B, 1 + K + n_metadata, d_agg)
 
-        cell_cls_out = out[:, 0, :]           # (B, d_agg)
-        group_cls_out = out[:, 1:1 + self.n_groups, :]  # (B, K, d_agg)
-
-        return cell_cls_out, group_cls_out
+        return out[:, 0, :]                   # (B, d_agg) — CELL_CLS only

@@ -1,6 +1,6 @@
 """Per-study layout of measured genes, cached across steps.
 
-`_build_gene_reps` needs, for every gene group, which of that group's genes were
+`_build_gene_queries` needs, for every gene group, which of that group's genes were
 measured in this study and where each one sits in the packed `(G_meas,)` output.
 That mapping depends on nothing but the study's did-not-sample pattern, and
 `PerStudyBatchSampler` guarantees one study per batch — so there are exactly as
@@ -29,11 +29,12 @@ class GroupSlice:
 
     Args:
         name:           Group name, for the embedding table lookup.
-        seq_pos:        The group's position in the aggregation output's K axis.
+        seq_pos:        The group's index in [0, K) — selects this group's
+                        projection in GroupedGeneQuery.
         within_idxs:    (n_sel,) indices *within the group*, for the group's
                         embedding table.
         meas_positions: (n_sel,) matching positions in the packed `(G_meas,)`
-                        axis of `gene_reps`.
+                        axis of the decoder's gene queries.
     """
 
     __slots__ = ("name", "seq_pos", "within_idxs", "meas_positions")

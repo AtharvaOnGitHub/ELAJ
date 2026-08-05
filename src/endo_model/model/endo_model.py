@@ -4,9 +4,11 @@ Forward pass (one call):
   1. TokenConstructor  → per-group gene tokens  (B, G_k, d_token) per group
   2. HierarchicalEncoder → group CLS dict       (B, d_token) per group
   3. MetadataEncoder   → metadata token seq     (B, 3, d_agg)
-  4. AggregationEncoder → cell_cls, group_cls_out
+  4. AggregationEncoder → cell_cls  (the only per-cell tensor it returns)
   5. BifurcatedLatentSpace → z, z_proj, ...
-  6. _build_gene_reps  → gene representations   (B, G_meas, d_gene_rep)
+  6. _build_gene_queries → per-gene decoder queries (G_meas, d_dec)
+                           — no batch dim: the latent is the only route
+                             from a cell to its reconstruction
   7. BilinearDecoder   → log_mu                 (B, G_meas)
   8. Library-size scaling: mu_hat = softmax(log_mu) * library_size
   9. PerGeneDispersion → theta                  (G_meas,)
@@ -24,6 +26,7 @@ from torch import Tensor
 from endo_model.configs.model_config import ModelConfig
 from endo_model.data.vocabulary import GeneVocabulary
 from endo_model.model.decoder.bilinear_decoder import BilinearDecoder
+from endo_model.model.decoder.gene_query import GroupedGeneQuery
 from endo_model.model.decoder.dispersion import PerGeneDispersion
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
@@ -80,11 +83,18 @@ class EndoFoundationModel(nn.Module):
         )
 
         # ── Decoder ──────────────────────────────────────────────────────────
-        d_gene_rep = config.d_token + config.d_agg
-        self.decoder = BilinearDecoder(d_gene_rep, config.d_agg, config.d_dec)
+        # The decoder's gene side is gene identity only, projected per group.
+        # It carries no cell information, so the latent is the sole route from a
+        # cell to its reconstruction.  See decoder/gene_query.py.
+        self.gene_query = GroupedGeneQuery(
+            n_groups=len(vocabulary.group_names),
+            d_token=config.d_token,
+            d_dec=config.d_dec,
+        )
+        self.decoder = BilinearDecoder(config.d_agg, config.d_dec)
         self.dispersion = PerGeneDispersion(vocabulary.vocab_size)
 
-        # ── Pre-computed index maps for _build_gene_reps ─────────────────────
+        # ── Pre-computed index maps for _build_gene_queries ──────────────────
         # For each gene group: list of global indices and within-group indices
         self._group_global_idxs: dict[str, list[int]] = {
             name: vocabulary.global_indices_for_group(name)
@@ -120,22 +130,18 @@ class EndoFoundationModel(nn.Module):
         )                                                          # (B, 3, d_agg)
 
         # ── Aggregation ───────────────────────────────────────────────────────
-        cell_cls, group_cls_out = self.aggregation_encoder(
-            group_cls_dict, meta_tokens
-        )
-        # cell_cls: (B, d_agg)  group_cls_out: (B, K, d_agg)
+        cell_cls = self.aggregation_encoder(group_cls_dict, meta_tokens)
+        # cell_cls: (B, d_agg) — the only per-cell tensor leaving the encoder
 
         # ── Latent space ──────────────────────────────────────────────────────
         latent = self.latent_space(cell_cls)   # dict with z_proj etc.
 
-        # ── Gene representations for measured genes ───────────────────────────
-        gene_reps, measured_global_idxs = self._build_gene_reps(
-            batch, group_cls_out
-        )
-        # gene_reps: (B, G_meas, d_gene_rep)
+        # ── Gene queries for measured genes ───────────────────────────────────
+        gene_queries, measured_global_idxs = self._build_gene_queries(batch)
+        # gene_queries: (G_meas, d_dec) — no batch dimension, by construction
 
         # ── Decode ────────────────────────────────────────────────────────────
-        log_mu = self.decoder(gene_reps, latent["z_proj"])     # (B, G_meas)
+        log_mu = self.decoder(gene_queries, latent["z_proj"])  # (B, G_meas)
         mu_hat = (
             F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)
         )                                                       # (B, G_meas)
@@ -148,50 +154,46 @@ class EndoFoundationModel(nn.Module):
             **latent,
         }
 
-    def _build_gene_reps(
-        self, batch: dict, group_cls_out: Tensor
-    ) -> tuple[Tensor, Tensor]:
-        """Build gene representations for non-DNS (measured) genes.
+    def _build_gene_queries(self, batch: dict) -> tuple[Tensor, Tensor]:
+        """Build one decoder query vector per measured (non-DNS) gene.
 
-        Loops over groups (K ≈ 50) rather than genes (G ≈ 19 K) for
-        efficiency.  All cells in the batch share the same DNS pattern because
-        PerStudyBatchSampler ensures single-study batches.
+        Note what this does *not* take: any per-cell tensor.  The result has no
+        batch dimension, which is the structural guarantee that the decoder can
+        learn nothing about a cell except through the latent.  An earlier
+        version also took the encoder's per-cell group summary, and the model
+        reconstructed from that instead of from the latent — both latent
+        branches collapsed to zero information.  See decoder/gene_query.py.
+
+        Loops over groups (K = 45) rather than genes (D ≈ 15 K).  All cells in
+        the batch share one DNS pattern because PerStudyBatchSampler builds each
+        batch from a single study.
 
         Args:
-            batch:         Data batch (same DNS pattern for all cells).
-            group_cls_out: (B, K, d_agg) from AggregationEncoder.
+            batch: Data batch — only `study_id` and `is_dns` are read.
 
         Returns:
-            (gene_reps, measured_global_idxs):
-                gene_reps:            (B, G_meas, d_gene_rep)
+            (gene_queries, measured_global_idxs):
+                gene_queries:         (G_meas, d_dec)
                 measured_global_idxs: (G_meas,) long
         """
-        B = group_cls_out.shape[0]
-        device = group_cls_out.device
-        d_gene_rep = self.config.d_token + self.config.d_agg
-
-        # One .item() on a scalar, against the ~15 000-element .tolist() this
-        # replaces.  Both synchronise, but this one neither copies an array back
-        # to the host nor builds a Python dict the next step discards.
+        # One .item() on a scalar. Both this and the ~15 000-element .tolist()
+        # it replaced synchronise, but this one neither copies an array back to
+        # the host nor builds a Python dict the next step discards.
         study_id = int(batch["study_id"][0].item())
         layout = self._gene_layouts.get(study_id, batch["is_dns"][0])
 
-        gene_reps = torch.zeros(B, layout.n_measured, d_gene_rep, device=device)
+        gene_queries = torch.zeros(
+            layout.n_measured,
+            self.config.d_dec,
+            device=batch["is_dns"].device,
+            dtype=self.gene_query.weight.dtype,
+        )
 
         for group in layout.slices:
-            n_sel = group.n_selected
-
-            # Identity embeddings from group table: (B, n_sel, d_token)
-            within_t = group.within_idxs.unsqueeze(0).expand(B, -1)  # (B, n_sel)
-            identity = self.gene_embedding(group.name, within_t)
-
-            # Group CLS from aggregation output: (B, d_agg) → (B, n_sel, d_agg)
-            group_cls_g = (
-                group_cls_out[:, group.seq_pos, :].unsqueeze(1).expand(-1, n_sel, -1)
+            identity = self.gene_embedding(group.name, group.within_idxs)
+            # identity: (n_sel, d_token) — one row per gene, no batch dimension
+            gene_queries[group.meas_positions] = self.gene_query.project(
+                identity, group.seq_pos
             )
 
-            # Concatenate and place into output
-            gene_rep_group = torch.cat([identity, group_cls_g], dim=-1)  # (B, n_sel, d_gene_rep)
-            gene_reps[:, group.meas_positions, :] = gene_rep_group
-
-        return gene_reps, layout.measured_global_idxs
+        return gene_queries, layout.measured_global_idxs

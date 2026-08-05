@@ -58,8 +58,9 @@ def test_model_config_derived_d_z():
 
 
 def test_model_config_derived_d_gene_rep():
+    """Gene identity only — d_agg must NOT appear, that was the bypass."""
     cfg = ModelConfig(d_token=32, d_agg=64)
-    assert cfg.d_gene_rep == 32 + 64   # 96
+    assert cfg.d_gene_rep == 32
 
 
 def test_model_config_d_z_with_different_n_vmf():

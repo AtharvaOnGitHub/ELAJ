@@ -163,18 +163,29 @@ class TestAggregationEncoder:
     def test_cell_cls_shape(self):
         enc = self._make_agg()
         gcd, mt = self._make_inputs(enc)
-        cell_cls, _ = enc(gcd, mt)
+        cell_cls = enc(gcd, mt)
         assert cell_cls.shape == (B, D_AGG)
 
-    def test_group_cls_out_shape(self):
-        enc = self._make_agg()
-        gcd, mt = self._make_inputs(enc)
-        _, group_cls_out = enc(gcd, mt)
-        assert group_cls_out.shape == (B, len(GROUP_NAMES), D_AGG)
+    def test_returns_cell_cls_only(self):
+        """The per-cell group CLS tokens must not be reachable.
 
-    def test_cell_cls_not_equal_group_cls(self):
+        Returning them is what let the decoder reconstruct without the latent
+        (run 49817807). A tuple return would be an invitation to wire them back
+        in, so the narrow signature is the guarantee, not a style choice.
+        """
         enc = self._make_agg()
         gcd, mt = self._make_inputs(enc)
-        cell_cls, group_cls_out = enc(gcd, mt)
-        # CELL_CLS at pos 0 should differ from group CLS at pos 1+
-        assert not torch.allclose(cell_cls, group_cls_out[:, 0, :])
+        out = enc(gcd, mt)
+        assert isinstance(out, torch.Tensor), "aggregation must return one tensor"
+        assert out.shape == (B, D_AGG)
+
+    def test_cell_cls_depends_on_all_groups(self):
+        enc = self._make_agg()
+        gcd, mt = self._make_inputs(enc)
+        baseline = enc(gcd, mt)
+        for name in GROUP_NAMES:
+            perturbed = dict(gcd)
+            perturbed[name] = perturbed[name] + 5.0
+            assert not torch.allclose(baseline, enc(perturbed, mt)), (
+                f"CELL_CLS ignored group {name}"
+            )

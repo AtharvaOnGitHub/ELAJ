@@ -119,13 +119,15 @@ class ModelConfig:
 
     @property
     def d_gene_rep(self) -> int:
-        """Gene representation dimension fed to the decoder.
+        """Width of the decoder's gene side: gene identity only.
 
-        Concatenation of gene identity embedding (d_token) and the updated
-        group CLS token from the aggregation layer (d_agg).
-        Default: 32 + 64 = 96.
+        This used to be d_token + d_agg, the second term being the aggregation
+        layer's per-cell group CLS token.  That term is what let the decoder
+        reconstruct a cell without consulting the latent, so it is gone; the
+        gene side now carries identity and nothing else, and GroupedGeneQuery
+        projects it to d_dec per group.  See model/decoder/gene_query.py.
         """
-        return self.d_token + self.d_agg
+        return self.d_token
 
     @classmethod
     def from_dict(cls, d: dict) -> "ModelConfig":

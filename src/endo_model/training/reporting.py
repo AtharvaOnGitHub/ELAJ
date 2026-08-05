@@ -1,0 +1,204 @@
+"""EpochReporter: writes the figures that make a run readable while it runs.
+
+Called at the end of every epoch. Loss panels are cheap and redrawn each time;
+the latent figures need a forward pass worth of embeddings and a UMAP fit, so
+they run on an interval and on a fixed subsample.
+
+The subsample is fixed deliberately. Choosing fresh cells each time would make
+consecutive epochs incomparable — a change in the picture could be the model
+moving or just different cells — and comparing epochs is the entire purpose.
+
+Nothing here is allowed to end a run. A figure is a diagnostic; losing one to a
+missing dependency or a bad axis limit must not cost the GPU hours already
+spent, so every draw is guarded.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch import Tensor
+
+from endo_model.data.constants import DISEASE_STATUS_TO_INT
+from endo_model.viz import apply_theme, save_figure
+from endo_model.viz.latent_panels import circular_latent, latent_umap, safe_umap
+from endo_model.viz.training_panels import (
+    adversarial_panel,
+    baseline_comparison,
+    loss_curves,
+)
+
+logger = logging.getLogger(__name__)
+
+_DISEASE_NAMES = {v: k for k, v in DISEASE_STATUS_TO_INT.items()}
+
+
+@dataclass
+class LatentCollector:
+    """Accumulates latent codes and their labels over a validation pass.
+
+    Args:
+        max_cells: Stop after this many. A UMAP with `random_state` set runs
+                   single-threaded, so the full 244k-cell split would take
+                   longer than the epoch that produced it.
+    """
+
+    max_cells: int = 20000
+    mu_gauss: list = field(default_factory=list)
+    mu_angle: list = field(default_factory=list)
+    kappa: list = field(default_factory=list)
+    study_id: list = field(default_factory=list)
+    disease: list = field(default_factory=list)
+    tissue: list = field(default_factory=list)
+    _n: int = 0
+
+    @property
+    def full(self) -> bool:
+        return self._n >= self.max_cells
+
+    def add(self, output: dict, batch: dict) -> None:
+        """Record one batch's latents, truncating at max_cells."""
+        if self.full:
+            return
+        room = self.max_cells - self._n
+        take = min(room, int(output["mu_gauss"].shape[0]))
+
+        def grab(t: Tensor) -> np.ndarray:
+            return t[:take].detach().float().cpu().numpy()
+
+        self.mu_gauss.append(grab(output["mu_gauss"]))
+        self.mu_angle.append(grab(output["mu_angle"]))
+        self.kappa.append(grab(output["kappa"]))
+        self.study_id.append(batch["study_id"][:take].cpu().numpy())
+        self.disease.append(batch["disease_status"][:take].cpu().numpy())
+        self.tissue.append(batch["tissue_levels"][:take].cpu().numpy())
+        self._n += take
+
+    def stacked(self) -> dict[str, np.ndarray] | None:
+        """Concatenate everything collected, or None if nothing was."""
+        if not self.mu_gauss:
+            return None
+        return {
+            "mu_gauss": np.concatenate(self.mu_gauss),
+            "mu_angle": np.concatenate(self.mu_angle),
+            "kappa": np.concatenate(self.kappa),
+            "study_id": np.concatenate(self.study_id),
+            "disease": np.concatenate(self.disease),
+            "tissue": np.concatenate(self.tissue),
+        }
+
+
+class EpochReporter:
+    """Draws every per-epoch figure into `out_dir/figures/`.
+
+    Args:
+        out_dir:        Run output directory.
+        n_studies:      For the adversary's chance line, ln(n_studies).
+        id_to_name:     study id -> study name, for legends.
+        baseline_all:   Mean-profile baseline NB loss over all measured genes.
+        baseline_hvg:   The same over highly variable genes.
+        latent_every:   Epochs between latent figures. 0 disables them.
+        max_latent_cells: Size of the fixed val subsample used for UMAP.
+        seed:           UMAP seed, so consecutive epochs are comparable.
+    """
+
+    def __init__(
+        self,
+        out_dir: Path | str,
+        n_studies: int,
+        id_to_name: dict[int, str] | None = None,
+        baseline_all: float | None = None,
+        baseline_hvg: float | None = None,
+        latent_every: int = 10,
+        max_latent_cells: int = 20000,
+        seed: int = 24,
+    ) -> None:
+        self.fig_dir = Path(out_dir) / "figures"
+        self.n_studies = n_studies
+        self.id_to_name = id_to_name or {}
+        self.baseline_all = baseline_all
+        self.baseline_hvg = baseline_hvg
+        self.latent_every = latent_every
+        self.max_latent_cells = max_latent_cells
+        self.seed = seed
+        apply_theme()
+
+    def wants_latents(self, epoch: int) -> bool:
+        """Whether this epoch's validation pass should collect latent codes.
+
+        Epoch 0 is always included: the first picture is the reference every
+        later one is read against, and a model that is already collapsed at
+        epoch 0 should not take ten epochs to reveal it.
+        """
+        if self.latent_every <= 0:
+            return False
+        return epoch == 0 or epoch % self.latent_every == 0
+
+    def new_collector(self) -> LatentCollector:
+        return LatentCollector(max_cells=self.max_latent_cells)
+
+    def on_epoch_end(
+        self, epoch: int, history: dict, latents: dict[str, np.ndarray] | None
+    ) -> None:
+        """Redraw everything available for this epoch."""
+        self._draw("losses", lambda: loss_curves(history))
+        if self.baseline_all is not None:
+            self._draw(
+                "baseline",
+                lambda: baseline_comparison(
+                    history, self.baseline_all, self.baseline_hvg
+                ),
+            )
+        self._draw("adversarial", lambda: adversarial_panel(history, self.n_studies))
+
+        if latents is not None:
+            self._draw(
+                f"latent_circular_epoch{epoch:03d}",
+                lambda: circular_latent(
+                    latents["mu_angle"], latents["kappa"], epoch
+                ),
+            )
+            self._draw_umap(epoch, latents)
+
+    def _draw_umap(self, epoch: int, latents: dict[str, np.ndarray]) -> None:
+        coords = safe_umap(latents["mu_gauss"], seed=self.seed)
+        if coords is None:
+            return
+        labels = {
+            "by study": (
+                latents["study_id"], self.id_to_name,
+                "separation here = batch effects survive",
+            ),
+            "by disease status": (
+                latents["disease"], _DISEASE_NAMES,
+                "CIRCULAR: disease_status is a model input",
+            ),
+            "by tissue compartment": (latents["tissue"][:, 0], None, None),
+            "by organ": (latents["tissue"][:, 1], None, None),
+        }
+        self._draw(
+            f"latent_umap_epoch{epoch:03d}",
+            lambda: latent_umap(coords, labels, epoch),
+        )
+
+    def _draw(self, name: str, build) -> None:
+        """Build and save one figure, swallowing anything it raises.
+
+        A broken figure must never end a run that has already spent hours on
+        the GPU, so the exception is logged with its type and the run continues.
+        """
+        import matplotlib.pyplot as plt
+
+        try:
+            fig = build()
+        except Exception as exc:  # noqa: BLE001 — diagnostics are not load-bearing
+            logger.warning("figure %r failed (%s: %s)", name, type(exc).__name__, exc)
+            return
+        try:
+            save_figure(fig, self.fig_dir / name)
+        finally:
+            plt.close(fig)

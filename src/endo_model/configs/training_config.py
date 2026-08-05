@@ -83,6 +83,12 @@ class DiagnosticsConfig:
     # divergence and still abort with a full report.
     skip_nonfinite_steps: bool = True
     max_consecutive_skips: int = 5
+    # Epochs between latent figures (UMAP + circular). 0 disables them.
+    # UMAP with a fixed random_state runs single-threaded, so this is an
+    # interval rather than every epoch, on a fixed subsample rather than
+    # the full split — a fresh subsample would make epochs incomparable.
+    latent_every: int = 10
+    max_latent_cells: int = 20000
 
     @classmethod
     def from_dict(cls, d: dict) -> "DiagnosticsConfig":
@@ -92,6 +98,8 @@ class DiagnosticsConfig:
             dump_faults=bool(d.get("dump_faults", True)),
             skip_nonfinite_steps=bool(d.get("skip_nonfinite_steps", True)),
             max_consecutive_skips=int(d.get("max_consecutive_skips", 5)),
+            latent_every=int(d.get("latent_every", 10)),
+            max_latent_cells=int(d.get("max_latent_cells", 20000)),
         )
 
 

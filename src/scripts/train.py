@@ -194,6 +194,38 @@ def main() -> None:
         payload = CheckpointManager.load(str(resume_path), model, optimizer, map_location=str(device))
         start_epoch = payload.get("epoch", 0) + 1
 
+    # ── Baseline ──────────────────────────────────────────────────────────────
+    # Fitted before training, once, over the training split. Without it a
+    # reconstruction loss is uninterpretable: run 49817807 reported nb = 0.43
+    # for eleven epochs and nothing in the log could say whether that beat
+    # predicting a constant. It did not.
+    from endo_model.evaluation.baseline import MeanProfileBaseline
+
+    logger.info("Fitting mean-profile baseline over the training split ...")
+    baseline = MeanProfileBaseline(
+        n_studies=model_cfg.n_studies, vocab_size=vocab.vocab_size
+    ).fit(train_loader)
+    baseline_scores = baseline.score(val_loader)
+    baseline.save(out_dir / "baseline.json", baseline_scores)
+    logger.info(
+        "Baseline (study mean profile): nb=%.4f all genes, nb=%.4f over %d HVGs",
+        baseline_scores.nb_all_genes, baseline_scores.nb_hvg, baseline_scores.n_hvg,
+    )
+
+    # ── Figures ───────────────────────────────────────────────────────────────
+    from endo_model.training.reporting import EpochReporter
+
+    reporter = EpochReporter(
+        out_dir=out_dir,
+        n_studies=model_cfg.n_studies,
+        id_to_name={s["id"]: s["name"] for s in study_configs},
+        baseline_all=baseline_scores.nb_all_genes,
+        baseline_hvg=baseline_scores.nb_hvg,
+        latent_every=train_cfg.diagnostics.latent_every,
+        max_latent_cells=train_cfg.diagnostics.max_latent_cells,
+        seed=exp_cfg.seed,
+    )
+
     # ── Diagnostics ───────────────────────────────────────────────────────────
     # Watches every step for non-finite values.  The normal path costs one
     # extra scalar check per step; the expensive per-module instrumentation is
@@ -226,6 +258,7 @@ def main() -> None:
         device=device,
         cce_enabled=model_cfg.cce.enabled,
         monitor=monitor,
+        reporter=reporter,
     )
     trainer.current_epoch = start_epoch
 

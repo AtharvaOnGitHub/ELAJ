@@ -50,5 +50,11 @@ diagnostics:
   # is the wrong trade.  Consecutive skips mean a real divergence and abort.
   skip_nonfinite_steps: true
   max_consecutive_skips: 5
+  # Latent figures (UMAP of the Gaussian branch, polar view of the circular
+  # branch) every N epochs, on a fixed subsample of val cells. Fixed so
+  # consecutive epochs are comparable; UMAP is single-threaded once seeded,
+  # so the full 244k-cell split would outlast the epoch that produced it.
+  latent_every: 10
+  max_latent_cells: 20000
 
 resume_from_checkpoint: null    # path to a checkpoint; null = train from scratch

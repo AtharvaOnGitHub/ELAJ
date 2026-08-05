@@ -60,6 +60,7 @@ class Trainer:
         device: torch.device | None = None,
         cce_enabled: bool = False,
         monitor: TrainingMonitor | None = None,
+        reporter=None,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -80,6 +81,9 @@ class Trainer:
         )
         self.logger = MetricLogger()
         self.monitor = monitor or TrainingMonitor(model, [composite_loss])
+        # EpochReporter, or None to run without figures.
+        self.reporter = reporter
+        self._collector = None
 
         self.global_step = 0
         self.current_epoch = 0
@@ -107,6 +111,13 @@ class Trainer:
             _record(history, "train", train_metrics)
 
             if epoch % self.config.val_check_interval == 0:
+                wants = (
+                    self.reporter is not None
+                    and self.reporter.wants_latents(epoch)
+                )
+                self._collector = (
+                    self.reporter.new_collector() if wants else None
+                )
                 val_metrics = self._val_epoch()
                 val_loss = val_metrics["total"]
                 history["val_loss"].append(val_loss)
@@ -119,6 +130,14 @@ class Trainer:
                         extra={"train_metrics": train_metrics,
                                "val_metrics": val_metrics},
                     )
+
+                if self.reporter is not None:
+                    latents = (
+                        self._collector.stacked()
+                        if self._collector is not None else None
+                    )
+                    self.reporter.on_epoch_end(epoch, history, latents)
+                self._collector = None
 
                 if self.early_stopping.step(val_loss):
                     break
@@ -201,6 +220,11 @@ class Trainer:
                 total_steps=self.total_steps,
             )
             val_logger.log({k: v.item() for k, v in losses.items()})
+            # Latents are collected here rather than in a second pass: the
+            # forward has already run, and re-running it would both cost an
+            # extra pass and sample different dropout.
+            if self._collector is not None and not self._collector.full:
+                self._collector.add(output, batch)
 
         return val_logger.epoch_averages()
 

@@ -47,7 +47,16 @@ class GroupEncoder(nn.Module):
             batch_first=True,
             norm_first=True,      # pre-LayerNorm
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=n_layers,
+            # Off deliberately. The nested-tensor path exists to skip padding in
+            # variable-length batches; every sequence here is full, so it could
+            # never fire. PyTorch disables it anyway because norm_first=True and
+            # warns each time a module is built, which is 46 warnings per test
+            # run reporting a decision we already made.
+            enable_nested_tensor=False,
+        )
 
     def forward(self, tokens: Tensor) -> tuple[Tensor, Tensor]:
         """Encode a gene group's token sequence.

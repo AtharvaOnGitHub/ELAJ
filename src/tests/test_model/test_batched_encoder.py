@@ -124,16 +124,41 @@ def test_padding_does_not_leak_into_shorter_groups():
     assert torch.equal(baseline, after), "a group's output changed with another group's input"
 
 
+def test_invariant_to_a_constant_offset():
+    """Adding the same constant to every feature changes nothing. By design.
+
+    Pre-LayerNorm subtracts each token's mean over the feature axis, so a
+    uniform offset is removed before the weights ever see it — at every layer,
+    including the residual path, since the next LayerNorm removes it again.
+
+    Pinned here because it is not obvious and it invalidates the natural way to
+    write the independence test below: perturbing by `+ 3.0` looks like a
+    perturbation and is in fact a no-op.
+    """
+    enc = make_batched()
+    tokens = make_tokens()
+    with torch.no_grad():
+        baseline = enc(tokens)
+        shifted = enc({name: value + 3.0 for name, value in tokens.items()})
+    for name in NAMES:
+        assert torch.allclose(baseline[name], shifted[name], atol=1e-5)
+
+
 def test_groups_are_independent():
-    """Perturbing one group's tokens must move that group and no other."""
+    """Perturbing one group's tokens must move that group and no other.
+
+    The perturbation replaces the tokens rather than offsetting them — see
+    test_invariant_to_a_constant_offset for why an offset would not register.
+    """
     enc = make_batched()
     tokens = make_tokens()
     with torch.no_grad():
         baseline = enc(tokens)
 
+    torch.manual_seed(7)
     for changed in NAMES:
         perturbed = dict(tokens)
-        perturbed[changed] = perturbed[changed] + 3.0
+        perturbed[changed] = torch.randn(B, SIZES[changed], D_TOKEN)
         with torch.no_grad():
             out = enc(perturbed)
         assert not torch.allclose(out[changed], baseline[changed]), (

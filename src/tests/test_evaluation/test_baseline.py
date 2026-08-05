@@ -28,13 +28,25 @@ def make_batch(study: int, counts: torch.Tensor, dns: torch.Tensor | None = None
     }
 
 
+def study_profile(study: int) -> torch.Tensor:
+    """A study's expression profile — distinct in *shape*, not merely scale.
+
+    Two studies differing by a constant factor have *identical* proportion
+    profiles, because dividing by the library size removes the factor. Building
+    the fixture that way makes a contamination test vacuous: it would compare
+    two things that are correctly equal. Reversing the profile makes them
+    genuinely different.
+    """
+    base = torch.arange(1, D + 1).float()
+    return base if study == 0 else base.flip(0)
+
+
 def constant_corpus(seed: int = 0, dns: torch.Tensor | None = None) -> list:
     """Two studies with distinct, cell-invariant expression profiles."""
     torch.manual_seed(seed)
     batches = []
     for study in range(N_STUDIES):
-        profile = torch.arange(1, D + 1).float() * (study + 1)
-        counts = profile.unsqueeze(0).expand(B, -1).contiguous()
+        counts = study_profile(study).unsqueeze(0).expand(B, -1).contiguous()
         batches.append(make_batch(study, counts, dns))
     return batches
 
@@ -47,13 +59,19 @@ def test_profile_recovers_a_constant_corpus():
     batches = constant_corpus()
     base = MeanProfileBaseline(N_STUDIES, D, n_hvg=5).fit(batches)
     for study in range(N_STUDIES):
-        expected = torch.arange(1, D + 1).float() * (study + 1)
+        expected = study_profile(study)
         expected = expected / expected.sum()
         got = base._proportions[study]
         assert torch.allclose(got, expected, atol=1e-5), f"study {study}"
 
 
 def test_studies_do_not_contaminate_each_other():
+    """Distinct study profiles must stay distinct.
+
+    Note the profiles differ in shape, not scale: proportions are
+    scale-invariant, so a fixture whose studies differ by a constant factor
+    would compare two correctly-equal vectors and prove nothing.
+    """
     base = MeanProfileBaseline(N_STUDIES, D, n_hvg=5).fit(constant_corpus())
     assert not torch.allclose(base._proportions[0], base._proportions[1])
 
@@ -100,7 +118,7 @@ def test_a_variable_corpus_scores_worse_than_a_constant_one():
 
     variable = []
     for study in range(N_STUDIES):
-        profile = torch.arange(1, D + 1).float() * (study + 1)
+        profile = study_profile(study)
         noisy = (
             profile.unsqueeze(0) * torch.rand(B, D).mul(4.0)
         ).round().clamp_min(0.0)

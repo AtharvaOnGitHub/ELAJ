@@ -6,7 +6,8 @@ optimizer:
 
 scheduler:
   name: CosineAnnealingLR
-  T_max: 100           # matches max_epochs
+  # No T_max: the cosine period has to equal the run length, so train.py
+  # derives it from max_epochs. A second number here could only disagree.
 
 batch_size: 256
 max_epochs: 50

@@ -1,0 +1,38 @@
+name: s0_dab
+description: >
+  Adversary at lambda 0.2, with the classifier now clipped.
+
+  Stage 0/2 of the tuning plan. All five arms share one base and differ only in
+  the line under "the variable" below, so any difference between them is
+  attributable. Ten epochs because dab_off turned upward on val_nb after epoch
+  1 and we need to see whether that is overfitting or noise.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s0_dab/
+seed: 24
+
+overrides:
+  training.max_epochs: 10
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+
+  # Nothing may early-stop an arm whose purpose is the shape of a curve. Every
+  # epoch is checkpointed, so the best one can be recovered afterwards.
+  training.early_stop_warmup_epochs: 99
+
+  # Latent figures every other epoch: enough to see a branch die, not so many
+  # that UMAP fitting starts to matter against a 31-minute epoch.
+  training.diagnostics.latent_every: 2
+
+  # ---- the variable ----
+  # The first valid measurement of the adversary. Every previous attempt was
+  # confounded: lambda 1.0 ran under a broken circular KL, lambda 0.2 ran with
+  # the DAB classifier excluded from the gradient clip and diverged to
+  # val_dab 18.51 against a chance of 2.079.
+  #
+  # Read val_dab against ln(8) = 2.079, not ln(12): four studies contribute no
+  # cells after the disease filter and the classifier is never asked about them.
+  model.dab.lambda_dab: 0.2

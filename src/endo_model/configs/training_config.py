@@ -24,15 +24,24 @@ class OptimizerConfig:
 
 @dataclass
 class SchedulerConfig:
+    """Learning-rate schedule.
+
+    There is deliberately no T_max here. The cosine period must equal the run
+    length or the schedule is wrong by construction, so scripts/train.py derives
+    it from max_epochs rather than reading a second number that could disagree.
+
+    A `T_max: 100` field used to sit here, parsed and never read, next to the
+    comment "matches max_epochs" — which it did not, for any run this project
+    has done. Nothing was miscalibrated by it, because train.py ignored it, but
+    it cost a review cycle: it is exactly the sort of dead configuration that
+    reads as a bug and is worse than no configuration at all.
+    """
+
     name: str = "CosineAnnealingLR"
-    T_max: int = 100
 
     @classmethod
     def from_dict(cls, d: dict) -> "SchedulerConfig":
-        return cls(
-            name=d.get("name", "CosineAnnealingLR"),
-            T_max=int(d.get("T_max", 100)),
-        )
+        return cls(name=d.get("name", "CosineAnnealingLR"))
 
 
 @dataclass

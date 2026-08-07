@@ -15,8 +15,8 @@ mechanism inert.
 
 ```
 total = w_nb·NB
-      + β(t)·w_kl_gauss·KL_gauss
-      + β(t)·w_kl_vmf·KL_vmf
+      + β(t)·w_kl_gauss·KL_gauss / G_meas
+      + β(t)·w_kl_vmf·KL_vmf     / G_meas
       + w_dab·CE(dab_logits, study_id)      ← λ(t) is inside, via gradient reversal
       + w_cce·InfoNCE
 ```
@@ -56,38 +56,112 @@ Two properties worth holding onto:
 - `.mean()` is over both `B` and `G_meas`. Since `G_meas` varies by study, the
   per-batch loss is a mean over a **different number of terms** depending on
   which study the batch came from — so cross-study loss comparisons are already
-  not apples-to-apples, independent of the fractional-count issue.
+  not apples-to-apples, independent of the fractional-count issue. This is also
+  why the step-level `nb` in the log is bimodal: each batch is one study, and
+  the low mode is whichever studies are easy. **Do not compare a step-level `nb`
+  against the pooled baseline** — that mistake produced a "47% better than
+  baseline" claim that was actually 6%.
+
+### Precision
+
+The whole forward runs under `autocast(bfloat16)` when `precision: bf16`, but
+this loss **forces fp32 back on**. The expression is three `lgamma` terms of
+similar magnitude subtracted from one another, then two log differences of
+similar magnitude: the answer is small relative to the terms producing it, so
+precision lost in those terms lands directly on the result. bf16 carries about
+three decimal digits, which is not enough for a difference of lgammas at counts
+in the thousands. See [`precision.py`](../../src/endo_model/precision.py).
 
 ---
 
 ## 2. KL divergences — [`kl_divergence.py`](../../src/endo_model/model/objectives/kl_divergence.py)
 
-### `GaussianKLLoss` — [`:25`](../../src/endo_model/model/objectives/kl_divergence.py:25)
+> **Read this section before changing anything here.** An earlier version of
+> this page argued that averaging KL over latent dimensions was correct because
+> "NB is also a per-element mean". That sentence was the single most expensive
+> mistake in the project. It is preserved below as the thing being corrected.
 
-```python
-kl = -0.5 * (1.0 + logvar - mu.pow(2) - logvar.exp())
-return kl.mean()
+### The scale bug
+
+The reconstruction term averages over **~15,000 genes**. The KL terms averaged
+over **32** and **8** latent dimensions. Those are not the same scale, and the
+loss was:
+
+```
+mean_gene(NB)  +  beta · mean_dim(KL)
 ```
 
-Closed-form KL to `N(0, I)`. `.mean()` over `(B, d_gauss)` — a **per-dimension**
-mean, not a per-cell sum, so its magnitude does not scale with `d_gauss`. That
-matters for the relative weighting against NB, which is also a per-element mean.
+Multiply through by 15,000 to put NB on the conventional per-cell footing and
+the KL weight that actually applied comes out as:
 
-### `PowerSphericalKLLoss` — [`:65`](../../src/endo_model/model/objectives/kl_divergence.py:65)
+| branch | dims | effective β at `beta_kl = 1.0` |
+|---|---|---|
+| Gaussian | 32 | **~469** |
+| circular | 8 | **~1,875** |
 
-Delegates to `power_spherical_kl_uniform(kappa, dim=2)` — `dim=2` because
-circular latents live on `S¹` embedded in 2-D.
+β-VAE papers report posterior collapse in the **1–20** range. The model was
+being charged several hundred nats of loss per nat of information stored, so it
+correctly stored none — 8/8 circular dimensions collapsed by epoch 0, `kl_vmf`
+pinned at its floor from epoch 1, and eleven epochs of training finished 1.1%
+better than predicting each study's mean profile.
 
-Depends only on `kappa`, not `mu_angle`: KL to a *uniform* prior is
-rotation-invariant, so the mean direction is unpenalised. Minimising it pushes
-`kappa → 0`, i.e. towards "no directional preference". The model must therefore
-earn concentration from the reconstruction term.
+**What makes this a diagnosis rather than a story:** the two ratios differ by 4×
+and predict that the 8-dimensional branch dies first and harder. It did,
+completely. The ratio was not chosen to fit the result; it falls out of counting
+15,000, 32 and 8.
 
-### `VonMisesKLLoss` — [`:42`](../../src/endo_model/model/objectives/kl_divergence.py:42)
+### What both classes do now
+
+```python
+# GaussianKLLoss
+kl = -0.5 * (1.0 + logvar - mu.pow(2) - logvar.exp())
+return kl.sum(dim=-1).mean()
+
+# PowerSphericalKLLoss
+return power_spherical_kl_uniform(kappa, dim=2).sum(dim=-1).mean()
+```
+
+**Summed over dimensions, averaged over cells** — the per-cell ELBO's KL. KL is
+an amount of information and it belongs to the cell, not to a dimension;
+averaging makes a 32-dimensional latent look eight times cheaper than an
+8-dimensional one carrying the same information, which is backwards.
+
+`CompositeLoss` then divides both by `G_meas`:
+
+```python
+n_measured = max(int(model_output["measured_global_idxs"].numel()), 1)
+kl_gauss = self.gauss_kl(...) / n_measured
+kl_vmf   = self.vmf_kl(...)  / n_measured
+```
+
+which puts them on `nb`'s per-gene scale, so `beta_kl = 1.0` is a genuine β=1
+VAE. `G_meas` rather than a constant because it varies by study (13,144–15,031):
+a study measuring more genes contributes more reconstruction evidence, and the
+KL should be weighed against the evidence actually in the batch.
+
+⚠ **Reported `kl_gauss` is now ~450× smaller in absolute terms.** That is the
+fix, not a regression. Read the shape of the curve, not the value.
+
+### The class that got missed
+
+The fix landed in two passes, and the first one missed. `CompositeLoss` binds
+`self.vmf_kl` to **`PowerSphericalKLLoss`**; the change went to `GaussianKLLoss`
+and `VonMisesKLLoss`, and the latter is dead code that nothing constructs. The
+circular branch stayed averaged — an 8× *under*-penalty this time — and κ shot
+to 8–15 against a collapse threshold of 1e-2, four orders of magnitude past it
+in three epochs. Two more runs void.
+
+`tests/test_model/test_objectives.py::test_composite_uses_the_power_spherical_kl`
+now pins which class the loss is bound to. Two distributions with similar names,
+one attribute called `vmf_kl`, and a change applied to the wrong one looks
+correct in review and does nothing at runtime.
+
+### `VonMisesKLLoss` — [`kl_divergence.py`](../../src/endo_model/model/objectives/kl_divergence.py)
 
 ⚠ **Dead code, retained deliberately.** Uses `torch.special.i0/i1`, which
 overflow for moderate `kappa` — one of the two reasons the branch moved to Power
-Spherical. Nothing constructs it.
+Spherical. Nothing constructs it, and as above, that is exactly what made it a
+trap.
 
 ---
 
@@ -205,6 +279,20 @@ there is no wasted compute.
 
 ⚠ Only three of seven are reachable from YAML. `w_nb`, `w_kl_gauss`,
 `w_kl_vmf`, `w_dab` are constructor defaults that `train.py` never overrides —
+
+Note `w_dab = 1.0` is why `dab` still appears in `total` and the classifier still
+trains even at `lambda_dab: 0.0`. `lambda_dab` is the **gradient-reversal
+scale**, not the loss weight: at 0 no reversed gradient reaches the encoder, but
+the number stays comparable across arms. That is deliberate — it is what lets
+`s0_ref` report how readable study identity is from an unopposed latent.
+
+**Read `dab` against `ln(n_live_studies)`, not `ln(n_configured)`.** Four of the
+twelve configured studies contribute no cells after the disease filter, and the
+classifier is never asked about them: chance is `ln(8) = 2.079`, not
+`ln(12) = 2.485`. Reading run `kl_check` against the wrong line made an adversary
+sitting exactly at chance (2.084) look like it was below it. `train.py` now
+passes the live count to `EpochReporter`.
+
 so the reconstruction/KL balance cannot be tuned without editing code. See
 [11](11-findings.md).
 

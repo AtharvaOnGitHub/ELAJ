@@ -11,14 +11,22 @@ Batch
  │      ├ ValueEncoder        (counts)      ┐ torch.where on dns_mask
  │      ├ dns_embedding       (DNS)         ┘
  │      └ DSBN                (per-study affine)
- ├→ HierarchicalEncoder   → {group: (B, d_token)}        K transformers
- ├→ MetadataEncoder       → (B, 3, d_agg)
- ├→ AggregationEncoder    → cell_cls (B, d_agg), group_cls_out (B, K, d_agg)
+ ├→ BucketedGroupEncoder  → {group: (B, d_token)}        45 encoders, 4 buckets
+ ├→ MetadataEncoder       → (B, 1, d_agg)                 age only
+ ├→ AggregationEncoder    → cell_cls (B, d_agg)
  ├→ BifurcatedLatentSpace → z, z_proj, mu_gauss, logvar, mu_angle, kappa, …
- ├→ _build_gene_reps      → (B, G_meas, d_gene_rep)
+ ├→ _build_gene_queries   → (G_meas, d_dec)               NO batch dimension
+ ├→ TissueHierarchyEncoder→ (B, d_tissue)                 decoder conditioning
  └→ BilinearDecoder       → log_mu (B, G_meas) → softmax × library_size → mu_hat
                             PerGeneDispersion → theta (G_meas,)
 ```
+
+**The missing batch dimension on `_build_gene_queries` is the load-bearing
+detail on this page.** The gene side of the decoder cannot vary by cell, so the
+latent is the only route from a cell to its own reconstruction. An earlier
+version passed `(B, G_meas, d_gene_rep)` built from the encoder's per-cell group
+summaries, and the model reconstructed from those instead of from the latent —
+both latent branches emptied. See [11 §A6](11-findings.md).
 
 ---
 
@@ -29,16 +37,19 @@ Builds every submodule, then precomputes three index maps
 
 | Map | Content |
 |---|---|
-| `_group_name_to_seq_pos` | group name → its column in `group_cls_out` |
 | `_group_global_idxs` | group name → its global indices |
-| `_global_to_group` | global index → `(group, within_idx)` |
+| `_gene_layouts` | `MeasuredGeneLayoutCache`, keyed `(study_id, device)` |
 
-These are built once because `_build_gene_reps` would otherwise recompute them
-every forward pass. ⚠ `_global_to_group` is built and never read — see
-[11](11-findings.md).
+`MeasuredGeneLayoutCache` [`gene_layout.py`](../../src/endo_model/model/gene_layout.py)
+holds, per study, which measured genes belong to which group and where each one
+lands in the packed `(G_meas,)` axis. That mapping depends only on the study's
+DNS pattern, and `PerStudyBatchSampler` guarantees one study per batch — so it is
+**11 layouts for a whole run** rather than one rebuild per step. The version it
+replaced did ~15,495 Python dict lookups every forward pass and produced an
+identical answer each time.
 
-`d_gene_rep = config.d_token + config.d_agg` is recomputed inline here rather
-than using the `ModelConfig.d_gene_rep` property.
+`d_gene_rep` is gone. The decoder's gene side is now gene identity alone,
+projected per group to `d_dec` — see §6.
 
 ---
 
@@ -122,68 +133,102 @@ normalisation.
 
 ---
 
-## 2. `HierarchicalEncoder` — [`group_encoder.py:70`](../../src/endo_model/model/encoders/group_encoder.py:70)
+## 2. `BucketedGroupEncoder` — [`bucketing.py`](../../src/endo_model/model/encoders/batched/bucketing.py)
 
-An `nn.ModuleList` of K `GroupEncoder`s, indexed positionally against
-`group_names`. `forward` is a dict comprehension taking `[1]` — the CLS output —
-and discarding the per-gene contextual outputs.
+Still 45 independent per-group transformers with their own weights. What changed
+twice is how they reach the GPU.
 
-### `GroupEncoder` — [`:18`](../../src/endo_model/model/encoders/group_encoder.py:18)
+**Then:** an `nn.ModuleList` of 45 `GroupEncoder`s in a Python loop. Measured on
+an A100: **30% idle, ~7% of fp32 peak while busy.** Every matmul at d_token=32
+was small enough that launching it cost more than running it, 45 times per layer
+per direction.
 
-```python
-seq = torch.cat([cls.expand(B, -1, -1), tokens], dim=1)   # (B, G_k+1, d_token)
-out = self.transformer(seq)
-return out, out[:, 0, :]
-```
+**Now:** the 45 weight sets are stacked along a leading K axis and driven by
+grouped matmuls (`BatchedLinear` uses `baddbmm`; `BatchedSelfAttention` folds
+group and cell into one batch axis for `scaled_dot_product_attention`), and the
+groups are split into **4 size buckets** so a 253-gene group is not padded to the
+493-gene group's length.
 
-A pre-LayerNorm (`norm_first=True`) `nn.TransformerEncoder` with a learnable
-`[GROUP_CLS]` prepended at position 0.
+`tests/test_model/test_batched_encoder.py` checks the batched form against real
+`nn.TransformerEncoderLayer` stacks holding the same weights, elementwise.
+`test_bucketing.py` checks the bucketed form against the unbucketed one. The
+claim is that this is a scheduling change with no modelling content, and that
+claim is only worth anything because it is tested.
 
-**This is the model's dominant memory cost.** Attention is `(B, n_heads, G_k+1,
-G_k+1)` per layer, retained for backward. Summed across all 45 groups at B=128,
-4 heads, 2 layers, fp32: **~23 GB**. It is why `max_size` exists in the
-vocabulary cut ([04 §4](04-flow-vocabulary.md)) and why batch size is 128.
+### Why buckets, and what they buy
 
-⚠ The K encoders run **sequentially in a Python loop**. With K=45 this is
-45 kernel-launch-bound transformer calls per forward pass — likely the
-throughput ceiling, not FLOPs. See [11](11-findings.md).
+Attention is quadratic in sequence length, and one padded block pads every group
+to the largest. Real group sizes run **253–493 genes**, and
+`scripts/benchmark_attention.py` measured **49.0% of the attention arithmetic
+being spent on padding**. `plan_buckets` chooses the partition with a small
+dynamic program that minimises `sum(count_b × max_b²)` exactly — on lopsided
+sizes an even split is measurably worse. On the real vocabulary it reports
+**85.2% of the padding removed** (buckets of length 271/344/423/494).
 
----
+A bucket whose groups are all the *same* size needs no padding, so
+`BatchedGroupEncoder` drops `key_valid` entirely for it. That matters more than
+it looks: **FlashAttention refuses any non-null `attn_mask`.**
 
-## 3. `MetadataEncoder` — [`metadata_encoder.py:20`](../../src/endo_model/model/embeddings/metadata_encoder.py:20)
+### The precision interaction
 
-Stacks three sub-encoders into `(B, 3, d_agg)`. Order is fixed convention:
-**tissue, age, disease**.
+Measured on an A100 at real training shapes, one SDPA call forward+backward:
 
-- **`TissueHierarchyEncoder`** [`tissue_encoder.py:16`](../../src/endo_model/model/embeddings/tissue_encoder.py:16)
-  — four `nn.Embedding` tables (compartment 8, organ 16, tissue_type 32,
-  microsite 16), **summed**. Sum rather than concat keeps the output at `d_agg`
-  regardless of depth, and lets a missing level (index 0) contribute a learned
-  "unknown" vector rather than a structural hole.
+| | time |
+|---|---|
+| fp32 + mask (what it used to do) | 449.97 ms |
+| fp32, no mask | 419.28 ms |
+| bf16 + mask | 174.87 ms |
+| **bf16, no mask** | **62.60 ms** |
+
+FlashAttention has **no fp32 kernel at all**, and separately rejects a mask. Both
+conditions are needed. This is why `precision: bf16` and bucketing landed
+together — either alone leaves most of the 7.19× on the table.
+
+End to end: **2h04 → ~31 min per epoch.**
+
+## 3. `MetadataEncoder` — [`metadata_encoder.py`](../../src/endo_model/model/embeddings/metadata_encoder.py)
+
+**One token: age.** `N_METADATA = 1`.
+
 - **`AgeEncoder`** [`age_encoder.py:21`](../../src/endo_model/model/embeddings/age_encoder.py:21)
   — sinusoidal basis (32 dims: 16 sin + 16 cos over log-spaced frequencies),
   age normalised by 100, then `nn.Linear(32, d_agg)`.
 
   > **Decision:** sinusoidal, not a lookup table, because age is continuous and
   > ordered — binning imposes arbitrary boundaries. NaN ages produce an exact
-  > zero vector ([`:64`](../../src/endo_model/model/embeddings/age_encoder.py:64)),
-  > signalling absence rather than imputing a value.
-- **`DiseaseStatusEncoder`** [`disease_encoder.py:9`](../../src/endo_model/model/embeddings/disease_encoder.py:9)
-  — `nn.Embedding(4, d_agg)`.
+  > zero vector, signalling absence rather than imputing a value.
 
-  ⚠ **`disease_status` is a model *input*.** The label the model might be asked
-  to predict is fed to the encoder. That is a deliberate conditioning choice for
-  a generative model, but it means the latent space is not a
-  disease-status-blind representation, and any downstream classification of
-  disease from `mu_gauss` is circular. See [11](11-findings.md).
+Two fields were removed from here, and both removals change what the trained
+model can be used to claim.
 
----
+### `disease_status` — removed from the model entirely
+
+It used to be an encoder input, and the UMAP panel carried a `CIRCULAR:` caption
+saying so. For a disease atlas that is not a caveat, it is a disqualification: a
+model *told* which cells are diseased will separate them, and the separation
+then demonstrates nothing. It is now held out and used only to colour the UMAP.
+
+`DiseaseStatusEncoder` still exists and is deliberately unwired, with the reason
+in its docstring.
+
+### `tissue` — moved to the decoder
+
+Conditioning a decoder on known covariates is standard, and it changes what the
+latent means: the latent no longer spends capacity encoding *which site* a cell
+came from, so what remains is the variation tissue does not explain. See §7.
+
+⚠ **As of the current corpus this conditioning is inert.**
+`scripts/describe_metadata.py` found `tissue_compartment`, `tissue_organ` and
+`tissue_microsite` absent from **all 13 studies**, and the only `tissue_type`
+values are the CELLxGENE free-text collision (`tissue`, `organoid`). Every cell
+reads level 0. `tissue_ontology_term_id` *is* fully populated and is the raw
+material a real hierarchy would be built from. See [11 §D5](11-findings.md).
 
 ## 4. `AggregationEncoder` — [`aggregation.py:74`](../../src/endo_model/model/encoders/aggregation.py:74)
 
 ```
-[CELL_CLS, group_CLS_0 … group_CLS_{K-1}, meta_tissue, meta_age, meta_disease]
-    0       1                 K              K+1        K+2       K+3
+[CELL_CLS, group_CLS_0 … group_CLS_{K-1}, meta_age]
+    0       1                 K              K+1
 ```
 
 `group_cls_dict` is stacked in `self.group_names` order — the same order as the
@@ -194,15 +239,20 @@ ModuleList — so position `1+i` always means group `i`.
 With d_token=32 and d_agg=64 it is a real projection. Metadata tokens are already
 `d_agg` and are not projected.
 
-Outputs: `cell_cls_out = out[:, 0, :]` → the latent space;
-`group_cls_out = out[:, 1:1+K, :]` → the decoder.
+Output: **`cell_cls = out[:, 0, :]` only.** `(B, d_agg)` — the one per-cell
+tensor that leaves the encoder.
 
-> **Decision:** the *updated* group CLS tokens feed the decoder, not the
-> pre-aggregation ones. After this transformer, each group's token has attended
-> to every other group and to the metadata — so a gene's representation carries
-> whole-cell context rather than only its own group's.
+> **Decision, reversed.** The updated group CLS tokens used to be returned and
+> fed to the decoder, on the reasoning that a gene's representation should carry
+> whole-cell context. That reasoning was the bug. Those tokens are a
+> contextualised read of the cell's own expression, and handing them to the
+> decoder gave it a per-cell channel that bypasses the KL penalty entirely. The
+> optimiser took the free route and both latent branches emptied.
+>
+> Nothing per-cell may leave this encoder except `cell_cls`, which goes through
+> the bottleneck. `tests/test_model/test_no_encoder_bypass.py` pins it.
 
-Sequence length is `1 + 45 + 3 = 49`; attention here is negligible next to §2.
+Sequence length is `1 + 45 + 1 = 47`; attention here is negligible next to §2.
 
 ---
 
@@ -299,6 +349,12 @@ gradient — means a boundary singularity, not bad data. Other candidates in thi
 model that have not been audited: `lgamma`/`digamma` in the losses, and the
 softmax over 15,495 genes.
 
+**And note what this costs under `precision: bf16`.** Every guard above is sized
+by `_BOUNDARY_EPS = 1e-6`. The nearest bf16 value below 1.0 is about `1 - 0.004`,
+so in bf16 a clamp to `1 - 1e-6` rounds straight back to 1.0 and does nothing —
+the guard would still be there, still look correct, and the NaN would be back.
+`rsample` therefore forces fp32 whatever the caller set.
+
 `power_spherical_kl_uniform` [`:42`](../../src/endo_model/model/latent/power_spherical.py:42)
 is the closed-form KL to uniform, independent of `μ`, zero at `κ = 0`. Both it
 and `_log_normalizer` were cross-checked against Monte-Carlo at d=2 and d=3
@@ -316,63 +372,78 @@ what `CompositeLoss` reads.
 
 ---
 
-## 6. `_build_gene_reps` — [`endo_model.py:150`](../../src/endo_model/model/endo_model.py:150)
-
-The most intricate function in the model.
+## 6. `_build_gene_queries` — [`endo_model.py`](../../src/endo_model/model/endo_model.py)
 
 ```python
-measured_mask        = ~batch["is_dns"][0]                    # (D,)
-measured_global_idxs = measured_mask.nonzero(as_tuple=True)[0]
+study_id = int(batch["study_id"][0].item())
+layout   = self._gene_layouts.get(study_id, batch["is_dns"][0])
+
+gene_queries = torch.zeros(layout.n_measured, self.config.d_dec, …)
+for group in layout.slices:
+    identity = self.gene_embedding(group.name, group.within_idxs)   # (n_sel, d_token)
+    gene_queries[group.meas_positions] = self.gene_query.project(
+        identity, group.seq_pos
+    )
+return gene_queries, layout.measured_global_idxs
 ```
 
-**Row 0 only.** Valid because `PerStudyBatchSampler` guarantees one study per
-batch and DNS is a per-study property. This is the single strongest coupling
-between the sampler and the model.
+**Shape `(G_meas, d_dec)`. No batch dimension, by construction.** That is the
+structural guarantee that nothing the model *inferred* about a cell reaches the
+decoder except through `z_proj`.
 
-Then per group:
+`batch["is_dns"][0]` — row 0 only. Valid because `PerStudyBatchSampler`
+guarantees one study per batch and DNS is a per-study property. This is the
+single strongest coupling between the sampler and the model.
+
+### `GroupedGeneQuery` — [`gene_query.py`](../../src/endo_model/model/decoder/gene_query.py)
 
 ```python
-identity     = self.gene_embedding(group_name, within_t)       # (B, n_sel, d_token)
-group_cls_g  = group_cls_out[:, seq_pos, :].expand(-1, n_sel, -1)  # (B, n_sel, d_agg)
-gene_reps[:, pos_t, :] = cat([identity, group_cls_g], -1)
+self.weight = nn.Parameter(torch.empty(n_groups, d_token, d_dec))
+self.bias   = nn.Parameter(torch.zeros(n_groups, d_dec))
+
+def project(self, embeddings, group_index):
+    return embeddings @ self.weight[group_index] + self.bias[group_index]
 ```
 
-Each measured gene's representation is **its identity embedding concatenated with
-its group's post-aggregation CLS token** — "which gene" plus "what this group is
-doing in this cell".
+**One projection matrix per group, not one shared matrix.** The alternative
+considered was a shared `W_q` applied to `[e_g ; u_k]` — the gene embedding
+concatenated with a learned per-group vector. That was rejected on a rank
+argument: concatenation caps `rank(Q)` at `d_token + d_group = 24`, while
+per-group matrices lift it to `d_dec = 64`.
 
-Note the identity embedding is looked up **twice** per forward pass: once in
-`TokenConstructor` (all genes) and again here (measured genes only). The same
-table, so the weights are shared and gradients accumulate from both paths.
-
-> **Decision:** the loop is over groups (K≈45), not genes (D≈15,495), and
-> `global_to_meas_pos` is an O(G_meas) dict built once
-> ([`:181`](../../src/endo_model/model/endo_model.py:181)) — it replaced an
-> O(G_k × G_meas) tensor scan in the inner loop.
-
-⚠ It is still O(D) **Python-level** work per forward pass: the inner
-`for within_i, global_i in enumerate(global_idxs_all)`
-([`:193`](../../src/endo_model/model/endo_model.py:193)) performs ~15,495 dict
-lookups and list appends every single batch, and the result is identical every
-time for a given study. See [11](11-findings.md).
+The deeper reason is consistency. The encoder already gives every group its own
+reader, so the 45 embedding tables are genuinely separate spaces rather than one
+table re-indexed. A shared decoder `W_q` would have been the one place assuming
+otherwise. Cost: +88,896 parameters, about 5%.
 
 ---
 
 ## 7. Decode
 
-### `BilinearDecoder` — [`bilinear_decoder.py:40`](../../src/endo_model/model/decoder/bilinear_decoder.py:40)
+### `BilinearDecoder` — [`bilinear_decoder.py`](../../src/endo_model/model/decoder/bilinear_decoder.py)
 
 ```python
-q = W_q(gene_reps)                              # (B, G_meas, d_dec)
-k = W_k(z_proj).unsqueeze(1)                    # (B, 1, d_dec)
-v = W_v(z_proj).unsqueeze(1)                    # (B, 1, d_dec)
-scores = (q * k).sum(-1, keepdim=True) * scale  # (B, G_meas, 1)
-log_mu = W_out(scores * v).squeeze(-1)          # (B, G_meas)
+context = cat([z_proj, tissue], -1)              # (B, d_agg + d_tissue)
+k       = self.W_k(context)                      # (B, d_dec)
+v       = self.W_v(context)                      # (B, d_dec)
+scores  = (k @ gene_queries.T) * self.scale      # (B, G_meas)
+gain    = v @ self.W_out.weight.squeeze(0)       # (B,)
+return scores * gain.unsqueeze(1) + self.W_out.bias
 ```
 
-Attention-shaped but with a **single key/value** (the cell's latent) and no
-softmax over genes — the softmax happens in the model, over genes, to enforce
-the library-size constraint. `scale = 1/√d_dec` is the usual variance control.
+**Two things reach the decoder per cell, and the difference between them is the
+whole point.** `z_proj` is the latent — the only route by which anything the
+model *inferred* reaches the reconstruction. `tissue` is a covariate: four small
+categorical levels handed to the model as input, not deduced from expression.
+Four category indices are identical for every cell from the same site, so they
+can shift a whole tissue's mean profile and nothing finer. That is why this is
+not the bypass §4 describes.
+
+`W_out(scores * v)` is expanded algebraically —
+`W_out(s·v) = s·(v·w) + b` — because `scores` is a scalar per (cell, gene) and
+`W_out` is linear. Computing it directly would materialise a
+`(B, G_meas, d_dec)` tensor: ~458 MB per forward at B=128, and the same again
+for its gradient. The result is identical.
 
 ### Library-size scaling — [`endo_model.py:138`](../../src/endo_model/model/endo_model.py:138)
 
@@ -404,7 +475,9 @@ in log space so `theta > 0` without a constraint.
 ```
 
 Eleven keys. `measured_global_idxs` is included because `CompositeLoss` needs it
-to slice `batch["counts"]` down to the same gene set the decoder predicted.
+twice: to slice `batch["counts"]` down to the same gene set the decoder
+predicted, and to divide both KL terms by the measured gene count so they sit on
+the same per-gene scale as `nb` — see [07](07-flow-losses.md).
 
 ---
 
@@ -416,7 +489,8 @@ to slice `batch["counts"]` down to the same gene set the decoder predicted.
 | `model.eval()` | `z_gauss = mu`; `z_vmf = loc`; no dropout; DSBN uses running stats |
 | CCE enabled | `Trainer` calls `forward` **twice** on the same batch; different dropout masks give the two views |
 | CCE disabled | one forward; `model_output2 = None` |
-| Different studies | `G_meas` changes → `mu_hat`, `theta`, `gene_reps` all change width |
+| Different studies | `G_meas` changes → `mu_hat`, `theta`, `gene_queries` all change width |
+| `precision: bf16` | forward and loss run under autocast; the Power Spherical sampler and the NB loss force fp32 back on regardless — see [07](07-flow-losses.md) |
 
 The eval/train difference in the latent branches is the reason `infer.py` output
 is reproducible: at eval both branches are deterministic functions of `cell_cls`.

@@ -117,11 +117,16 @@ The concatenation is essential — see [07](07-flow-losses.md).
 CosineAnnealingLR(optimizer, T_max=max(train_cfg.max_epochs, 1))
 ```
 
-> **Decision, and the comment at [`:154`](../../src/scripts/train.py:154) is worth
-> reading:** `Trainer` steps the scheduler once per **epoch**, so `T_max` is in
-> epochs. Passing total optimiser steps would stretch the cosine period by
+> **Decision:** `Trainer` steps the scheduler once per **epoch**, so `T_max` is
+> in epochs. Passing total optimiser steps would stretch the cosine period by
 > `len(train_loader)` and leave the LR essentially constant for the whole run.
 > The `max(…, 1)` guards `max_epochs=0`.
+
+`SchedulerConfig` has **no `T_max` field**, deliberately. It used to carry
+`T_max: 100` with the comment "matches max_epochs" — parsed, never read, and
+matching no run this project has done. Nothing was miscalibrated by it, because
+`train.py` always derived the value; it cost a review cycle instead. The cosine
+period has to equal the run length, so a second number could only disagree.
 
 ### 13. Resume — [`:162`](../../src/scripts/train.py:162)
 
@@ -177,6 +182,7 @@ for epoch in range(self.current_epoch, self.config.max_epochs):
 
     if epoch % self.config.val_check_interval == 0:
         val_metrics = self._val_epoch()
+        self.baseline_gate.evaluate(epoch, val_metrics)   # before everything else
         if self.ckpt_manager: self.ckpt_manager.save(...)
         if self.early_stopping.step(val_loss): break
 
@@ -198,6 +204,48 @@ Four ordering decisions worth noticing:
 
 ⚠ `val_check_interval` is used as an **epoch modulus**, not a step interval,
 despite a name that suggests otherwise in most frameworks.
+
+### `BaselineGate` — [`baseline_gate.py`](../../src/endo_model/evaluation/baseline_gate.py)
+
+Runs first in the validation block, before checkpointing and before figures, and
+prints one line:
+
+```
+BASELINE  epoch   3  val_nb=0.3815  baseline=0.3917  2.6% BETTER than baseline
+BASELINE  epoch   3  val_nb_hvg=1.0996  baseline=1.1629  5.4% BETTER than baseline
+```
+
+**Why this is a component and not a print statement.** Two complete runs
+finished — every figure written, every checkpoint saved — before anyone noticed
+that neither had ever beaten the study-mean baseline. The number was in
+`metrics.csv` the whole time, one column over from the loss being watched, and
+the comparison had to be done by hand afterwards.
+
+It cannot stop a run. Being below baseline at epoch 0 is normal and stopping
+there would be wrong. It also skips the HVG comparison when `baseline_hvg` is 0,
+because no HVG set was built and comparing against zero would print a flattering
+number every epoch that means nothing.
+
+The comparison is only meaningful because `MeanProfileBaseline` is **fitted on
+train and scored on validation** — the same held-out cells the model is scored
+on. A baseline scored on its own training data would be a harder target than it
+deserves to be.
+
+### Precision — [`precision.py`](../../src/endo_model/precision.py)
+
+`PrecisionPolicy` owns one decision: which autocast context wraps a forward
+pass. `"off"` gives a `nullcontext`; `"bf16"` gives
+`torch.autocast("cuda", bfloat16)`. It is also a no-op on CPU, so the test suite
+stays representative.
+
+Validation uses the **same** policy as training on purpose: a val loss measured
+in a different precision from the train loss is not comparable to it, and the
+two curves are drawn on the same axes.
+
+Two regions force fp32 back on regardless — the Power Spherical sampler and the
+NB loss. Both reasons are specific and written down in `precision.py`; the
+sampler's is that its boundary guards are sized at 1e-6 and bf16 resolves about
+4e-3 near 1.0, so in bf16 every guard silently becomes a no-op.
 
 ### `_set_sampler_epoch` — [`:117`](../../src/endo_model/training/trainer.py:143)
 
@@ -227,8 +275,14 @@ for batch in self.train_loader:
 
     self.monitor.check_losses(batch, losses)      # raises if total is non-finite
 
-    losses["total"].backward()
-    grad_norm = nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip_norm)
+    with self.precision.autocast(self.device):        # bf16, or a no-op
+        output1 = self.model(batch)
+        losses  = self.composite_loss(...)
+
+    losses["total"].backward()                        # OUTSIDE the autocast
+    grad_norm = nn.utils.clip_grad_norm_(
+        self.clipped_parameters(), self.config.grad_clip_norm
+    )
     if self.monitor.check_gradients(batch, grad_norm, losses):
         self.optimizer.step()                     # skipped if grads are non-finite
     self.global_step += 1
@@ -246,9 +300,20 @@ for batch in self.train_loader:
   NaN weights, and every subsequent forward would then fail on healthy data —
   which is exactly how the original NaN presented as a forward-pass error one
   step after the real damage. Skipping leaves the model as it was before the batch.
-- ⚠ `clip_grad_norm_` still receives `self.model.parameters()` **only** — the DAB
-  classifier's gradients are never clipped, though the optimiser does update
-  them. See finding D1.
+- `clip_grad_norm_` now receives **every optimised parameter**, model *and* DAB
+  classifier. It used to receive `self.model.parameters()` only, while the
+  optimiser updated both — so the classifier trained unbounded. Run `dab_soft`
+  diverged to `val_dab` 18.51 against a chance of 2.079, which is what an
+  unclipped adversary looks like.
+
+  ⚠ **Watch the side effect.** With the classifier inside the norm, `|g|` runs
+  3–10 where it used to run 0.01–0.35, and `grad_clip_norm` is still 1.0 — so on
+  steps the classifier dominates, the *model's* gradients are scaled down with
+  it. Two clip groups would be the clean fix. Not yet done.
+- **Backward runs outside the autocast context**, which is what the torch docs
+  require: autocast records the dtype each op ran in during forward and replays
+  that on the way back. There is no `GradScaler` — that is an fp16 device for
+  rescuing underflowed gradients, and bf16 has fp32's exponent range.
 - `.item()` on every loss forces a **GPU sync every step**. Correct for logging,
   but it removes any CPU/GPU overlap.
 

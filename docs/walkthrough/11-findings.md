@@ -1,13 +1,47 @@
 # 11 — Findings
 
-Defects and fragilities found while writing this walkthrough. Each was verified
-against the code, not inferred.
+Defects and fragilities, each verified against the code or against a run, not
+inferred.
 
-**Fixed so far:** A1, B3, and — found by running rather than by reading — the
-categorical-`disease_status` crash (A0) and the Power Spherical boundary
-singularities (A5). Everything else stands.
+---
 
-Ranked by how much they matter to the run that is queued now.
+## The run ledger
+
+Seven training runs. **One is a valid measurement.** That is the most important
+fact on this page, and the reason for the rest of it.
+
+| # | Job | What was new | Outcome | Verdict |
+|---|---|---|---|---|
+| 1 | pre-`b419257` | first real launch, batch 128 | NaN gradient, epoch 0 step 173 | **void** |
+| 2 | 49817807 | sampler boundary fix | early-stopped epoch 10; `nb` flat 0.43; 82.6% of steps clipped, median \|g\| 38 | **void** |
+| 3 | 50132670 | bypass closed, `GroupedGeneQuery`, batched encoder, batch 256 | 24h timeout at epoch 10; best `val_nb` 0.4204 vs 0.4249 (**1.1%**) | **void** |
+| 4 | 50361461 `kl_check` | bf16, bucketing, KL rescale, disease filter, tissue→decoder | `val_nb` 0.412/0.402/0.399 | **void** |
+| 5 | 50361462 `kl_check_no_dab` | as above, λ_dab 0 | `val_nb` 0.399/0.394/0.401 | **void** |
+| 6 | 50375975 `dab_off` | circular KL fixed, HVG fixed, chance line fixed | HVG better than baseline all 3 epochs | **partial** |
+| 7 | 50375976 `dab_soft` | λ_dab 0.2 | `val_dab` 4.50 → **18.51** → 10.63 (chance 2.079) | **void** |
+
+Why each void run is void, with a confidence on the attribution:
+
+| # | Cause | Confidence |
+|---|---|---|
+| 1 | Power Spherical boundary singularities (§A5) | 99% |
+| 2 | Decoder bypass (§A6) | 90% |
+| 3 | KL scale (§A7) | 85% |
+| 4, 5 | `PowerSphericalKLLoss` missed by the KL fix (§A8) | 95% |
+| 7 | DAB classifier outside the gradient clip (§D1) | 70% |
+
+The residual percentages are honest. Run 3 changed the bypass and the batch size
+together, so 10% of run 2's attribution belongs elsewhere. Run 3's fix was
+necessary and *not sufficient* — the model still did not beat baseline
+afterwards. Run 7's clip fix is untested.
+
+**Established, and not yet overturned:**
+
+- ~31 min per epoch, from 2h04 (bf16 + bucketing, 85.2% of padding removed)
+- The model beats the study-mean baseline on both metrics by epoch 3, in two
+  seeds: `val_nb` +2.6%/+1.8%, HVG +5.4%/+4.7%
+- **The seed noise floor is ~4%** (§A9). Nothing smaller than that is a result.
+- The circular branch dies under a *correct* penalty: κ ≈ 0.025
 
 ---
 
@@ -42,6 +76,90 @@ Three things worth carrying forward:
 
 Unaudited candidates of the same class: `lgamma`/`digamma` in the losses, and
 the softmax over 15,495 genes.
+
+### A6 — ✅ FIXED (`f3c9dc0`) — the decoder read the encoder's per-cell summary
+
+`_build_gene_reps` concatenated each gene's identity embedding with **its
+group's post-aggregation CLS token** — a contextualised read of the cell's own
+expression, arriving at the decoder outside the KL penalty. The optimiser took
+the free route: both latent branches emptied while reconstruction still worked.
+
+The fix makes it structural rather than a matter of care. `_build_gene_queries`
+returns `(G_meas, d_dec)` with **no batch dimension**, so there is no per-cell
+channel to leak through. `test_no_encoder_bypass.py` pins it.
+
+**The generalisable form:** a bypass is any per-cell path to the reconstruction
+that does not pass through the bottleneck. It does not announce itself — the
+loss curve looks fine, because reconstruction *is* fine. What shows it is the
+KL going to zero while `nb` does not.
+
+Note what is *not* a bypass, by the same test: the tissue embedding now
+conditioning the decoder (§06 §7) is four categorical indices, identical for
+every cell from the same site. It can shift a whole tissue's mean profile and
+nothing finer.
+
+---
+
+### A7 — ✅ FIXED (`113a0cf`) — the KL was on a different scale from the reconstruction
+
+**The most expensive defect in the project**, and the one this walkthrough
+previously argued *for*. See [07 §2](07-flow-losses.md) for the full mechanism.
+
+`nb` averaged over ~15,000 genes; the KL terms averaged over 32 and 8 latent
+dimensions. `beta_kl = 1.0` was therefore an effective β of ~469 and ~1,875,
+against the 1–20 range where posterior collapse is already documented. The model
+stored no information, correctly, given what it was asked.
+
+**Why it survived so long:** every individual number looked reasonable. `nb`
+around 0.43, `kl_gauss` around 0.1 — nothing out of range, nothing NaN, no
+warning. The defect was in the *relationship* between two numbers that were
+never compared.
+
+---
+
+### A8 — ✅ FIXED (`3e82da2`) — the KL fix went to the wrong class
+
+`CompositeLoss` binds `self.vmf_kl` to `PowerSphericalKLLoss`. The mean→sum
+change went to `GaussianKLLoss` and `VonMisesKLLoss` — and the latter is dead
+code nothing constructs. The circular branch stayed averaged, now an 8×
+*under*-penalty, and κ ran to 8–15 against a 1e-2 collapse threshold. Runs 4 and
+5 void.
+
+Two names close enough to confuse (`VonMisesKLLoss`, `PowerSphericalKLLoss`), one
+attribute called `vmf_kl`, and dead code sitting where the live class should be.
+`test_composite_uses_the_power_spherical_kl` now pins the binding.
+
+**Lesson:** dead code that shares a name shape with live code is not neutral. It
+is a place for a fix to land and do nothing.
+
+---
+
+### A9 — The seed noise floor is ~4%, and every earlier claim predates knowing it
+
+`s0_ref` and `s0_ref_seed7` are identical but for `exp_cfg.seed`. Because the
+patient split is held by `data.splits.seed` and stays at 24, both are scored on
+exactly the same held-out cells.
+
+| epoch | `val_nb` gap | HVG gap |
+|---|---|---|
+| 0 | 0.4% | 0.6% |
+| 1 | 1.4% | 1.4% |
+| 2 | **3.8%** | **4.2%** |
+| 3 | 0.8% | 0.8% |
+
+**Nothing smaller than ~4% is a result.** Several conclusions recorded earlier in
+this project — including "dab_off beats baseline by 2.7% on HVG" and
+"overfitting starts at epoch 1" — sit inside that band. The second was checked
+and was noise: epoch 3 is the best epoch in both seeds.
+
+What *is* robust is direction and consistency: HVG beat baseline in **8 of 8**
+epoch-seed cells. Sign agreement across replicates carries information that a
+single magnitude does not.
+
+⚠ Still unknown for every other axis. Two arms cannot settle a 3% difference,
+which constrains how the LR sweep can be read.
+
+---
 
 ### A0 — ✅ FIXED (`050265f`) — categorical `disease_status` crashed training
 
@@ -80,6 +198,9 @@ should sit comfortably inside the 180 GB request — but it is the thing to chec
 if the job is OOM-killed rather than crashing.
 
 ### A1b — `group_indices` carries a redundant batch dimension that blocks `pin_memory`
+
+*(Still open. Measured cost is small — ~7 ms of a ~565 ms step — but it is the
+only thing keeping `pin_memory` off.)*
 
 `collate_fn` builds it as `idx_tensor.unsqueeze(0).expand(B, -1)`
 ([collate.py:79](../../src/endo_model/data/collate.py:79)) — a stride-0 view in
@@ -238,7 +359,7 @@ number alongside each val entry rather than relying on position.
 `optimizer.name`. `train.py` hardcodes `CosineAnnealingLR` and `AdamW`. Setting
 `name: SGD` silently gets you AdamW.
 
-### B5 — `disease_status` is a model input, which makes some evaluation circular
+### B5 — ✅ FIXED (`f8740a4`) — `disease_status` was a model input, making evaluation circular
 
 [`endo_model.py:118`](../../src/endo_model/model/endo_model.py:118) →
 `MetadataEncoder` → `DiseaseStatusEncoder`.
@@ -272,7 +393,7 @@ inflates `D` with genes that are DNS in every training study.
 
 ## C. Performance
 
-### C1 — `_build_gene_reps` does O(D) Python work every forward pass
+### C1 — ✅ FIXED (`ca6a0c0`) — `_build_gene_reps` did O(D) Python work every forward pass
 
 [`endo_model.py:193`](../../src/endo_model/model/endo_model.py:193)
 
@@ -291,7 +412,7 @@ studies, so 11 distinct results exist for the whole run.
 
 **Fix:** cache by `study_id`. Combined with A1 this is the throughput fix.
 
-### C2 — The 45 group transformers run sequentially
+### C2 — ✅ FIXED (`9421945`, `f8740a4`) — the 45 group transformers ran sequentially
 
 [`group_encoder.py:105`](../../src/endo_model/model/encoders/group_encoder.py:105)
 is a dict comprehension over an `nn.ModuleList`. 45 separate transformer calls
@@ -336,7 +457,7 @@ arrays indexed by position is the real fix.
 | `import torch` inside a method body | [adversarial.py:54](../../src/endo_model/model/objectives/adversarial.py:54) | every forward call |
 | `_to_device` duplicated 3× | trainer, evaluator, infer | |
 
-### D1 — `clip_grad_norm_` misses the DAB classifier
+### D1 — ✅ FIXED (`16d58e2`) — `clip_grad_norm_` missed the DAB classifier
 
 [`trainer.py:172`](../../src/endo_model/training/trainer.py:172) passes
 `self.model.parameters()` only. `composite_loss.parameters()` — the adversary —
@@ -391,15 +512,102 @@ validated against a schema.
 
 ---
 
+### D5 — The tissue hierarchy has never existed
+
+`tissue_compartment`, `tissue_organ` and `tissue_microsite` are absent from
+**all 13 studies**. `tissue_type` exists in three and is the CELLxGENE free-text
+collision (`tissue`, `organoid`). Nothing in `data_collation/src/` ever wrote
+those columns.
+
+So `TissueHierarchyEncoder` has read all zeros for every cell in every run, and
+the decoder conditioning added in `f8740a4` is **inert**.
+
+`tissue_ontology_term_id` is 100% populated in all 13 studies and is the raw
+material: `UBERON:0001295` endometrium, `UBERON:0002358` peritoneum,
+`UBERON:0000992` ovary, `UBERON:0001296` myometrium, `UBERON:0007106` chorionic
+villus, plus five more in `fonseca_2023`. Building the mapping is a defined job
+in collation, not a research problem.
+
+**Why it went unnoticed:** the loader's warning fires only when a column exists
+and is non-numeric. A column that is simply *absent* is skipped silently and
+defaults to 0, which is indistinguishable from a corpus with no anatomy in it.
+
+---
+
+### D6 — Disease status is confounded with study, and no hyperparameter reaches it
+
+`ectopic` comes from three studies, and **`fonseca_2023` alone supplies 241,829
+of 318,085 — 76%**. `shih_2022` is 100% eutopic. All three `garcia_alonso`
+studies are 100% control (229,708 cells), which is why the disease filter empties
+them entirely.
+
+This is why the `by disease status` UMAP panel is a recolouring of the `by study`
+panel: it is the actual structure of the corpus, not a plotting artefact.
+
+**The consequence for the adversary is structural.** Removing study identity from
+the latent removes most of the disease signal with it, because in this corpus
+they are nearly the same axis. Tuning `lambda_dab` trades one against the other;
+it cannot give both.
+
+Options, none free: restrict disease contrasts to studies containing both classes
+(`tan_2022`, `ferrero_2024`, `fonseca_2023` each have eutopic *and* ectopic
+within-study), or hold a study out entirely and test transfer.
+
+---
+
+### D7 — Two figure defects that made results look real
+
+Both fixed, both worth recording because both produced a *plausible* picture.
+
+**The UMAP was 2 studies of 11** (`113a0cf`). `LatentCollector` took the first
+20,000 val cells in loader order, and `PerStudyBatchSampler` emits one study at a
+time. Worse than under-sampling: the two studies it caught are entirely eutopic
+and entirely ectopic, so the disease panel was an exact relabelling of the study
+panel. Now a per-study quota.
+
+**The HVG baseline was 0.0000** (`08d5117`). `_select_hvg` intersects per-study
+measured-gene masks; a study the disease filter emptied has an all-false row, so
+the intersection selected nothing. The panel rendered as a flat line and looked
+drawn rather than broken. Now restricted to studies that contributed cells.
+
+The shared lesson: **an empty or degenerate input to a plotting path produces a
+figure, not an error.** Both of these were caught by reading numbers off an axis
+that should have been impossible, not by any test.
+
+---
+
 ## Suggested order
 
-Remaining, after A0/A1/B3:
+The project is past the bug-fixing stage and into hyperparameter tuning. What
+that changes: **nothing here is worth doing if it cannot be measured against the
+~4% noise floor** (§A9).
 
-1. **A2** (`global_step` on resume) — one line, and you will hit it at 24 h.
-2. **A3** (empty val guard) — one `if`, prevents a crash mid-run.
-3. **C1** (cache `_build_gene_reps` by study) — largest remaining throughput win,
-   and the one to reach for if A1 alone does not saturate the GPU.
-4. **B1/B2** (wire the loss weights and annealing to config) — needed before any
-   tuning run, pointless before the first one.
+**Blocking anything else:**
 
-1 and 2 are small and independent. 3 and 4 are proper changes and deserve tests.
+1. **Two clip groups** — the D1 fix put the DAB classifier inside the norm, and
+   `grad_clip_norm` is still 1.0, so on steps the classifier dominates the
+   model's gradients are scaled down with it. Clip the two groups separately.
+2. **B1/B2** (wire the loss weights and annealing to config) — `beta_max` and
+   `warmup_fraction` are read from nothing, and four of seven loss weights are
+   constructor defaults. Both are needed before β can be tuned at all, which is
+   the next axis after learning rate.
+
+**Small and independent:**
+
+3. **A2** (`global_step` on resume) — one line, and you will hit it at 24 h.
+4. **A3** (empty val guard) — one `if`. `li_2025` already has 0 val cells.
+
+**Data work, no GPU, parallel to everything:**
+
+5. **D5** — the UBERON→hierarchy mapping. Five terms cover almost everything, and
+   until it exists the decoder conditioning does nothing.
+6. **`wang_2022` recollation** — its h5ad still has `disease_status: other`
+   baked in, so the filter drops all 49,606 cells and it contributes an unused
+   study id.
+7. **D6** — decide the confound strategy. This one is a judgement about what the
+   atlas is allowed to claim, not an implementation task.
+
+**Never run at all:** the test split, `evaluate.py`, `infer.py`,
+`baseline_pca.yaml`, `baseline_scvi.yaml`. The last is the one that matters —
+scVI is the state of the art here, and beating a study-mean profile is a low bar.
+Without it we do not know what "good" looks like.

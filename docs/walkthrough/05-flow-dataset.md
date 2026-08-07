@@ -133,6 +133,40 @@ reference) and `panel_row` (an int).
 
 ---
 
+## 2b. The disease filter — [`dataset.py`](../../src/endo_model/data/dataset.py)
+
+`include_disease_statuses` drops cells inside the studies that survive
+`exclude_studies`. Two helpers, both deliberately separate from the split logic:
+
+- `_disease_codes_to_keep` turns names into integer codes and **raises on an
+  unknown name**. A typo would otherwise drop the whole corpus, and the first
+  symptom would be an empty dataset several minutes into a job.
+- `_select_disease_cells` filters and returns **original obs row indices**, not
+  positions in the filtered subset — everything downstream slices the count
+  matrix with them.
+
+Applied **before** the `max_cells_per_study` cap, so the cap applies to the cells
+actually kept rather than to a pool the filter is about to shrink.
+
+A study reduced to zero cells logs a warning and keeps its id, because study ids
+index the DSBN and study-embedding tables. On the current corpus that is four of
+twelve: `wang_2022` (until its collation is re-run) and all three
+`garcia_alonso_2021_*`, which are 100% control.
+
+### `disease_status` now has five values
+
+`eutopic`, `ectopic`, `control`, **`adenomyosis`**, `other`. Adding the fourth
+renumbered `other` from 3 to 4. The h5ad files store strings, so they are
+unaffected, but the disease embedding table changed width and checkpoints from
+before it will not load.
+
+⚠ The vocabulary here must stay in step with `VALID_STATUSES` in
+`data_collation/src/process/metadata_attacher.py`. A status valid there but
+missing from `DISEASE_STATUS_TO_INT` is silently re-coded to `other` at load
+time.
+
+---
+
 ## 3. `StudyPanel` — [`panel.py:31`](../../src/endo_model/data/panel.py:31)
 
 Holds one study's counts as CSR and rebuilds dense vectors on demand.

@@ -184,6 +184,46 @@ Run this after any vocabulary rebuild or corpus change, before training.
 
 ---
 
+## 4b. `describe_metadata.py` — [`describe_metadata.py`](../../src/scripts/describe_metadata.py)
+
+Tabulates every study's obs columns and plots coverage, `disease_status`, and the
+UBERON/MONDO terms. Reads obs in anndata's **backed mode** and never touches the
+count matrix, so a 300k-cell study costs what a 10k-cell one does. No GPU, no
+model, no torch — its import chain reaches `endo_model.evaluation`, whose
+`__init__` is deliberately torch-free and whose exports import umap and scanpy
+lazily.
+
+Descriptive by design: nothing on the axes states a conclusion, because the point
+of looking is to find out what is there.
+
+Two things it established, both of which had been assumed rather than checked:
+
+1. **The tissue hierarchy does not exist.** `tissue_compartment`, `tissue_organ`
+   and `tissue_microsite` are absent from **all 13 studies**; the only
+   `tissue_type` values are the CELLxGENE free-text collision. Nothing in
+   `data_collation/` ever wrote those columns.
+2. **Disease status is confounded with study.** `ectopic` comes from three
+   studies and **76% of it is `fonseca_2023` alone**. `shih_2022` is 100%
+   eutopic; all three `garcia_alonso` studies are 100% control.
+
+The second is the more consequential, and it is a corpus property no
+hyperparameter reaches: removing study identity from the latent removes most of
+the disease signal with it. See [11 §D6](11-findings.md).
+
+---
+
+## 4c. `benchmark_attention.py` — [`benchmark_attention.py`](../../src/scripts/benchmark_attention.py)
+
+Times the group encoder's attention across dtype × mask × backend at real
+training shapes, and reports which backends can serve each configuration at all.
+Asserts nothing and is not run by pytest — it answers "what would we gain", which
+has no correct answer to assert against.
+
+It is the reason `precision: bf16` and bucketing exist in the form they do; the
+numbers are in [06 §2](06-flow-model-forward.md).
+
+---
+
 ## 5. Initialisation differences across all five entry points
 
 | | train | evaluate | infer | ablation | preflight |

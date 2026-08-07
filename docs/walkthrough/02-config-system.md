@@ -137,9 +137,25 @@ schedules — `0.20 * total_steps` at
 Nothing reads `train_cfg.kl_annealing`. Editing `beta_max` or `warmup_fraction`
 in a YAML does nothing at all. See [11](11-findings.md).
 
-⚠ `SchedulerConfig` is likewise inert: `train.py:157` constructs
-`CosineAnnealingLR` directly with `T_max=max(train_cfg.max_epochs, 1)`, ignoring
-`scheduler.name` and `scheduler.T_max`.
+`SchedulerConfig` carries only `name`. Its `T_max: 100` field was removed: it
+was parsed and never read, next to a comment claiming it matched `max_epochs`
+(it matched no run this project has done). `train.py` derives the cosine period
+from `max_epochs`, which is the only value that can be correct — so a second
+number could only disagree. Dead configuration that lies is worse than none.
+
+**New keys since the last revision of this page:**
+
+| Key | Where | Default | Effect |
+| --- | --- | --- | --- |
+| `training.precision` | `base.yaml` | `bf16` | `"off"` or `"bf16"`. bf16 is what puts the group encoder's attention on the FlashAttention kernel, which has no fp32 build. |
+| `model.group_encoder.n_buckets` | `ELAJ_*.yaml` | `4` | Size buckets for the 45 group encoders. `1` restores one padded block. |
+| `model.d_tissue` | `ELAJ_*.yaml` | `16` | Width of the tissue embedding concatenated onto `z_proj` at the decoder. `0` disables conditioning. |
+| `data.include_disease_statuses` | `corpus.yaml` | `[eutopic, ectopic, adenomyosis]` | Keeps only cells with these statuses. Empty keeps everything. |
+
+`include_disease_statuses` is distinct from `exclude_studies`: it drops **cells**
+within the studies that remain, so a study id is never invalidated by it. A
+study reduced to zero cells keeps its id and its DSBN parameters, which is
+logged as a warning — four studies are in that state on the current corpus.
 
 **`DiagnosticsConfig`** (added `e23b97d`, extended `b419257`) is *not* inert —
 `train.py` reads every field when it builds `TrainingMonitor`. See
@@ -213,12 +229,30 @@ src/configs/
     data/        corpus.yaml
 ```
 
-`first_run.yaml` is the live config. It sets `model: configs/model/ELAJ_small.yaml`
-(**not** medium — `ELAJ_medium.yaml` is referenced by nothing) and overrides
-`training.batch_size: 128`.
+```
+src/configs/experiment/
+    s0_ref.yaml  s0_ref_seed7.yaml  s0_lr_low.yaml  s0_lr_high.yaml  s0_dab.yaml
+    first_run.yaml  full_model.yaml  baseline_pca.yaml  baseline_scvi.yaml
+```
 
-`corpus.yaml` carries `vocabulary_path`, `studies_csv`, the `splits` block, and
-`exclude_studies: [wang_2022, zhang_2022]`.
+The `s0_*` arms are the live configs. All five share one base and differ by
+**one line each**, under a `# ---- the variable ----` marker, so any difference
+between them is attributable. `s0_ref_seed7` differs from `s0_ref` only in
+`seed`.
+
+That pairing matters more than it looks. `exp_cfg.seed` drives weight init,
+dropout and batch order; the **patient split is held separately by
+`data.splits.seed`** and stays at 24. So the two arms are scored on exactly the
+same held-out cells, which is what makes them an error bar rather than two
+different problems. Measured gap: **up to ~4%** on both `val_nb` and the HVG
+metric — larger than most effects claimed from single-seed runs before it
+existed.
+
+`corpus.yaml` carries `vocabulary_path`, `studies_csv`, the `splits` block,
+`exclude_studies: [zhang_2022]`, and `include_disease_statuses`. `wang_2022` was
+re-included once its `disease_status` was corrected from `other` to
+`adenomyosis` — it had only ever been `other` because its `status_config` said
+so.
 
 ---
 

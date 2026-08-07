@@ -7,7 +7,7 @@ Usage
     apply_theme()                      # call once, before creating figures
     fig, ax = plt.subplots()
     ...
-    save_figure(fig, out_dir / "my_plot")   # writes .png and .pdf
+    save_figure(fig, out_dir / "my_plot")   # writes .png
 
 The theme sets matplotlib rcParams from the project Palette so that every
 figure shares one visual identity: clean sans-serif type, de-emphasised
@@ -31,8 +31,12 @@ from endo_model.viz.palette import PALETTE, Palette
 
 logger = logging.getLogger(__name__)
 
-# Default output formats for save_figure.
-_DEFAULT_FORMATS = ("png", "pdf")
+# Default output formats for save_figure.  PNG only: these figures are read
+# during a run to decide whether to keep it going, and a second copy of every
+# panel in a second format is one more thing to sync off the cluster for no
+# gain.  Pass formats=("png", "pdf") at the call site if a specific figure is
+# going into a document.
+_DEFAULT_FORMATS = ("png",)
 _DEFAULT_DPI = 200
 
 
@@ -143,7 +147,7 @@ def save_figure(
     Args:
         fig:       The matplotlib Figure to save.
         path_stem: Output path without extension (parent dirs are created).
-        formats:   File formats to write (default: png and pdf).
+        formats:   File formats to write (default: png only).
         dpi:       Raster resolution.
 
     Returns:

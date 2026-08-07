@@ -184,3 +184,26 @@ def test_hvg_metric_returns_empty_when_no_hvgs_measured():
         "theta": torch.full((excluded.numel(),), 5.0),
     }
     assert metric(output, batch) == {}
+
+
+def test_empty_study_does_not_erase_the_hvg_set():
+    """A study filtered to zero cells must not veto every gene.
+
+    `_select_hvg` intersects the per-study measured masks. A study that
+    contributed no cells has an all-false mask, so including it in the
+    intersection selects nothing — which is what run kl_check did after the
+    disease filter emptied four studies: `0 highly variable genes`, an HVG
+    baseline of 0.0000, and a panel that looked drawn rather than broken.
+    """
+    batches = constant_corpus()
+    # A third study that exists in the corpus but contributes no cells.
+    base = MeanProfileBaseline(N_STUDIES + 1, D, n_hvg=5).fit(batches)
+    assert int(base.hvg_mask.sum()) > 0, "an empty study erased the HVG set"
+
+
+def test_hvg_set_matches_when_an_empty_study_is_added():
+    """Adding a study with no cells must not change which genes are selected."""
+    batches = constant_corpus()
+    without = MeanProfileBaseline(N_STUDIES, D, n_hvg=5).fit(batches).hvg_mask
+    with_empty = MeanProfileBaseline(N_STUDIES + 2, D, n_hvg=5).fit(batches).hvg_mask
+    assert torch.equal(without, with_empty)

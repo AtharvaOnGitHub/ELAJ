@@ -157,16 +157,26 @@ class MeanProfileBaseline:
     def _select_hvg(self) -> Tensor:
         """Top genes by variance of log-normalised expression, pooled.
 
-        Restricted to genes measured in *every* study: a gene absent from some
-        studies would be scored on a different cell population than the rest,
-        and its rank would reflect which studies assayed it rather than how it
-        behaves.
+        Restricted to genes measured in every study *that contributed cells*: a
+        gene absent from some studies would be scored on a different cell
+        population than the rest, and its rank would reflect which studies
+        assayed it rather than how it behaves.
+
+        The "contributed cells" qualifier is load-bearing. A study filtered down
+        to zero cells never records a measured gene, so requiring every study
+        would intersect against an all-false row and select nothing. Run
+        kl_check did exactly that — four studies emptied by the disease filter,
+        `0 highly variable genes`, and an HVG baseline of 0.0000 that silently
+        made the model's HVG panel meaningless rather than failing.
         """
         cells = self._n_cells.clamp_min(1.0).unsqueeze(-1)
         mean_log = self._sum_log / cells
         var_log = (self._sum_sq_log / cells) - mean_log ** 2
 
-        everywhere = self._measured.all(dim=0)                # (D,)
+        contributed = self._n_cells > 0                       # (n_studies,)
+        if not bool(contributed.any()):
+            return torch.zeros(self.vocab_size, dtype=torch.bool)
+        everywhere = self._measured[contributed].all(dim=0)   # (D,)
         # Weight each study's variance by its cell count, so a 8k-cell study
         # does not sway the ranking as much as a 300k-cell one.
         weights = (self._n_cells / self._n_cells.sum()).unsqueeze(-1)

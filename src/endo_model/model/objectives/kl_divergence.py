@@ -84,18 +84,29 @@ class VonMisesKLLoss(nn.Module):
 
 
 class PowerSphericalKLLoss(nn.Module):
-    """Mean KL from the uniform circular prior for the Power Spherical branch.
+    """KL from the uniform circular prior, summed over the circular dimensions.
 
-    KL is computed per-cell per-dimension (on S^1, dim=2) and averaged.
+    This is the class CompositeLoss actually uses; VonMisesKLLoss above is the
+    von Mises formula and is referenced only by tests. When the mean/sum fix
+    landed it was applied to the two classes whose names matched what the loss
+    was called (`vmf_kl`) and missed this one, which is what the attribute is
+    bound to. The circular branch was therefore still averaged over its 8
+    dimensions while the Gaussian branch was summed over its 32 — leaving the
+    circular penalty 8x too weak rather than, as before, far too strong.
+
+    Run kl_check_no_dab shows what that looks like from the other side: every
+    circular dimension alive at median kappa 8-15, against a collapse threshold
+    of 1e-2. A latent branch that concentrated four orders of magnitude past
+    the threshold in three epochs was not being asked to pay for it.
     """
 
     def forward(self, kappa: Tensor) -> Tensor:
-        """Compute mean KL( PowerSpherical(mu, kappa) ‖ Uniform(S^1) ).
+        """Compute KL( PowerSpherical(mu, kappa) ‖ Uniform(S^1) ).
 
         Args:
             kappa: (B, n_vMF) — concentration parameters (> 0).
 
         Returns:
-            Scalar — mean KL over (B, n_vMF).
+            Scalar — KL summed over circular dimensions, averaged over cells.
         """
-        return power_spherical_kl_uniform(kappa, dim=2).mean()
+        return power_spherical_kl_uniform(kappa, dim=2).sum(dim=-1).mean()

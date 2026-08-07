@@ -205,10 +205,11 @@ class EpochReporter:
                 latents["study_id"], self.id_to_name,
                 "separation here = batch effects survive",
             ),
-            "by disease status": (
-                latents["disease"], _DISEASE_NAMES,
-                "CIRCULAR: disease_status is a model input",
-            ),
+            # No caveat any more: disease_status was removed from the model, so
+            # separation here is a finding rather than a restatement of an
+            # input. Leaving the old "CIRCULAR" warning up would have argued
+            # against our own result.
+            "by disease status": (latents["disease"], _DISEASE_NAMES, None),
             "by tissue compartment": (latents["tissue"][:, 0], None, None),
             "by organ": (latents["tissue"][:, 1], None, None),
         }

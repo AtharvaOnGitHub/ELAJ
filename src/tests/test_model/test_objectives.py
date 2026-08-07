@@ -245,10 +245,27 @@ class TestKLIsOnThePerGeneScale:
         wide = float(loss(torch.ones(4, 32), torch.zeros(4, 32)))
         assert wide == pytest.approx(4 * narrow, rel=1e-5)
 
-    def test_vmf_kl_sums_over_dimensions(self):
-        from endo_model.model.objectives.kl_divergence import VonMisesKLLoss
+    def test_circular_kl_sums_over_dimensions(self):
+        """PowerSphericalKLLoss, not VonMisesKLLoss — the former is what
+        CompositeLoss binds to `vmf_kl`, and testing the other one is how the
+        sum/mean fix missed it the first time."""
+        from endo_model.model.objectives.kl_divergence import PowerSphericalKLLoss
 
-        loss = VonMisesKLLoss()
+        loss = PowerSphericalKLLoss()
         one = float(loss(torch.full((4, 1), 2.0)))
         eight = float(loss(torch.full((4, 8), 2.0)))
         assert eight == pytest.approx(8 * one, rel=1e-5)
+
+
+def test_composite_uses_the_power_spherical_kl():
+    """Pins which class the circular penalty actually comes from.
+
+    VonMisesKLLoss and PowerSphericalKLLoss are different distributions with
+    similar names, and the attribute they can be bound to is called `vmf_kl`.
+    A change applied to the wrong one looks correct in review and does nothing
+    at runtime.
+    """
+    from endo_model.model.objectives.kl_divergence import PowerSphericalKLLoss
+
+    loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2)
+    assert isinstance(loss.vmf_kl, PowerSphericalKLLoss)

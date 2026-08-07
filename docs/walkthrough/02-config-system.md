@@ -102,11 +102,12 @@ model_cfg.n_groups  = len(vocab.group_names)  # train.py:87
 Two derived properties, both computed rather than stored so they cannot drift:
 
 - `d_z` — [`:107`](../../src/endo_model/configs/model_config.py:107) — `d_gauss + 2*n_vMF`
-- `d_gene_rep` — [`:121`](../../src/endo_model/configs/model_config.py:121) — `d_token + d_agg`
+- `d_tissue` — width of the decoder's tissue embedding (`0` disables conditioning)
 
-⚠ Neither property is actually used by `EndoFoundationModel`, which recomputes
-`d_gene_rep` inline at [`endo_model.py:82`](../../src/endo_model/model/endo_model.py:82)
-and again at [`:170`](../../src/endo_model/model/endo_model.py:170). See [11](11-findings.md).
+The `d_gene_rep` property this note used to warn about is gone with the
+concatenated gene representation it described — the decoder's gene side is now
+gene identity alone, projected per group to `d_dec`. See
+[06 §6](06-flow-model-forward.md).
 
 **`CCEConfig.enabled` is a control-flow switch, not just a weight.** It is read
 twice, in two different places, for two different effects:

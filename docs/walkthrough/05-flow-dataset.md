@@ -34,7 +34,7 @@ downstream — `TokenConstructor` generates within-group indices with
 and those two only line up because of this sort.
 
 **Contract:** the vocabulary is immutable at training time. `group_names` order
-fixes the `HierarchicalEncoder` ModuleList order, the `AggregationEncoder`
+fixes the `BucketedGroupEncoder` bucket assignment, the `AggregationEncoder`
 sequence layout, and therefore the meaning of every checkpoint weight. Rebuilding
 the vocabulary invalidates every checkpoint.
 
@@ -240,7 +240,7 @@ batch order is identical every epoch. `Trainer._set_sampler_epoch` calls it.
 
 **Contract:** every batch contains exactly one study. Required by:
 - `DSBN` — `nn.Embedding(study_id)` must resolve to one row per batch;
-- `EndoFoundationModel._build_gene_reps` — uses `is_dns[0]` as the DNS pattern
+- `EndoFoundationModel._build_gene_queries` — uses `is_dns[0]` as the DNS pattern
   for the whole batch.
 
 `drop_last=True` by default: partial batches of size 1 break `BatchNorm1d`.

@@ -90,7 +90,7 @@ the naïve `np.concatenate` it replaced would have raised a shape error.
 |---|---|---|
 | gene symbol → global | `GeneVocabulary.gene_to_index` | [vocabulary.py:99](../../src/endo_model/data/vocabulary.py:99) |
 | group → its global indices | `GeneVocabulary.global_indices_for_group` | [vocabulary.py:121](../../src/endo_model/data/vocabulary.py:121) |
-| global → (group, within) | `EndoFoundationModel._global_to_group` | [endo_model.py:96](../../src/endo_model/model/endo_model.py:96) |
+| global → (group, within) | `MeasuredGeneLayoutCache`, per study | [gene_layout.py](../../src/endo_model/model/gene_layout.py) |
 | global → measured position | `global_to_meas_pos` (rebuilt per forward) | [endo_model.py:181](../../src/endo_model/model/endo_model.py:181) |
 | study-local → global | `global_idx_arr` in the Dataset loop | [dataset.py:293](../../src/endo_model/data/dataset.py:293) |
 
@@ -112,7 +112,7 @@ and `StudyPanel`, and never escapes to the model.
 | `d_gauss` | Gaussian latent dims | 32 | `model.d_gauss` |
 | `n_vMF` | circular latent dims | 8 | `model.n_vMF` |
 | `d_z` | joint latent = `d_gauss + 2·n_vMF` | 48 | derived, [model_config.py:107](../../src/endo_model/configs/model_config.py:107) |
-| `d_gene_rep` | `d_token + d_agg` | 96 | derived, [model_config.py:121](../../src/endo_model/configs/model_config.py:121) |
+| `d_tissue` | decoder tissue embedding | 16 | [model_config.py](../../src/endo_model/configs/model_config.py) |
 | `d_dec` | decoder inner width | 64 | `model.d_dec` |
 | `n_studies` | studies in corpus | 11 | runtime, from `studies.csv` minus exclusions |
 

@@ -6,6 +6,47 @@ if it is violated — including whether the failure is **loud** (an exception) o
 
 Silent failures are the ones to memorise.
 
+
+## New invariants since the last revision
+
+**Nothing per-cell may leave the encoder except `cell_cls`.** The decoder's gene
+side has no batch dimension, which makes this structural rather than a matter of
+care. *Broken by:* returning the aggregation encoder's group CLS tokens, or
+giving `_build_gene_queries` anything derived from `batch["counts"]`.
+*Pinned by:* `test_no_encoder_bypass.py`.
+
+**The KL terms and `nb` must be on the same per-gene scale.** KL is summed over
+latent dimensions and divided by `G_meas`; `nb` is a mean over genes. *Broken
+by:* averaging KL over dimensions — which makes `beta_kl = 1.0` an effective β
+of several hundred. *Pinned by:* `test_objectives.py::TestKLIsOnThePerGeneScale`.
+
+**`CompositeLoss.vmf_kl` must be `PowerSphericalKLLoss`.** `VonMisesKLLoss` is
+dead code with a confusable name. *Pinned by:*
+`test_composite_uses_the_power_spherical_kl`.
+
+**Every optimised parameter must be inside the gradient clip.** The DAB
+classifier lives on `CompositeLoss`, not on the model, so
+`model.parameters()` does not reach it. *Broken by:* the obvious spelling.
+
+**`disease_status` must not reach the model.** It is the label the atlas exists
+to reveal. *Pinned by:*
+`test_embeddings.py::test_metadata_encoder_holds_no_disease_or_tissue`.
+
+**`DISEASE_STATUS_TO_INT` must match `VALID_STATUSES` in the collation
+pipeline.** A status valid there but missing here is silently re-coded to
+`other`. *Not pinned by anything* — the two live in separate packages.
+
+**A study with zero cells must not veto a corpus-wide intersection.** Its
+per-study masks are all false. *Broken by:* `_select_hvg` before `08d5117`,
+which selected 0 highly variable genes and rendered a flat panel rather than
+failing.
+
+**`exp_cfg.seed` and `data.splits.seed` are separate on purpose.** The first
+drives init, dropout and batch order; the second the patient split. Varying the
+first alone gives a replicate scored on identical held-out cells. *Broken by:*
+collapsing them into one seed, which would make every replicate a different
+problem.
+
 ---
 
 ## I1 — Every batch contains exactly one study
@@ -14,7 +55,7 @@ Silent failures are the ones to memorise.
 **Relied on by** two places:
 
 - `DSBN.forward` — `gamma(study_id)` / `beta(study_id)` must resolve to one row.
-- `EndoFoundationModel._build_gene_reps` — uses `is_dns[0]` as the DNS pattern
+- `EndoFoundationModel._build_gene_queries` — uses `is_dns[0]` as the DNS pattern
   for the whole batch.
 
 **If violated:** *silent.* `gamma(study_id)` with mixed ids returns per-cell rows
@@ -77,7 +118,7 @@ different gene's identity embedding. The model would still train.
 
 **Enforced by** nothing.
 **Relied on by** every weight in the model. `group_names` order fixes the
-`HierarchicalEncoder` ModuleList order and the `AggregationEncoder` sequence
+`BucketedGroupEncoder` bucket assignment and the `AggregationEncoder` sequence
 layout.
 
 **If violated:** *loud* if `K` or any `G_k` changed (shape mismatch on
@@ -92,7 +133,7 @@ while sizes matched.
 
 **Enforced by** `StudyPanel`, which holds one `global_idx` array for the whole
 study.
-**Relied on by** `_build_gene_reps` using row 0.
+**Relied on by** `_build_gene_queries` using row 0.
 
 **If violated:** would require per-cell panels, which the data model cannot
 express.

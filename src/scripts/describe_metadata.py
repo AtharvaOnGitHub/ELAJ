@@ -37,6 +37,24 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def resolve_studies(data_cfg, root: str, include_excluded: bool) -> list:
+    """The studies to describe, as StudyConfig objects.
+
+    `include_excluded` reads the corpus CSV directly rather than going through
+    `resolve_studies`, which drops excluded studies and renumbers the rest.
+    Deciding whether an exclusion was the right call needs the study that was
+    excluded, so it has to bypass the thing that excludes it.
+    """
+    if not include_excluded:
+        return data_cfg.resolve_studies(root)
+
+    from endo_model.configs.data_config import load_studies_csv
+
+    if data_cfg.studies_csv is None:
+        return list(data_cfg.studies)
+    return load_studies_csv(str(Path(root) / data_cfg.studies_csv))
+
+
 def load_obs(path: str, study: str):
     """Read one study's obs frame without touching X.
 
@@ -67,20 +85,12 @@ def main() -> int:
     )
 
     exp_cfg, _, _, data_cfg = load_experiment(args.config, root=args.root)
-    studies = (
-        data_cfg.resolve_studies(args.root)
-        if not args.include_excluded
-        else __import__(
-            "endo_model.configs.data_config", fromlist=["load_studies_csv"]
-        ).load_studies_csv(str(Path(args.root) / data_cfg.studies_csv))
-    )
+    studies = resolve_studies(data_cfg, args.root, args.include_excluded)
 
     summary = MetadataSummary()
     for study in studies:
-        name = study["name"] if isinstance(study, dict) else study.name
-        path = study["path"] if isinstance(study, dict) else study.path
-        logger.info("Reading obs for %s", name)
-        summary.add_study(name, load_obs(path, name))
+        logger.info("Reading obs for %s", study.name)
+        summary.add_study(study.name, load_obs(study.path, study.name))
 
     out_dir = Path(args.root) / exp_cfg.output_dir / "metadata"
     summary.to_csv(out_dir / "metadata_summary.csv")

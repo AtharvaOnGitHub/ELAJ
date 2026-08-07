@@ -211,3 +211,44 @@ class TestCompositeLoss:
         out = comp(mo, batch, current_step=50, total_steps=100)
         out["total"].backward()
         assert mo["mu_gauss"].grad is not None
+
+
+# ── KL scale relative to the reconstruction term ─────────────────────────────
+
+class TestKLIsOnThePerGeneScale:
+    """The bug that emptied run 50132670's latent, pinned.
+
+    `nb` averages over ~15,000 genes. The KL terms used to average over their
+    own 32 and 8 dimensions, which made beta_kl = 1.0 an effective beta of
+    ~469 and ~1,875 — far past the range where posterior collapse is a known
+    risk. Nothing about that was visible in any loss curve; both terms simply
+    looked small.
+    """
+
+    def test_gaussian_kl_sums_over_dimensions(self):
+        from endo_model.model.objectives.kl_divergence import GaussianKLLoss
+
+        mu = torch.zeros(4, 16)
+        logvar = torch.zeros(4, 16)
+        mu[:, :] = 1.0                       # KL = 0.5 per dimension
+        got = float(GaussianKLLoss()(mu, logvar))
+        assert got == pytest.approx(0.5 * 16, rel=1e-5), (
+            "KL is being averaged over dimensions, not summed"
+        )
+
+    def test_wider_latent_costs_more_not_the_same(self):
+        """Averaging made a 32-d latent look as cheap as an 8-d one."""
+        from endo_model.model.objectives.kl_divergence import GaussianKLLoss
+
+        loss = GaussianKLLoss()
+        narrow = float(loss(torch.ones(4, 8), torch.zeros(4, 8)))
+        wide = float(loss(torch.ones(4, 32), torch.zeros(4, 32)))
+        assert wide == pytest.approx(4 * narrow, rel=1e-5)
+
+    def test_vmf_kl_sums_over_dimensions(self):
+        from endo_model.model.objectives.kl_divergence import VonMisesKLLoss
+
+        loss = VonMisesKLLoss()
+        one = float(loss(torch.full((4, 1), 2.0)))
+        eight = float(loss(torch.full((4, 8), 2.0)))
+        assert eight == pytest.approx(8 * one, rel=1e-5)

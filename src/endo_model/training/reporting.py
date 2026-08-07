@@ -48,6 +48,7 @@ class LatentCollector:
     """
 
     max_cells: int = 20000
+    n_studies: int = 1
     mu_gauss: list = field(default_factory=list)
     mu_angle: list = field(default_factory=list)
     kappa: list = field(default_factory=list)
@@ -55,17 +56,40 @@ class LatentCollector:
     disease: list = field(default_factory=list)
     tissue: list = field(default_factory=list)
     _n: int = 0
+    _per_study: dict = field(default_factory=dict)
+
+    @property
+    def per_study_quota(self) -> int:
+        """How many cells any one study may contribute.
+
+        PerStudyBatchSampler emits every batch of one study before moving to
+        the next, so taking the first `max_cells` cells in loader order takes
+        them from whichever studies happen to come first. Run 50132670's
+        epoch-0 UMAP was 11,008 cells of shih_2022 and 8,992 of tan_2022 —
+        two studies out of eleven — and because those two happen to be
+        entirely eutopic and entirely ectopic respectively, the "by disease
+        status" panel was an exact relabelling of the "by study" panel. Every
+        conclusion the figure invites was an artefact of the order the loader
+        ran in.
+        """
+        return max(1, self.max_cells // max(self.n_studies, 1))
 
     @property
     def full(self) -> bool:
+        """True once no study can contribute anything further."""
         return self._n >= self.max_cells
 
     def add(self, output: dict, batch: dict) -> None:
-        """Record one batch's latents, truncating at max_cells."""
+        """Record one batch's latents, up to this study's quota."""
         if self.full:
             return
-        room = self.max_cells - self._n
+        study = int(batch["study_id"][0].item())
+        used = self._per_study.get(study, 0)
+        room = min(self.max_cells - self._n, self.per_study_quota - used)
+        if room <= 0:
+            return
         take = min(room, int(output["mu_gauss"].shape[0]))
+        self._per_study[study] = used + take
 
         def grab(t: Tensor) -> np.ndarray:
             return t[:take].detach().float().cpu().numpy()
@@ -144,7 +168,9 @@ class EpochReporter:
         return epoch == 0 or epoch % self.latent_every == 0
 
     def new_collector(self) -> LatentCollector:
-        return LatentCollector(max_cells=self.max_latent_cells)
+        return LatentCollector(
+            max_cells=self.max_latent_cells, n_studies=self.n_studies
+        )
 
     def on_epoch_end(
         self, epoch: int, history: dict, latents: dict[str, np.ndarray] | None

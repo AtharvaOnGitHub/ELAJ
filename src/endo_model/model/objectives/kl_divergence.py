@@ -33,10 +33,23 @@ class GaussianKLLoss(nn.Module):
             logvar: (B, d_gauss) — posterior log variance.
 
         Returns:
-            Scalar — mean KL over (B, d_gauss).
+            Scalar — KL summed over latent dimensions, averaged over cells.
+
+        Summed, not averaged, over dimensions.  KL is an amount of information
+        and it belongs to the cell, not to a dimension: averaging makes a
+        32-dimensional latent look eight times cheaper than an 8-dimensional
+        one carrying the same information, which is backwards.
+
+        This used to return `kl.mean()`, and that single word cost run
+        50132670 its latent.  The NB term averages over ~15,000 genes while
+        this averaged over 32 dimensions, so the two were on scales differing
+        by a factor of ~469.  beta_kl = 1.0 was therefore a beta-VAE at
+        beta ~= 469, against the 1-20 range at which the literature already
+        reports posterior collapse.  CompositeLoss now divides by the measured
+        gene count to put this back on the NB term's per-gene scale.
         """
         kl = -0.5 * (1.0 + logvar - mu.pow(2) - logvar.exp())
-        return kl.mean()
+        return kl.sum(dim=-1).mean()
 
 
 class VonMisesKLLoss(nn.Module):
@@ -52,14 +65,22 @@ class VonMisesKLLoss(nn.Module):
             kappa: (B, n_vMF) — concentration parameters (> 0).
 
         Returns:
-            Scalar — mean KL over (B, n_vMF).
+            Scalar — KL summed over circular dimensions, averaged over cells.
+
+        Summed over dimensions for the same reason as GaussianKLLoss, and this
+        branch is where the old averaging did its worst damage: with n_vMF = 8
+        against ~15,000 genes the effective beta was ~1,875, four times the
+        Gaussian branch's. Run 50132670 duly killed the circular latent first
+        and hardest — 8/8 dimensions collapsed by epoch 0 and kl_vmf pinned at
+        its 1.2e-7 floor from epoch 1 onward, while the Gaussian branch limped
+        on at 0.06-0.3 nats.
         """
         eps = 1e-8
         i0 = torch.special.i0(kappa)                  # (B, n_vMF)
         i1 = torch.special.i1(kappa)                  # (B, n_vMF)
         A = i1 / (i0 + eps)                            # mean resultant length
         kl = kappa * A - torch.log(i0 + eps)          # (B, n_vMF) ≥ 0
-        return kl.mean()
+        return kl.sum(dim=-1).mean()
 
 
 class PowerSphericalKLLoss(nn.Module):

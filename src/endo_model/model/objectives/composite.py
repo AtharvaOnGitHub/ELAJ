@@ -100,8 +100,27 @@ class CompositeLoss(nn.Module):
         # KL divergences — beta annealing: ramp 0 → 1 over first 20 % of steps
         # to prevent posterior collapse before reconstruction is established.
         beta_kl = min(1.0, current_step / max(0.20 * total_steps, 1))
-        kl_gauss = self.gauss_kl(model_output["mu_gauss"], model_output["logvar"])
-        kl_vmf = self.vmf_kl(model_output["kappa"])
+
+        # Both KL terms arrive summed over latent dimensions and averaged over
+        # cells — the per-cell ELBO's KL.  Dividing by the measured gene count
+        # puts them on the same per-gene scale as `nb`, which is a mean over
+        # genes, so that beta_kl = 1.0 is a genuine beta = 1 VAE.
+        #
+        # Without this division beta_kl = 1.0 was an effective beta of ~469 for
+        # the Gaussian branch and ~1,875 for the circular one, against the 1-20
+        # range at which posterior collapse is already a documented risk.  Run
+        # 50132670 collapsed exactly as that predicts, circular branch first.
+        #
+        # G_meas rather than a constant because it varies by study (13,144 to
+        # 15,031 here): a study that measured more genes contributes more
+        # reconstruction evidence, and the KL should be weighed against the
+        # evidence actually present in the batch.
+        n_measured = max(int(model_output["measured_global_idxs"].numel()), 1)
+        kl_gauss = (
+            self.gauss_kl(model_output["mu_gauss"], model_output["logvar"])
+            / n_measured
+        )
+        kl_vmf = self.vmf_kl(model_output["kappa"]) / n_measured
 
         # DAB with linearly ramped lambda (0 → max over first 50 % of steps)
         ramp = min(1.0, 2.0 * current_step / max(total_steps, 1))

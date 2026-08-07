@@ -102,6 +102,26 @@ class Trainer:
         self.baseline_gate = baseline_gate
         self._collector = None
 
+        # Everything the optimizer updates, so everything the optimizer updates
+        # is clipped.  This used to be `model.parameters()`, which silently
+        # excluded the DAB study classifier: it lives on CompositeLoss, and
+        # train.py passes `model.parameters() + composite_loss.parameters()` to
+        # AdamW.  The classifier was therefore optimised without a bound on its
+        # step size.
+        #
+        # Run dab_soft is what that costs.  At lambda_dab 0.2 — a *fifth* of the
+        # scale that sat at chance — val_dab went 4.50, 18.51, 10.63 against a
+        # chance of 2.079.  A weaker reversal lets the classifier grow its
+        # logits unopposed, and an unclipped classifier has nothing to stop it;
+        # when the encoder does move, those confident predictions are confidently
+        # wrong and the cross-entropy is enormous.  Reading the parameter list
+        # off the optimizer means a head added later cannot reintroduce this.
+        self._clipped_parameters = [
+            param
+            for group in optimizer.param_groups
+            for param in group["params"]
+        ]
+
         self.global_step = 0
         self.current_epoch = 0
         self.total_steps = len(train_loader) * config.max_epochs
@@ -221,7 +241,7 @@ class Trainer:
             # steps before anything goes non-finite.  Discarding it threw that
             # away, and clipping hides the climb from the loss curve.
             grad_norm = nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.grad_clip_norm
+                self._clipped_parameters, self.config.grad_clip_norm
             )
 
             # A non-finite gradient must not reach the optimiser: AdamW would

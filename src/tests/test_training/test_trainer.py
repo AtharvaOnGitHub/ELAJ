@@ -260,3 +260,34 @@ class TestHistoryBreakdown:
         trainer = self._make_trainer()
         history = trainer.fit()
         assert all(0.0 <= b <= 1.0 for b in history["train_beta_kl"])
+
+
+def test_clip_covers_every_optimised_parameter():
+    """The DAB classifier lives on CompositeLoss, not on the model.
+
+    train.py optimises `model.parameters() + composite_loss.parameters()`, but
+    the clip used to name `model.parameters()` alone, leaving the study
+    classifier's step size unbounded. Run dab_soft diverged to val_dab 18.51
+    against a chance of 2.079 with a *weaker* reversal than the run that sat at
+    chance. Reading the list off the optimizer means a head added later cannot
+    reintroduce it.
+    """
+    import torch.nn as nn
+    from torch.optim import AdamW
+
+    from endo_model.configs.training_config import TrainingConfig
+    from endo_model.training.trainer import Trainer
+
+    model = nn.Linear(4, 4)
+    extra = nn.Linear(4, 3)          # stands in for the DAB classifier
+    optimizer = AdamW(list(model.parameters()) + list(extra.parameters()), lr=1e-3)
+
+    trainer = Trainer(
+        model=model, train_loader=[], val_loader=[],
+        composite_loss=None, optimizer=optimizer, scheduler=None,
+        config=TrainingConfig(),
+    )
+    clipped = {id(p) for p in trainer._clipped_parameters}
+    for name, param in extra.named_parameters():
+        assert id(param) in clipped, f"classifier {name} is optimised but not clipped"
+    assert len(clipped) == len(list(model.parameters())) + len(list(extra.parameters()))

@@ -20,10 +20,25 @@ from endo_model.viz.palette import PALETTE
 
 logger = logging.getLogger(__name__)
 
-# Below this, the Power Spherical is indistinguishable from uniform on the
-# circle — the dimension carries no direction. The sampler floors kappa at 1e-4,
-# so anything near that is collapsed rather than merely weak.
-_COLLAPSE_KAPPA = 1e-2
+# Below this, the Power Spherical carries no usable direction.
+#
+# This was 1e-2, chosen as "just above the sampler's 1e-4 floor", and that was
+# too generous to be informative. Run dab_off reported 0/8 collapsed at median
+# kappa 0.021-0.030 — above the old line, and carrying about 1e-4 nats per
+# dimension, which is uniform in everything but the arithmetic. A panel that
+# says "not collapsed" about a dimension holding a ten-thousandth of a nat is
+# not answering the question it was built to answer.
+#
+# 0.2 is where KL to the uniform prior reaches roughly 0.01 nats (KL ~ kappa^2/4
+# for small kappa on S^1). Still permissive, but now a dimension that clears it
+# is one that stores something.
+_COLLAPSE_KAPPA = 0.2
+
+# Small-kappa KL to the uniform circular prior, in nats. Reported alongside
+# kappa because a concentration is hard to size by eye and an information
+# content is not.
+def _kl_nats(kappa: np.ndarray) -> np.ndarray:
+    return kappa ** 2 / 4.0
 
 
 def safe_umap(z: np.ndarray, seed: int = 24) -> np.ndarray | None:
@@ -130,7 +145,8 @@ def circular_latent(
             ax.axvline(np.log10(_COLLAPSE_KAPPA), ls="--", lw=1.2,
                        color=PALETTE.muted)
             ax.set_title(
-                f"median κ = {median:.2e}" + ("  COLLAPSED" if dead else ""),
+                f"median κ = {median:.2e}\n≈ {_kl_nats(median):.1e} nats"
+                + ("  COLLAPSED" if dead else ""),
                 fontsize=8, color=PALETTE.bad if dead else PALETTE.ink,
             )
         ax.set_xlabel("log₁₀ κ", fontsize=8)

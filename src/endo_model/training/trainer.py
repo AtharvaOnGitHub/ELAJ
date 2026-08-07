@@ -64,6 +64,7 @@ class Trainer:
         reporter=None,
         extra_val_metrics=None,
         precision: PrecisionPolicy | None = None,
+        baseline_gate=None,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -95,6 +96,10 @@ class Trainer:
         # from the train loss is not comparable to it, and the two curves are
         # drawn on the same axes.
         self.precision = precision or PrecisionPolicy("off")
+        # BaselineGate, or None to run without the comparison. Reports each
+        # epoch whether the model is beating the study-mean baseline — see
+        # evaluation/baseline_gate.py for why that is not left to the CSV.
+        self.baseline_gate = baseline_gate
         self._collector = None
 
         self.global_step = 0
@@ -134,6 +139,11 @@ class Trainer:
                 val_loss = val_metrics["total"]
                 history["val_loss"].append(val_loss)
                 _record(history, "val", val_metrics)
+
+                # Before checkpointing and before the figures: the one number
+                # that says whether this run is worth continuing.
+                if self.baseline_gate is not None:
+                    self.baseline_gate.evaluate(epoch, val_metrics)
 
                 if self.ckpt_manager is not None:
                     self.ckpt_manager.save(

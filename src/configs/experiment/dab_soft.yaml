@@ -1,0 +1,54 @@
+name: dab_soft
+description: >
+  Adversary at a fifth scale, with the circular KL fixed.
+
+  Paired with its partner run: same seed, same data order, so step N is
+  the same batch in both and the two are directly comparable.
+
+  Both previous runs are void — CompositeLoss binds vmf_kl to
+  PowerSphericalKLLoss, which the mean-to-sum fix missed, so the
+  circular branch was penalised 8x too weakly throughout.
+
+  Three epochs, because the KL ramp completes inside epoch 1 — a latent still
+  carrying information at epoch 2 here has met the full penalty.  The question
+  is narrow: does val_nb get below the study-mean baseline at all, and what
+  does the adversary cost the circular branch to get there.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/dab_soft/
+seed: 24
+
+overrides:
+  # Three epochs, and the short run is itself part of the test.  The KL ramp is
+  # 20% of total_steps, so beta_kl reaches its full 1.0 inside epoch 1 rather
+  # than epoch 10 — the latent meets the full penalty almost immediately.  A
+  # latent still carrying information at epoch 2 here is under more pressure
+  # than it would be at epoch 2 of a 50-epoch run, not less.
+  training.max_epochs: 3
+
+  # Nothing may early-stop a run whose entire purpose is the shape of a curve.
+  training.early_stop_warmup_epochs: 99
+
+  training.batch_size: 256
+  training.diagnostics.log_every: 10
+
+  # Latent figures every epoch.  The circular panel states "N/8 dimensions
+  # collapsed" in its title, which is the single most direct read on whether
+  # the fix worked.
+  training.diagnostics.latent_every: 1
+
+  # A fifth of the previous gradient-reversal scale.
+  #
+  # The previous pair was read against ln(12) = 2.485, but only 8 of the 12
+  # studies survive the disease filter, so chance is ln(8) = 2.079 — and
+  # kl_check's val_dab settled at 2.084. The adversary was already at chance;
+  # what it also did was collapse 4 of 8 circular dimensions and leave the
+  # surviving ones at kappa 0.01-0.03 against 8-15 without it.
+  #
+  # So this is not "the adversary was too weak to work". It is "it reached
+  # chance and kept pushing". A softer scale should hold dab near 2.079 while
+  # leaving the circular branch something to encode.
+  model.dab.lambda_dab: 0.2

@@ -14,6 +14,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -218,12 +219,36 @@ def main() -> None:
     from endo_model.evaluation.metrics import HvgReconstructionMetric
     hvg_metric = HvgReconstructionMetric(baseline.hvg_mask)
 
+    # Reported at the end of every validation pass rather than left in
+    # metrics.csv.  Two complete runs finished before anyone noticed neither had
+    # ever beaten this number — see evaluation/baseline_gate.py.
+    from endo_model.evaluation.baseline_gate import BaselineGate
+    baseline_gate = BaselineGate(
+        baseline_all=baseline_scores.nb_all_genes,
+        baseline_hvg=baseline_scores.nb_hvg or None,
+    )
+
     # ── Figures ───────────────────────────────────────────────────────────────
     from endo_model.training.reporting import EpochReporter
 
+    # Studies that actually contribute cells, not studies configured.  The
+    # adversary's chance line is ln(n), and a study the disease filter emptied
+    # is one the classifier can never be asked about — including it moves the
+    # line and makes a correctly-at-chance adversary read as below chance.
+    # With 12 configured and 8 populated that is ln(12)=2.485 against
+    # ln(8)=2.079, and run kl_check settled at 2.084.
+    n_live_studies = len(set(train_dataset.study_ids))
+    if n_live_studies != model_cfg.n_studies:
+        logger.info(
+            "Adversary chance line: ln(%d) = %.3f — %d of %d studies contribute "
+            "cells after filtering",
+            n_live_studies, math.log(max(n_live_studies, 1)),
+            n_live_studies, model_cfg.n_studies,
+        )
+
     reporter = EpochReporter(
         out_dir=out_dir,
-        n_studies=model_cfg.n_studies,
+        n_studies=n_live_studies,
         id_to_name={s["id"]: s["name"] for s in study_configs},
         baseline_all=baseline_scores.nb_all_genes,
         baseline_hvg=baseline_scores.nb_hvg,
@@ -272,6 +297,7 @@ def main() -> None:
         reporter=reporter,
         extra_val_metrics=hvg_metric,
         precision=precision,
+        baseline_gate=baseline_gate,
     )
     trainer.current_epoch = start_epoch
 
@@ -295,6 +321,7 @@ def main() -> None:
 
     # ── Write metrics CSV ─────────────────────────────────────────────────────
     _write_metrics_csv(out_dir / "metrics.csv", history)
+    logger.info("%s", baseline_gate.summarise())
     if monitor.skipped_steps:
         logger.warning(
             "%d update(s) were skipped for non-finite gradients over the run.",

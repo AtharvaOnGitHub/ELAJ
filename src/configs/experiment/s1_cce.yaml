@@ -1,0 +1,38 @@
+name: s1_cce
+description: >
+  CCE on, penalties halved. ~21 h.
+
+  Two forward passes per batch, so ~69 min/epoch against ~35 — 18 epochs rather
+  than 25 is what fits inside the 24 h walltime with margin.
+
+  Penalties halved on the reasoning that CCE is itself a regulariser: it already
+  constrains the latent by requiring two dropout views of the same cell to agree,
+  so charging full price for information on top double-counts.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s1_cce/
+seed: 24
+
+overrides:
+  training.max_epochs: 18
+  training.batch_size: 256
+  training.optimizer.lr: 1.0e-3
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 2
+
+  # Nothing may early-stop an arm whose purpose is the shape of a curve.
+  training.early_stop_warmup_epochs: 99
+
+  # CCE: a second forward pass with different dropout, and InfoNCE pulling the
+  # two embeddings of the same cell together. This is the cost driver.
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.1
+
+  # Halved. beta_max scales BOTH KL terms; it was hardcoded at 1.0 until this
+  # commit, so this is the first run where editing it does anything.
+  training.kl_annealing.beta_max: 0.5
+
+  model.dab.lambda_dab: 0.0

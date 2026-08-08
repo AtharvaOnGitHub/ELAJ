@@ -168,7 +168,23 @@ def main() -> None:
         lambda_dab_max=model_cfg.dab.lambda_dab,
         cce_temperature=model_cfg.cce.temperature,
         dab_hidden_dim=model_cfg.dab.hidden_dim,
+        w_nb=model_cfg.loss.w_nb,
+        w_kl_gauss=model_cfg.loss.w_kl_gauss,
+        w_kl_vmf=model_cfg.loss.w_kl_vmf,
+        w_dab=model_cfg.loss.w_dab,
+        free_bits=model_cfg.loss.free_bits,
+        beta_max=train_cfg.kl_annealing.beta_max,
+        warmup_fraction=train_cfg.kl_annealing.warmup_fraction,
     ).to(device)
+    logger.info(
+        "Loss: w_nb=%.3g w_kl_gauss=%.3g w_kl_vmf=%.3g w_dab=%.3g w_cce=%.3g "
+        "free_bits=%.3g beta_max=%.3g warmup=%.3g lambda_dab=%.3g",
+        model_cfg.loss.w_nb, model_cfg.loss.w_kl_gauss, model_cfg.loss.w_kl_vmf,
+        model_cfg.loss.w_dab,
+        model_cfg.cce.lambda_cce if model_cfg.cce.enabled else 0.0,
+        model_cfg.loss.free_bits, train_cfg.kl_annealing.beta_max,
+        train_cfg.kl_annealing.warmup_fraction, model_cfg.dab.lambda_dab,
+    )
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
     all_params = list(model.parameters()) + list(composite_loss.parameters())

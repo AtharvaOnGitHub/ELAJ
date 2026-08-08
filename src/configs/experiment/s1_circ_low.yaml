@@ -1,0 +1,36 @@
+name: s1_circ_low
+description: >
+  Circular penalty cut to a tenth, lr 2e-3. ~11.5 h.
+
+  Asks one question: with the charge on the circular branch largely removed,
+  does it store anything the reconstruction can use?
+
+  In s0_lr_high, 7 of 8 circular dimensions sat at kappa ~ 3e-4 and one at 190,
+  and the branch as a whole held 2.66 nats. If that is the penalty holding it
+  down, this run frees it. If the dimensions stay dead, the penalty was not the
+  binding constraint and free bits (s1_freebits) is the better lever.
+
+  lr 2e-3 is untested and sits between 1e-3 (best so far) and 3e-3.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s1_circ_low/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.optimizer.lr: 2.0e-3
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 2
+
+  # Nothing may early-stop an arm whose purpose is the shape of a curve.
+  training.early_stop_warmup_epochs: 99
+
+  # A tenth of the charge on the circular branch only. The Gaussian branch is
+  # untouched, so any change in the circular dimensions is attributable.
+  model.loss.w_kl_vmf: 0.1
+
+  model.dab.lambda_dab: 0.0

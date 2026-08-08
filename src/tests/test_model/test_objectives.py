@@ -269,3 +269,66 @@ def test_composite_uses_the_power_spherical_kl():
 
     loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2)
     assert isinstance(loss.vmf_kl, PowerSphericalKLLoss)
+
+
+# ── Free bits and the newly-wired weights ────────────────────────────────────
+
+class TestFreeBits:
+    """The floor must be a no-op when off, and bind per dimension when on."""
+
+    def test_zero_free_bits_is_exactly_the_old_reduction(self):
+        from endo_model.model.objectives.kl_divergence import GaussianKLLoss
+
+        torch.manual_seed(0)
+        mu, logvar = torch.randn(16, 8), torch.randn(16, 8) * 0.1
+        kl = -0.5 * (1.0 + logvar - mu.pow(2) - logvar.exp())
+        got = GaussianKLLoss()(mu, logvar, free_bits=0.0)
+        assert got == pytest.approx(float(kl.sum(dim=-1).mean()), rel=1e-6)
+
+    def test_floor_binds_on_a_dead_dimension(self):
+        """A dimension at kappa ~ 3e-4 costs ~2e-8 nats and has no gradient to
+        climb back with. The floor is what stops it getting there."""
+        from endo_model.model.objectives.kl_divergence import PowerSphericalKLLoss
+
+        loss = PowerSphericalKLLoss()
+        dead = torch.full((32, 4), 3e-4)
+        assert float(loss(dead, free_bits=0.0)) < 1e-6
+        assert float(loss(dead, free_bits=0.1)) == pytest.approx(0.4, rel=1e-5)
+
+    def test_floor_leaves_a_live_dimension_alone(self):
+        from endo_model.model.objectives.kl_divergence import PowerSphericalKLLoss
+
+        loss = PowerSphericalKLLoss()
+        live = torch.full((32, 1), 190.0)
+        assert float(loss(live, free_bits=0.1)) == pytest.approx(
+            float(loss(live, free_bits=0.0)), rel=1e-6
+        )
+
+    def test_floor_applies_to_the_batch_mean_not_per_cell(self):
+        """Per-cell clamping would floor the cheap cells and leave the expensive
+        ones, raising the loss without changing what the dimension is asked to
+        do. Here the mean is above the floor even though half the cells are not."""
+        from endo_model.model.objectives.kl_divergence import _reduce
+
+        kl = torch.tensor([[0.0], [1.0]])          # mean 0.5, one cell at 0
+        assert float(_reduce(kl, free_bits=0.2)) == pytest.approx(0.5)
+
+
+class TestWiredWeights:
+    """beta_max and the per-term weights were unreachable from YAML until now."""
+
+    def test_beta_max_scales_the_kl_terms(self):
+        half = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, beta_max=0.5)
+        full = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, beta_max=1.0)
+        assert half.beta_max == 0.5 and full.beta_max == 1.0
+
+    def test_warmup_fraction_is_read_not_hardcoded(self):
+        loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, warmup_fraction=0.5)
+        assert loss.warmup_fraction == 0.5
+
+    def test_w_kl_vmf_is_independent_of_w_kl_gauss(self):
+        """s1_circ_low lowers one and not the other; if they were tied the run
+        would answer a different question from the one it was built for."""
+        loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, w_kl_vmf=0.1)
+        assert loss.w_kl_vmf == 0.1
+        assert loss.w_kl_gauss == 1.0

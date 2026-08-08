@@ -52,8 +52,18 @@ class CompositeLoss(nn.Module):
         cce_temperature: float = 0.1,
         dab_hidden_dim: int = 64,
         dab_dropout: float = 0.1,
+        beta_max: float = 1.0,
+        warmup_fraction: float = 0.20,
+        free_bits: float = 0.0,
     ) -> None:
         super().__init__()
+        # beta_max and warmup_fraction used to be hardcoded here as 1.0 and 0.20
+        # while TrainingConfig.kl_annealing carried the same two names and was
+        # read by nothing. Editing the YAML did nothing at all.
+        self.beta_max = beta_max
+        self.warmup_fraction = warmup_fraction
+        # Nats per latent dimension the model is not charged for.
+        self.free_bits = free_bits
         self.w_nb = w_nb
         self.w_kl_gauss = w_kl_gauss
         self.w_kl_vmf = w_kl_vmf
@@ -99,7 +109,9 @@ class CompositeLoss(nn.Module):
 
         # KL divergences — beta annealing: ramp 0 → 1 over first 20 % of steps
         # to prevent posterior collapse before reconstruction is established.
-        beta_kl = min(1.0, current_step / max(0.20 * total_steps, 1))
+        beta_kl = self.beta_max * min(
+            1.0, current_step / max(self.warmup_fraction * total_steps, 1)
+        )
 
         # Both KL terms arrive summed over latent dimensions and averaged over
         # cells — the per-cell ELBO's KL.  Dividing by the measured gene count
@@ -117,10 +129,14 @@ class CompositeLoss(nn.Module):
         # evidence actually present in the batch.
         n_measured = max(int(model_output["measured_global_idxs"].numel()), 1)
         kl_gauss = (
-            self.gauss_kl(model_output["mu_gauss"], model_output["logvar"])
+            self.gauss_kl(
+                model_output["mu_gauss"], model_output["logvar"], self.free_bits
+            )
             / n_measured
         )
-        kl_vmf = self.vmf_kl(model_output["kappa"]) / n_measured
+        kl_vmf = (
+            self.vmf_kl(model_output["kappa"], self.free_bits) / n_measured
+        )
 
         # DAB with linearly ramped lambda (0 → max over first 50 % of steps)
         ramp = min(1.0, 2.0 * current_step / max(total_steps, 1))

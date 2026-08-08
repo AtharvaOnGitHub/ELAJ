@@ -1,0 +1,37 @@
+name: s1_freebits
+description: >
+  Free bits plus a soft adversary. ~5.8 h.
+
+  free_bits: the model is not charged for the first 0.1 nats in any latent
+  dimension. Different lever from s1_circ_low: that one lowers the price, this
+  one stops a dimension being pushed somewhere it cannot climb out of. A quiet
+  circular dimension sits at kappa ~ 3e-4 where the gradient is ~1.5e-4 — flat
+  ground, not a steep hill.
+
+  0.1 rather than a larger floor because the Gaussian branch currently holds
+  about 0.35 nats per dimension: a 0.1 floor leaves it alone and catches only
+  dimensions that are genuinely dying.
+
+  lambda_dab 0.05 rather than 0.2. At 0.2 the adversary drove val_dab to ~5
+  against a chance of 2.079 — overshooting by 2.5x — and cost the whole
+  reconstruction gain. Read val_dab against 2.079, not 2.485.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s1_freebits/
+seed: 24
+
+overrides:
+  training.max_epochs: 10
+  training.batch_size: 256
+  training.optimizer.lr: 1.0e-3
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 2
+
+  # Nothing may early-stop an arm whose purpose is the shape of a curve.
+  training.early_stop_warmup_epochs: 99
+
+  model.loss.free_bits: 0.1
+  model.dab.lambda_dab: 0.05

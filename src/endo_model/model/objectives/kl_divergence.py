@@ -25,7 +25,9 @@ from endo_model.model.latent.power_spherical import power_spherical_kl_uniform
 class GaussianKLLoss(nn.Module):
     """Mean KL divergence from standard Gaussian prior."""
 
-    def forward(self, mu: Tensor, logvar: Tensor) -> Tensor:
+    def forward(
+        self, mu: Tensor, logvar: Tensor, free_bits: float = 0.0
+    ) -> Tensor:
         """Compute mean KL per cell.
 
         Args:
@@ -49,7 +51,7 @@ class GaussianKLLoss(nn.Module):
         gene count to put this back on the NB term's per-gene scale.
         """
         kl = -0.5 * (1.0 + logvar - mu.pow(2) - logvar.exp())
-        return kl.sum(dim=-1).mean()
+        return _reduce(kl, free_bits)
 
 
 class VonMisesKLLoss(nn.Module):
@@ -100,7 +102,7 @@ class PowerSphericalKLLoss(nn.Module):
     the threshold in three epochs was not being asked to pay for it.
     """
 
-    def forward(self, kappa: Tensor) -> Tensor:
+    def forward(self, kappa: Tensor, free_bits: float = 0.0) -> Tensor:
         """Compute KL( PowerSpherical(mu, kappa) ‖ Uniform(S^1) ).
 
         Args:
@@ -109,4 +111,33 @@ class PowerSphericalKLLoss(nn.Module):
         Returns:
             Scalar — KL summed over circular dimensions, averaged over cells.
         """
-        return power_spherical_kl_uniform(kappa, dim=2).sum(dim=-1).mean()
+        return _reduce(power_spherical_kl_uniform(kappa, dim=2), free_bits)
+
+
+def _reduce(kl: Tensor, free_bits: float) -> Tensor:
+    """Sum a per-cell per-dimension KL over dimensions, averaging over cells.
+
+    Args:
+        kl:        (B, d) non-negative per-dimension KL.
+        free_bits: Nats per dimension the model is not charged for. 0 disables.
+
+    `kl.mean(dim=0).sum()` is exactly `kl.sum(dim=-1).mean()` — same terms, other
+    order — so free_bits=0 changes nothing. The order matters only because the
+    floor has to apply to a dimension's *average* cost across the batch, not to
+    each cell separately. Per-cell clamping would floor the cheap cells and leave
+    the expensive ones untouched, which raises the loss without changing what any
+    dimension is being asked to do.
+
+    Why it exists: a circular dimension that has gone quiet sits at kappa ~ 3e-4,
+    where KL is about kappa^2/4 and the slope is kappa/2 ~ 1.5e-4. There is
+    almost no gradient to climb back out with. It is not being crushed; it is
+    stuck on flat ground. Lowering the penalty does not help, because the penalty
+    down there is already nearly zero. Not charging for the first `free_bits`
+    nats stops a dimension being pushed onto that flat ground at all.
+
+    Run s0_lr_high: 7 of 8 circular dimensions at kappa ~ 3e-4, one at 190.
+    """
+    per_dim = kl.mean(dim=0)
+    if free_bits > 0.0:
+        per_dim = per_dim.clamp_min(free_bits)
+    return per_dim.sum()

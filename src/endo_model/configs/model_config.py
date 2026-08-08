@@ -71,6 +71,36 @@ class CCEConfig:
 
 
 @dataclass
+class LossConfig:
+    """Per-term loss weights and the KL free-bits floor.
+
+    These were constructor defaults on CompositeLoss that train.py never
+    overrode, so the reconstruction/KL balance could not be tuned without
+    editing code. Wired here because tuning them is now the point.
+
+    free_bits is nats per latent dimension the model is not charged for. It
+    exists because a dimension that has gone quiet has almost no gradient to
+    climb back with — see kl_divergence._reduce.
+    """
+
+    w_nb: float = 1.0
+    w_kl_gauss: float = 1.0
+    w_kl_vmf: float = 1.0
+    w_dab: float = 1.0
+    free_bits: float = 0.0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LossConfig":
+        return cls(
+            w_nb=float(d.get("w_nb", 1.0)),
+            w_kl_gauss=float(d.get("w_kl_gauss", 1.0)),
+            w_kl_vmf=float(d.get("w_kl_vmf", 1.0)),
+            w_dab=float(d.get("w_dab", 1.0)),
+            free_bits=float(d.get("free_bits", 0.0)),
+        )
+
+
+@dataclass
 class DABConfig:
     """Domain Adversarial Batch-correction (DAB) component configuration.
 
@@ -111,6 +141,7 @@ class ModelConfig:
         default_factory=AggregationEncoderConfig
     )
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
+    loss: LossConfig = field(default_factory=LossConfig)
     cce: CCEConfig = field(default_factory=CCEConfig)
     dab: DABConfig = field(default_factory=DABConfig)
 
@@ -150,6 +181,7 @@ class ModelConfig:
             n_vMF=d.get("n_vMF", 8),
             d_dec=d.get("d_dec", 64),
             d_tissue=int(d.get("d_tissue", 16)),
+            loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),
             n_studies=d.get("n_studies"),
             group_encoder=GroupEncoderConfig.from_dict(d.get("group_encoder", {})),

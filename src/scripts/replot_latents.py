@@ -38,13 +38,36 @@ logger = logging.getLogger("elaj.replot")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", required=True, help="The run's experiment YAML.")
-    p.add_argument("--checkpoint", required=True, help="Checkpoint .pt to load.")
+    p.add_argument(
+        "--checkpoint", default=None,
+        help="Checkpoint .pt to load. Defaults to the newest in the run's "
+             "checkpoints/ directory.",
+    )
     p.add_argument("--root", default=".", help="Project root.")
     p.add_argument(
         "--epoch", type=int, default=None,
         help="Epoch number for the figure titles. Defaults to the checkpoint's.",
     )
     return p.parse_args()
+
+
+def newest_checkpoint(out_dir: Path) -> Path:
+    """The most recent checkpoint in a run's output directory.
+
+    Checkpoints are named epoch_NNNN_step_NNNNNNN.pt, so lexical order is epoch
+    order — no need to parse or to trust mtime, which a file copy would change.
+
+    Raises:
+        FileNotFoundError: if the directory has none. Worth failing here rather
+            than deep inside torch.load with a less obvious message.
+    """
+    ckpts = sorted((out_dir / "checkpoints").glob("epoch_*.pt"))
+    if not ckpts:
+        raise FileNotFoundError(
+            f"No checkpoints in {out_dir / 'checkpoints'}. "
+            f"Did the run get far enough to save one?"
+        )
+    return ckpts[-1]
 
 
 def report_kappa(kappa) -> None:
@@ -126,15 +149,17 @@ def main() -> int:
         num_workers=4,
     )
 
+    out_dir = Path(root) / exp_cfg.output_dir
+    checkpoint = Path(args.checkpoint) if args.checkpoint else newest_checkpoint(out_dir)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EndoFoundationModel(vocab, model_cfg).to(device)
-    payload = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    payload = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(payload["model_state"])
     model.eval()
     epoch = args.epoch if args.epoch is not None else int(payload.get("epoch", 0))
-    logger.info("Loaded %s (epoch %d)", args.checkpoint, epoch)
+    logger.info("Loaded %s (epoch %d)", checkpoint, epoch)
 
-    out_dir = Path(root) / exp_cfg.output_dir
     reporter = EpochReporter(
         out_dir=out_dir / "figures_replot",
         n_studies=len(set(val_dataset.study_ids)),

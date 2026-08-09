@@ -173,10 +173,17 @@ class Trainer:
                 # epoch 9. `nb` falls monotonically enough to be a signal.
                 stop_metric = val_metrics.get("nb", val_loss)
 
+                # Checkpoints are ranked by the same metric early stopping
+                # uses, for the same reason. Ranking by the composite total
+                # kept epochs 11/15/16 of s1_circ_low and discarded epoch 18,
+                # which was the best model that run produced: val_total climbed
+                # 0.690 -> 0.766 across those epochs while val_nb fell
+                # 0.3623 -> 0.3605. The run improved and the checkpointer threw
+                # the improvement away.
                 if self.ckpt_manager is not None:
                     self.ckpt_manager.save(
                         self.model, self.optimizer,
-                        epoch, self.global_step, val_loss,
+                        epoch, self.global_step, stop_metric,
                         extra={"train_metrics": train_metrics,
                                "val_metrics": val_metrics},
                     )

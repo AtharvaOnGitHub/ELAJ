@@ -1,0 +1,42 @@
+name: s3_gauss64
+description: >
+  d_gauss 32 -> 64. Twice the Gaussian latent width.
+
+  Stage 3 hyperparameter sweep. Every arm sits on the s1_circ_low base — lr
+  2e-3, w_kl_vmf 0.1, no adversary — which is the best configuration measured so
+  far (val_nb 0.3605, 6 of 8 circular dimensions alive). Each arm moves ONE
+  thing off that base, listed under "the variable".
+
+  Noise floor from the s0_ref / s0_ref_seed7 pair: about 0.3% on best-epoch
+  val_nb. Anything under ~0.5% is not a result.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s3_gauss64/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+
+  # Scores val_nb, not the composite total. Checkpoints are ranked the same way.
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # ---- the base (held fixed across the sweep) ----
+  training.optimizer.lr: 2.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.dab.lambda_dab: 0.0
+
+  # ---- the variable ----
+  # The Gaussian branch holds about 11 nats across 32 dimensions and has been
+  # stable there for several runs, which is either the right amount or a
+  # capacity ceiling. Widening it distinguishes those.
+  #
+  # Cheap: only the two latent heads and z_proj change width, not the encoder,
+  # so runtime is within noise of the base.
+  model.d_gauss: 64

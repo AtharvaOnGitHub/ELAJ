@@ -1,0 +1,41 @@
+name: s3_beta_half
+description: >
+  beta_max 1.0 -> 0.5. Halves the charge on BOTH latent branches.
+
+  Stage 3 hyperparameter sweep. Every arm sits on the s1_circ_low base — lr
+  2e-3, w_kl_vmf 0.1, no adversary — which is the best configuration measured so
+  far (val_nb 0.3605, 6 of 8 circular dimensions alive). Each arm moves ONE
+  thing off that base, listed under "the variable".
+
+  Noise floor from the s0_ref / s0_ref_seed7 pair: about 0.3% on best-epoch
+  val_nb. Anything under ~0.5% is not a result.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s3_beta_half/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+
+  # Scores val_nb, not the composite total. Checkpoints are ranked the same way.
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # ---- the base (held fixed across the sweep) ----
+  training.optimizer.lr: 2.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.dab.lambda_dab: 0.0
+
+  # ---- the variable ----
+  # s1_cce ran with beta_max 0.5 and did well, but had CCE on at the same
+  # time so the two could not be separated. This is the clean version.
+  #
+  # Note this is not the same lever as w_kl_vmf: beta_max scales both
+  # branches, w_kl_vmf only the circular one.
+  training.kl_annealing.beta_max: 0.5

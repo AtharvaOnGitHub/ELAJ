@@ -97,6 +97,10 @@ def main() -> None:
         seed=data_cfg.splits.seed,
         max_cells_per_study=data_cfg.max_cells_per_study,
         include_disease_statuses=data_cfg.include_disease_statuses,
+        tissue_hierarchy_path=(
+            str(Path(root) / data_cfg.tissue_hierarchy_csv)
+            if data_cfg.tissue_hierarchy_csv else None
+        ),
     )
     train_dataset = EndometriosisDataset(split="train", **split_kwargs)
     val_dataset = EndometriosisDataset(split="val", **split_kwargs)

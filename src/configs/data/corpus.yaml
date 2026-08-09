@@ -11,6 +11,15 @@ splits:
   test_fraction: 0.15
   seed: 24
 
+# UBERON term -> the four numeric tissue levels the model reads.
+#
+# Those four columns (tissue_compartment, tissue_organ, tissue_type,
+# tissue_microsite) do not exist in ANY of the 13 studies and never have —
+# nothing in collation ever wrote them, so every cell read level 0 and the
+# decoder's tissue conditioning was inert. tissue_ontology_term_id IS populated
+# everywhere; only the translation was missing. Set to null to go back to that.
+tissue_hierarchy_csv: configs/data/tissue_hierarchy.csv
+
 dns_sentinel: -1
 max_cells_per_study: null      # null = use all; integer = cap for debugging
 

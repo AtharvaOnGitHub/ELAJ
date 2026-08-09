@@ -86,6 +86,7 @@ def latent_umap(
     coords: np.ndarray,
     labels: dict[str, tuple[np.ndarray, dict | None, str | None]],
     epoch: int,
+    branch: str = "Gaussian",
 ) -> plt.Figure:
     """UMAP of the Gaussian latent, one panel per colouring.
 
@@ -104,7 +105,9 @@ def latent_umap(
     axes = np.atleast_1d(axes)
     for ax, (title, (codes, names, note)) in zip(axes, labels.items()):
         _scatter_by_label(ax, coords, codes, names, title, note)
-    fig.suptitle(f"Gaussian latent — UMAP of {coords.shape[0]:,} val cells (epoch {epoch})")
+    fig.suptitle(
+        f"{branch} latent — UMAP of {coords.shape[0]:,} val cells (epoch {epoch})"
+    )
     fig.tight_layout()
     return fig
 

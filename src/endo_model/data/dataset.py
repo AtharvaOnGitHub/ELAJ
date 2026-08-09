@@ -37,6 +37,7 @@ from typing import Optional
 import numpy as np
 import scipy.sparse
 
+from endo_model.data.tissue_hierarchy import ONTOLOGY_COLUMN, TissueHierarchy
 from endo_model.data.constants import (
     DISEASE_STATUS_TO_INT,
     N_TISSUE_LEVELS,
@@ -55,7 +56,7 @@ _TISSUE_LEVEL_COLUMNS = (
 )
 
 
-def _tissue_level_matrix(obs, study_name: str) -> np.ndarray:
+def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
     """Build an (n_cells, N_TISSUE_LEVELS) int64 matrix of tissue hierarchy codes.
 
     Columns that are missing, or whose values cannot be coerced to numbers, are
@@ -68,6 +69,22 @@ def _tissue_level_matrix(obs, study_name: str) -> np.ndarray:
     import pandas as pd
 
     matrix = np.zeros((len(obs), N_TISSUE_LEVELS), dtype=np.int64)
+
+    # The four numeric columns do not exist in any study in this corpus and
+    # never have — nothing in collation ever wrote them, so every cell read 0
+    # and the decoder's tissue conditioning was inert. What is populated, in
+    # all 13 studies, is the UBERON term. Derive the levels from that when the
+    # numeric columns are absent; a study that does carry them still wins, so
+    # this is a fallback rather than a replacement.
+    if hierarchy is not None and not any(c in obs.columns for c in _TISSUE_LEVEL_COLUMNS):
+        if ONTOLOGY_COLUMN in obs.columns:
+            return hierarchy.matrix_for(obs[ONTOLOGY_COLUMN].to_numpy(), study_name)
+        logger.warning(
+            "Study '%s': no tissue level columns and no '%s' either — tissue "
+            "reads as unknown for every cell.",
+            study_name, ONTOLOGY_COLUMN,
+        )
+        return matrix
 
     for level_i, col in enumerate(_TISSUE_LEVEL_COLUMNS):
         if col not in obs.columns:
@@ -280,11 +297,18 @@ class EndometriosisDataset:
         seed: int = 24,
         max_cells_per_study: Optional[int] = None,
         include_disease_statuses: Optional[list[str]] = None,
+        tissue_hierarchy_path: Optional[str] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
 
         keep_codes = _disease_codes_to_keep(include_disease_statuses)
+        # UBERON -> the four numeric tissue levels. None disables the fallback
+        # and every study reads level 0, which is what happened for every run
+        # before this existed.
+        self._tissue_hierarchy = (
+            TissueHierarchy(tissue_hierarchy_path) if tissue_hierarchy_path else None
+        )
 
         self._vocab = vocab
         self._split = split
@@ -375,7 +399,7 @@ class EndometriosisDataset:
             # Coerce all obs-derived metadata once per study (vectorised), so
             # the per-cell loop below does array indexing rather than pandas
             # .iloc row access.
-            tissue_matrix = _tissue_level_matrix(adata.obs, name)
+            tissue_matrix = _tissue_level_matrix(adata.obs, name, self._tissue_hierarchy)
             age_arr = _age_vector(adata.obs)
             disease_arr = _disease_status_codes(adata.obs, name)
 

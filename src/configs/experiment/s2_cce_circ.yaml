@@ -1,0 +1,41 @@
+name: s2_cce_circ
+description: >
+  CCE on, circular penalty at 0.05, lr 2e-3, tissue conditioning live for the
+  first time. 18 epochs, ~21 h.
+
+  Combines the two arms that worked. s1_circ_low was the best run so far
+  (val_nb 0.3605) and revived 6 of 8 circular dimensions; s1_cce reached 0.3658
+  but killed the circular branch outright. Halving the circular penalty again
+  asks whether a lower price can keep that branch alive under CCE.
+
+  Three things change at once against s1_circ_low, so read it as "is this
+  better", not "which part did it". The disentangling arm is separate.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s2_cce_circ/
+seed: 24
+
+overrides:
+  training.max_epochs: 18
+  training.batch_size: 256
+  training.optimizer.lr: 2.0e-3
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 2
+
+  # Early stopping is live for the first time, and it scores val_nb rather than
+  # the composite total. `total` is dominated by dab, which bounces 0.4 to 2.5
+  # for reasons unrelated to progress — on s0_ref it would have fired at epoch 3
+  # and discarded the best model, which was at epoch 9.
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.1
+
+  # Half of s1_circ_low's 0.1.
+  model.loss.w_kl_vmf: 0.05
+
+  model.dab.lambda_dab: 0.0

@@ -169,6 +169,9 @@ class DataConfig:
     # renumbers study ids, this drops cells within the studies that remain, so
     # a study id is never invalidated by it.
     include_disease_statuses: List[str] = field(default_factory=list)
+    # UBERON -> tissue level mapping. None disables it and every cell
+    # reads level 0, which is what every run before this one did.
+    tissue_hierarchy_csv: Optional[str] = None
 
     def resolve_studies(self, root: str = ".") -> List[StudyConfig]:
         """Return the study list, loading from CSV if studies_csv is configured.
@@ -208,4 +211,5 @@ class DataConfig:
             include_disease_statuses=[
                 str(s) for s in d.get("include_disease_statuses", [])
             ],
+            tissue_hierarchy_csv=d.get("tissue_hierarchy_csv"),
         )

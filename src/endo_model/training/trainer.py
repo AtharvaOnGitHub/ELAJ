@@ -165,6 +165,14 @@ class Trainer:
                 if self.baseline_gate is not None:
                     self.baseline_gate.evaluate(epoch, val_metrics)
 
+                # Early stopping scores reconstruction, not the composite total.
+                # `total` is dominated by `dab`, which bounces between 0.4 and
+                # 2.5 epoch to epoch for reasons that have nothing to do with
+                # whether the model is improving — on run s0_ref it would have
+                # fired at epoch 3 and thrown away the best model, which was at
+                # epoch 9. `nb` falls monotonically enough to be a signal.
+                stop_metric = val_metrics.get("nb", val_loss)
+
                 if self.ckpt_manager is not None:
                     self.ckpt_manager.save(
                         self.model, self.optimizer,
@@ -181,7 +189,7 @@ class Trainer:
                     self.reporter.on_epoch_end(epoch, history, latents)
                 self._collector = None
 
-                if self.early_stopping.step(val_loss):
+                if self.early_stopping.step(stop_metric):
                     break
 
             if self.scheduler is not None:

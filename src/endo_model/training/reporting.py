@@ -217,6 +217,34 @@ class EpochReporter:
             f"latent_umap_epoch{epoch:03d}",
             lambda: latent_umap(coords, labels, epoch),
         )
+        self._draw_circular_umap(epoch, latents, labels)
+
+    def _draw_circular_umap(self, epoch: int, latents, labels) -> None:
+        """The same UMAP, over the circular branch instead of the Gaussian one.
+
+        Run s1_circ_low's Gaussian UMAP showed studies thoroughly mixed, which
+        reads as batch effects being gone — while val_dab sat at 0.405 against a
+        chance of 2.079, meaning the study classifier could still name the study
+        almost perfectly. Both cannot be true of the same latent.
+
+        The resolution is that the existing panel plots `mu_gauss` only, and
+        that run was the first with six live circular dimensions. The study
+        information had somewhere else to go. This panel is where to look for it.
+
+        Plotted from the angles directly rather than from (cos, sin) pairs: the
+        pair is how the model hands the angle to the decoder, but for a
+        neighbour embedding it doubles the width for no added information.
+        """
+        angles = latents.get("mu_angle")
+        if angles is None or angles.shape[1] < 2:
+            return
+        coords = safe_umap(angles, seed=self.seed)
+        if coords is None:
+            return
+        self._draw(
+            f"latent_umap_circular_epoch{epoch:03d}",
+            lambda: latent_umap(coords, labels, epoch, branch="Power Spherical"),
+        )
 
     def _draw(self, name: str, build) -> None:
         """Build and save one figure, swallowing anything it raises.

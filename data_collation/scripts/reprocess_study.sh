@@ -43,10 +43,12 @@ module purge
 module load bear-apps/2024a
 module load SciPy-bundle/2024.05-gfbf-2024a
 module load PyYAML/6.0.2-GCCcore-13.3.0
+module load Pillow/10.4.0-GCCcore-13.3.0
 module load tqdm/4.66.5-GCCcore-13.3.0
 module load h5py/3.12.1-foss-2024a
 module load anndata/0.10.9-foss-2024a
 module load R/4.5.0-gfbf-2024a
+module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate

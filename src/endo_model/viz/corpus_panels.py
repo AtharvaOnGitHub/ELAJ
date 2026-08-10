@@ -204,3 +204,311 @@ def cells_per_donor(per_donor: dict[str, list[int]]) -> plt.Figure:
     ], frameon=False, fontsize=8, loc="lower right")
     ax.grid(axis="x", alpha=0.4)
     return fig
+
+
+# ── QC, computed from the count matrix ───────────────────────────────────────
+
+
+def _ridgeline(ax, values_by_study: dict, log: bool, xlabel: str, title: str):
+    """Per-study distributions as stacked violins on a shared axis.
+
+    Violins rather than box plots: single-cell depth distributions are usually
+    bimodal or long-tailed, and a box plot reports five numbers that a bimodal
+    distribution is not described by.
+    """
+    studies = sorted(values_by_study, key=lambda s: -np.median(values_by_study[s]))
+    data = [np.asarray(values_by_study[s], dtype=float) for s in studies]
+    data = [np.log10(d[d > 0]) if log else d[np.isfinite(d)] for d in data]
+    data = [d for d in data if d.size]
+
+    parts = ax.violinplot(data, vert=False, showmedians=True, widths=0.9)
+    for body in parts["bodies"]:
+        body.set_facecolor(PALETTE.primary)
+        body.set_alpha(0.65)
+        body.set_linewidth(0)
+    for key in ("cmedians", "cmins", "cmaxes", "cbars"):
+        if key in parts:
+            parts[key].set_color(PALETTE.ink_soft)
+            parts[key].set_linewidth(1.0)
+
+    ax.set_yticks(range(1, len(studies) + 1), studies)
+    ax.set_xlabel(xlabel)
+    ax.set_title(title)
+    ax.grid(axis="x", alpha=0.4)
+    return ax
+
+
+def library_size(values_by_study: dict) -> plt.Figure:
+    """Total counts per cell, per study.
+
+    Sequencing depth is the largest technical difference between studies and it
+    sets what the reconstruction loss is scaled against — the model predicts a
+    composition and multiplies by each cell's own library size. A study an order
+    of magnitude deeper is a different measurement of the same biology.
+    """
+    fig, ax = plt.subplots(figsize=(9, 0.45 * len(values_by_study) + 3))
+    _ridgeline(ax, values_by_study, True, "log₁₀ total counts per cell",
+               "Sequencing depth")
+    return fig
+
+
+def genes_per_cell(values_by_study: dict) -> plt.Figure:
+    """Distinct genes detected per cell, per study.
+
+    Reads differently from depth: two studies can share a median library size
+    and differ here if one sequenced fewer cells more deeply, or if one used a
+    3' chemistry and the other full-length.
+    """
+    fig, ax = plt.subplots(figsize=(9, 0.45 * len(values_by_study) + 3))
+    _ridgeline(ax, values_by_study, False, "genes detected per cell",
+               "Genes per cell")
+    return fig
+
+
+def detection_rate(rates_by_study: dict) -> plt.Figure:
+    """Per gene, the fraction of cells in which it is detected.
+
+    The x axis is what "sparse" means concretely for this corpus. It also sets
+    what the reconstruction task is: a gene detected in 1% of cells is one the
+    model is mostly asked to predict zero for, and getting that right is easy —
+    which is why the highly-variable-gene loss is reported separately.
+    """
+    fig, ax = plt.subplots(figsize=(9, 5))
+    colors = PALETTE.categorical_cycle(max(len(rates_by_study), 1))
+    for (study, rates), color in zip(sorted(rates_by_study.items()), colors):
+        values = np.sort(np.asarray(rates, dtype=float))[::-1]
+        if not values.size:
+            continue
+        ax.plot(np.arange(1, values.size + 1), values, label=study,
+                color=color, linewidth=1.4)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("genes, ranked by detection rate")
+    ax.set_ylabel("fraction of cells detecting the gene")
+    ax.set_title("Gene detection rate")
+    ax.legend(frameon=False, fontsize=8, ncol=1, loc="upper left",
+              bbox_to_anchor=(1.02, 1.0))
+    ax.grid(alpha=0.4)
+    return fig
+
+
+# ── Coverage, completeness, provenance ───────────────────────────────────────
+
+
+def vocabulary_coverage(
+    measured: dict[str, int], vocab_size: int, panel_size: dict[str, int]
+) -> plt.Figure:
+    """How much of the model's gene vocabulary each study actually assayed.
+
+    The model marks any vocabulary gene a study did not measure as
+    did-not-sample rather than zero, and excludes it from that study's
+    reconstruction loss. This is the size of that exclusion, per study — the
+    grey remainder is what the model is never asked to predict for those cells.
+    """
+    studies = sorted(measured, key=lambda s: -measured[s])
+    covered = np.array([measured[s] for s in studies], float)
+    missing = vocab_size - covered
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.75 * len(studies) + 3), 5))
+    ax.bar(studies, covered, color=PALETTE.primary, label="in vocabulary (measured)")
+    ax.bar(studies, missing, bottom=covered, color=PALETTE.grid,
+           label="in vocabulary, not measured (DNS)")
+    ax.axhline(vocab_size, ls="--", lw=1.2, color=PALETTE.muted)
+    ax.set_ylabel("genes")
+    ax.set_title(f"Vocabulary coverage per study (vocabulary = {vocab_size:,} genes)")
+    ax.tick_params(axis="x", rotation=60)
+    for tick in ax.get_xticklabels():
+        tick.set_ha("right")
+    for i, study in enumerate(studies):
+        ax.text(i, covered[i] / 2, f"{covered[i] / vocab_size:.0%}",
+                ha="center", va="center", fontsize=8, color="white")
+    ax.legend(frameon=False, fontsize=8, loc="lower right")
+    return fig
+
+
+def metadata_completeness(present: dict[str, dict]) -> plt.Figure:
+    """Fraction of cells with a usable value, per study and metadata field.
+
+    A field is only usable where it is present everywhere it is needed. This
+    says which analyses the corpus can support at all: a covariate missing from
+    half the studies cannot be conditioned on.
+    """
+    studies = sorted(present)
+    fields = sorted({f for per in present.values() for f in per})
+    matrix = np.array(
+        [[present[s].get(f, 0.0) for f in fields] for s in studies], dtype=float
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(1.1 * len(fields) + 5, 0.45 * len(studies) + 3)
+    )
+    im = ax.imshow(matrix, vmin=0, vmax=1, cmap="Blues", aspect="auto")
+    ax.set_xticks(range(len(fields)), fields, rotation=25, ha="right")
+    ax.set_yticks(range(len(studies)), studies)
+    ax.set_title("Metadata completeness")
+    for i in range(len(studies)):
+        for j in range(len(fields)):
+            ax.text(j, i, f"{matrix[i, j]:.0%}", ha="center", va="center",
+                    fontsize=8,
+                    color="white" if matrix[i, j] > 0.5 else PALETTE.ink)
+    fig.colorbar(im, ax=ax, shrink=0.7, label="fraction of cells")
+    return fig
+
+
+def age_distribution(ages_by_study: dict) -> plt.Figure:
+    """Donor age per study, one point per donor.
+
+    Per donor, not per cell — a study with 200k cells from six donors would
+    otherwise dominate an age histogram with six distinct values.
+    """
+    studies = sorted(ages_by_study, key=lambda s: -len(ages_by_study[s]))
+    fig, ax = plt.subplots(figsize=(9, 0.45 * len(studies) + 3))
+    rng = np.random.default_rng(24)
+
+    for i, study in enumerate(studies):
+        values = np.asarray(ages_by_study[study], dtype=float)
+        values = values[np.isfinite(values)]
+        if not values.size:
+            ax.text(0.01, i, "no age recorded", transform=ax.get_yaxis_transform(),
+                    va="center", fontsize=8, color=PALETTE.muted)
+            continue
+        jitter = (rng.random(values.shape) - 0.5) * 0.3
+        ax.scatter(values, np.full(values.shape, i) + jitter, s=26, alpha=0.75,
+                   linewidths=0, color=PALETTE.primary)
+        ax.scatter([np.median(values)], [i], marker="|", s=340, linewidths=2,
+                   color=PALETTE.bad, zorder=3)
+
+    ax.set_yticks(range(len(studies)), studies)
+    ax.set_xlabel("donor age (years)")
+    ax.set_title("Donor age")
+    ax.grid(axis="x", alpha=0.4)
+    return fig
+
+
+# ── Sample size and structure ────────────────────────────────────────────────
+
+
+def donors_by_status(counts: dict[str, dict]) -> plt.Figure:
+    """Donors, not cells, per study and disease status.
+
+    Cells from one donor are not independent observations of a disease. This is
+    the denominator that statistical claims about disease actually rest on, and
+    it is typically two to three orders of magnitude smaller than the cell count
+    beside it.
+    """
+    studies = sorted(counts, key=lambda s: -sum(counts[s].values()))
+    statuses = sorted({k for per in counts.values() for k in per})
+    colors = PALETTE.categorical_cycle(max(len(statuses), 1))
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(studies) + 4), 5))
+    bottom = np.zeros(len(studies))
+    for status, color in zip(statuses, colors):
+        values = np.array([counts[s].get(status, 0) for s in studies], float)
+        ax.bar(studies, values, bottom=bottom, label=str(status), color=color)
+        bottom += values
+    for i, total in enumerate(bottom):
+        ax.text(i, total, str(int(total)), ha="center", va="bottom", fontsize=8)
+
+    ax.set_ylabel("donors")
+    ax.set_title("Donors by disease status")
+    ax.tick_params(axis="x", rotation=60)
+    for tick in ax.get_xticklabels():
+        tick.set_ha("right")
+    ax.legend(frameon=False, fontsize=8, loc="upper right")
+    return fig
+
+
+def corpus_concentration(cells: dict[str, int], donors: dict[str, int]) -> plt.Figure:
+    """Cumulative share of the corpus as studies are added largest-first.
+
+    A curve that reaches 80% in three studies is a corpus whose "1.9 million
+    cells" describes three experiments. Both curves are drawn because they can
+    disagree: the largest studies by cell count are not always the largest by
+    donor count.
+    """
+    by_cells = sorted(cells, key=lambda s: -cells[s])
+    cell_share = np.cumsum([cells[s] for s in by_cells]) / max(sum(cells.values()), 1)
+    donor_total = max(sum(donors.values()), 1)
+    donor_share = np.cumsum([donors.get(s, 0) for s in by_cells]) / donor_total
+    x = np.arange(1, len(by_cells) + 1)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(x, cell_share, marker="o", color=PALETTE.primary, label="cells")
+    ax.plot(x, donor_share, marker="s", color=PALETTE.secondary, label="donors")
+    ax.plot(x, x / len(by_cells), ls="--", lw=1.2, color=PALETTE.muted,
+            label="even contribution")
+    ax.set_xticks(x, by_cells, rotation=60, ha="right")
+    ax.set_ylabel("cumulative share of corpus")
+    ax.set_ylim(0, 1.02)
+    ax.set_title("Corpus concentration (studies added largest-first)")
+    ax.legend(frameon=False, fontsize=9, loc="lower right")
+    ax.grid(alpha=0.4)
+    return fig
+
+
+def study_site_matrix(counts: dict[str, dict]) -> plt.Figure:
+    """Which studies contribute which anatomical sites.
+
+    Read the zeros. A site present in one study only cannot be separated from
+    that study's batch effect by any method, because there is no second source
+    of it to compare against.
+    """
+    studies = sorted(counts)
+    sites = sorted({s for per in counts.values() for s in per})
+    matrix = np.array(
+        [[counts[st].get(si, 0) for si in sites] for st in studies], dtype=float
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(0.9 * len(sites) + 5, 0.45 * len(studies) + 3)
+    )
+    shown = np.where(matrix > 0, matrix, np.nan)
+    im = ax.imshow(np.log10(shown), cmap="Blues", aspect="auto")
+    ax.set_xticks(range(len(sites)), sites, rotation=35, ha="right")
+    ax.set_yticks(range(len(studies)), studies)
+    ax.set_title("Cells by study and anatomical site")
+    for i in range(len(studies)):
+        for j in range(len(sites)):
+            value = matrix[i, j]
+            ax.text(j, i, f"{int(value):,}" if value else "—", ha="center",
+                    va="center", fontsize=7,
+                    color="white" if value and np.log10(value) > np.nanmax(np.log10(shown)) * 0.65
+                    else PALETTE.ink)
+    fig.colorbar(im, ax=ax, shrink=0.7, label="log₁₀ cells")
+    return fig
+
+
+def sampling_hierarchy(
+    cells: dict[str, int], samples: dict[str, int], donors: dict[str, int]
+) -> plt.Figure:
+    """Cells, samples and donors per study on one log axis.
+
+    The corpus is nested — cells within samples within donors within studies —
+    and every level up is a smaller and more independent unit. Drawing the three
+    together shows how far apart they are: the gap between the cell bar and the
+    donor bar is the factor by which cell counts overstate sample size.
+    """
+    studies = sorted(cells, key=lambda s: -cells[s])
+    y = np.arange(len(studies))
+    height = 0.27
+
+    fig, ax = plt.subplots(figsize=(9, 0.62 * len(studies) + 3))
+    for offset, (values, label, color) in zip(
+        (height, 0.0, -height),
+        (
+            (cells, "cells", PALETTE.primary),
+            (samples, "samples", PALETTE.secondary),
+            (donors, "donors", PALETTE.muted),
+        ),
+    ):
+        widths = [max(values.get(s, 0), 0.9) for s in studies]
+        ax.barh(y + offset, widths, height=height, label=label, color=color)
+
+    ax.set_xscale("log")
+    ax.set_yticks(y, studies)
+    ax.invert_yaxis()
+    ax.set_xlabel("count (log scale)")
+    ax.set_title("Sampling hierarchy: cells, samples, donors")
+    ax.legend(frameon=False, fontsize=9, loc="lower right")
+    ax.grid(axis="x", alpha=0.4)
+    return fig

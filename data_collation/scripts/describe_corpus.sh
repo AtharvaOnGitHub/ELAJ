@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --qos=bbdefault
 #SBATCH --constraint=icelake
-#SBATCH --time=00:40:00
+#SBATCH --time=03:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=64G
+#SBATCH --mem=120G
 #SBATCH --job-name=elaj_corpus
 #SBATCH --output=logs/corpus_%j.log
 

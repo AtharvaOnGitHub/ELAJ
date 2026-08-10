@@ -18,12 +18,25 @@ different model would bucket the same terms differently. Keeping it model-side
 also means the h5ad files do not need regenerating, which matters when the
 alternative is re-running collation for 13 studies to add four integer columns.
 
-**Unverified terms map to 0 and say so.** Three UBERON ids in the corpus
-(0007136, 0007111, 8480043 — 57,924 cells, all in fonseca_2023) are marked
-UNVERIFIED in the CSV because I could not confirm what they denote. Guessing
-anatomy would put wrong structure into the decoder's conditioning and nothing
-downstream would flag it. They read as "unknown", exactly like a missing value,
-and the loader logs them once per study.
+**How the four levels are meant to be used.** The hierarchy exists so that a
+site does not have to be either "peritoneum" or "uterosacral ligament" — it is
+both, at different levels. The three deep-lesion sites in fonseca_2023 share
+compartment 2, organ 3 and tissue_type 4 (all peritoneum) and differ only at
+microsite:
+
+    UBERON:0002358  peritoneum, site unspecified   2 / 3 / 4 / 0
+    UBERON:0007136  uterosacral ligament           2 / 3 / 4 / 1
+    UBERON:0007111  rectouterine pouch             2 / 3 / 4 / 2
+    UBERON:8480043  pelvic side wall               2 / 3 / 4 / 3
+
+`TissueHierarchyEncoder` sums one embedding per level, so those four sites share
+three of their four vectors. A model that has learned nothing useful about
+microsite still knows they are peritoneal; one that has learned the distinction
+can use it. Flattening them into four unrelated `tissue_type` codes would throw
+that away and make each site start from scratch.
+
+The same applies upward: endometrium and myometrium share compartment and organ
+(uterus) and separate at tissue_type.
 """
 
 from __future__ import annotations
@@ -41,6 +54,9 @@ logger = logging.getLogger(__name__)
 
 ONTOLOGY_COLUMN = "tissue_ontology_term_id"
 UNVERIFIED = "UNVERIFIED"
+"""Label for a term whose anatomy could not be confirmed. Reads as unknown
+rather than being guessed at — wrong anatomy in the decoder's conditioning
+would not surface anywhere downstream."""
 
 
 @dataclass(frozen=True)

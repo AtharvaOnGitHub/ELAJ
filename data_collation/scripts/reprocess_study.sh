@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --qos=bbdefault
+#SBATCH --constraint=icelake
 #SBATCH --time=6:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -20,6 +21,19 @@
 #
 # --skip-download: raw files are already on disk.
 # --force:         the processed h5ad exists and would otherwise be skipped.
+#
+# No PyTorch module, deliberately. This script used to copy train.sh's module
+# list, which loads PyTorch/2.7.1-foss-2024a-CUDA-12.6.0 — a CUDA build that
+# lives in the GPU nodes' software stack and not on the default partition. The
+# job died at module-load time complaining about a CUDA module it had no use
+# for: `grep -r torch data_collation/` returns nothing.
+#
+# R stays. rds_loader.py shells out to Rscript, which duempelmann_2026 and the
+# other RDS-sourced studies need. wang_2022 is mtx_per_sample and does not, but
+# the script has to work for any study named on the command line.
+#
+# --constraint=icelake pins the architecture the rest of this project runs on;
+# the 2024a module tree is built per architecture.
 
 set -euo pipefail
 
@@ -27,21 +41,20 @@ STUDY="${1:?usage: sbatch scripts/reprocess_study.sh <study_name>}"
 
 module purge
 module load bear-apps/2024a
-module load PyTorch/2.7.1-foss-2024a-CUDA-12.6.0
-module load R/4.5.0-gfbf-2024a
-module load PyYAML/6.0.2-GCCcore-13.3.0
 module load SciPy-bundle/2024.05-gfbf-2024a
+module load PyYAML/6.0.2-GCCcore-13.3.0
 module load tqdm/4.66.5-GCCcore-13.3.0
-module load anndata/0.10.9-foss-2024a
 module load h5py/3.12.1-foss-2024a
-module load Pillow/10.4.0-GCCcore-13.3.0
+module load anndata/0.10.9-foss-2024a
 module load R/4.5.0-gfbf-2024a
-module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
 cd /rds/homes/a/axw1008/axw1008/data_collation
+
+python -c "import anndata, pandas, numpy, scipy, yaml; print('imports ok')"
+command -v Rscript >/dev/null && echo "Rscript ok" || echo "WARNING: no Rscript — RDS studies will fail"
 
 echo "Reprocessing ${STUDY} ..."
 python scripts/run_pipeline.py \

@@ -12,7 +12,7 @@
 
 # Tabulates and plots what the corpus carries in its metadata columns.
 #
-#   sbatch data_collation/scripts/describe_metadata.sh configs/experiment/dab_off.yaml
+#   sbatch data_collation/scripts/describe_metadata.sh configs/experiment/s1_circ_low.yaml
 #
 # No PyTorch, and that is deliberate rather than incidental.  The first version
 # of this script copied train.sh's module list, which loads
@@ -33,10 +33,17 @@
 # If the module loads still fail, the reliable fallback is to run it as a GPU
 # job with train.sh's exact module list — it wastes a card for five minutes but
 # uses a stack known to work.
+#
+# No --include-excluded. That flag bypasses exclude_studies so a study dropped
+# from the corpus still appears, which was useful while deciding whether an
+# exclusion was right. zhang_2022 (chorionic villus / decidua) is settled: it is
+# not endometrial tissue and is out of scope permanently, so it should not be in
+# a figure describing what the atlas contains. Pass the flag by hand if you ever
+# need to look at it again.
 
 set -euo pipefail
 
-CONFIG="${1:-configs/experiment/dab_off.yaml}"
+CONFIG="${1:-configs/experiment/s1_circ_low.yaml}"
 
 module purge
 module load bear-apps/2024a
@@ -53,4 +60,4 @@ cd /rds/homes/a/axw1008/axw1008/src
 
 export PYTHONUNBUFFERED=1
 python -u -c "import anndata, pandas, numpy, matplotlib, yaml; print('imports ok')"
-python -u -m scripts.describe_metadata --config "${CONFIG}" --root . --include-excluded
+python -u -m scripts.describe_metadata --config "${CONFIG}" --root .

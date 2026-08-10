@@ -262,15 +262,18 @@ class TestHistoryBreakdown:
         assert all(0.0 <= b <= 1.0 for b in history["train_beta_kl"])
 
 
-def test_clip_covers_every_optimised_parameter():
-    """The DAB classifier lives on CompositeLoss, not on the model.
+def test_clip_partitions_every_optimised_parameter():
+    """Two clip groups, together covering everything the optimizer updates.
 
-    train.py optimises `model.parameters() + composite_loss.parameters()`, but
-    the clip used to name `model.parameters()` alone, leaving the study
-    classifier's step size unbounded. Run dab_soft diverged to val_dab 18.51
-    against a chance of 2.079 with a *weaker* reversal than the run that sat at
-    chance. Reading the list off the optimizer means a head added later cannot
-    reintroduce it.
+    One group would let the DAB classifier decide how far the model may step:
+    `clip_grad_norm_` takes ONE norm over everything given to it and scales
+    everything by the same factor. In run s0_ref |g| tracked `dab` almost
+    linearly — dab 0.048 -> |g| 0.389, dab 3.124 -> |g| 8.113 — so at clip 1.0
+    the model's updates were cut 2-8x by a term that, at lambda_dab = 0, sends
+    the encoder no gradient at all.
+
+    Partitioning off the optimizer rather than off composite_loss means a head
+    added later is clipped without anyone remembering to name it.
     """
     import torch.nn as nn
     from torch.optim import AdamW
@@ -287,7 +290,12 @@ def test_clip_covers_every_optimised_parameter():
         composite_loss=None, optimizer=optimizer, scheduler=None,
         config=TrainingConfig(),
     )
-    clipped = {id(p) for p in trainer._clipped_parameters}
-    for name, param in extra.named_parameters():
-        assert id(param) in clipped, f"classifier {name} is optimised but not clipped"
-    assert len(clipped) == len(list(model.parameters())) + len(list(extra.parameters()))
+    model_ids = {id(p) for p in trainer._model_parameters}
+    loss_ids = {id(p) for p in trainer._loss_parameters}
+
+    assert model_ids == {id(p) for p in model.parameters()}
+    assert loss_ids == {id(p) for p in extra.parameters()}
+    assert not (model_ids & loss_ids), "a parameter is in both clip groups"
+    assert len(model_ids | loss_ids) == len(
+        list(model.parameters())
+    ) + len(list(extra.parameters())), "a parameter is optimised but not clipped"

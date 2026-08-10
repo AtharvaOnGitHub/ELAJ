@@ -115,16 +115,18 @@ class Trainer:
         #
         # Clipping them separately gives each its own budget. |g| now reports
         # the model's norm, which is the one worth watching.
-        loss_params = {id(p) for p in composite_loss.parameters()}
-        self._model_parameters = [
+        # Partitioned off the optimizer by whether a parameter belongs to the
+        # model, rather than by asking composite_loss what it owns. Anything
+        # optimised that is not the model — the DAB classifier today, a head
+        # added later — lands in the second group without being named here.
+        model_params = {id(param) for param in model.parameters()}
+        optimised = [
             param
             for group in optimizer.param_groups
             for param in group["params"]
-            if id(param) not in loss_params
         ]
-        self._loss_parameters = [
-            param for param in composite_loss.parameters() if param.requires_grad
-        ]
+        self._model_parameters = [p for p in optimised if id(p) in model_params]
+        self._loss_parameters = [p for p in optimised if id(p) not in model_params]
 
         self.global_step = 0
         self.current_epoch = 0

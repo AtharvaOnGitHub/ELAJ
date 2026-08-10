@@ -19,16 +19,6 @@ def test_endometrium_maps_to_something(hierarchy):
     assert any(hierarchy.levels_for("UBERON:0001295"))
 
 
-def test_endometrium_and_myometrium_share_an_organ_but_not_a_tissue(hierarchy):
-    """Both are uterus; they are different tissues within it. If the hierarchy
-    cannot express that, it is not a hierarchy."""
-    endo = hierarchy.levels_for("UBERON:0001295")
-    myo = hierarchy.levels_for("UBERON:0001296")
-    assert endo[0] == myo[0]      # same compartment
-    assert endo[1] == myo[1]      # same organ
-    assert endo[2] != myo[2]      # different tissue type
-
-
 def test_distinct_organs_are_distinct(hierarchy):
     organs = {
         hierarchy.levels_for(t)[1]
@@ -37,11 +27,42 @@ def test_distinct_organs_are_distinct(hierarchy):
     assert len(organs) == 3, "endometrium, ovary and peritoneum collapsed together"
 
 
-def test_unverified_terms_read_as_unknown(hierarchy):
+def test_peritoneal_sites_share_everything_above_microsite(hierarchy):
+    """The reason there are four levels rather than one flat code.
+
+    uterosacral ligament, rectouterine pouch and pelvic side wall are all
+    peritoneal. TissueHierarchyEncoder sums one embedding per level, so sharing
+    compartment/organ/tissue_type gives them three of four vectors in common: a
+    model that has learned nothing about microsite still knows they are
+    peritoneal. Flattening them into unrelated tissue_type codes would make each
+    site start from scratch.
+    """
+    peritoneum = hierarchy.levels_for("UBERON:0002358")
+    sites = {
+        term: hierarchy.levels_for(term)
+        for term in ("UBERON:0007136", "UBERON:0007111", "UBERON:8480043")
+    }
+
+    for term, levels in sites.items():
+        assert levels[:3] == peritoneum[:3], f"{term} is not grouped with peritoneum"
+        assert levels[3] != 0, f"{term} has no microsite of its own"
+
+    microsites = [levels[3] for levels in sites.values()]
+    assert len(set(microsites)) == len(microsites), "two sites share a microsite"
+
+
+def test_uterine_tissues_share_organ_but_split_at_tissue_type(hierarchy):
+    """The same sharing one level up."""
+    endo = hierarchy.levels_for("UBERON:0001295")
+    myo = hierarchy.levels_for("UBERON:0001296")
+    assert endo[:2] == myo[:2]
+    assert endo[2] != myo[2]
+
+
+def test_an_unmapped_term_reads_as_unknown(hierarchy):
     """Guessing anatomy would put wrong structure into the decoder's
     conditioning and nothing downstream would flag it."""
-    for term in ("UBERON:0007136", "UBERON:0007111", "UBERON:8480043"):
-        assert hierarchy.levels_for(term) == (0, 0, 0, 0)
+    assert hierarchy.levels_for("UBERON:0000000") == (0, 0, 0, 0)
 
 
 def test_an_unseen_term_is_unknown_not_an_error(hierarchy):

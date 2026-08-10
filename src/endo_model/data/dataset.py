@@ -56,6 +56,81 @@ _TISSUE_LEVEL_COLUMNS = (
 )
 
 
+def _assign_splits(
+    raw_study_data: list,
+    val_fraction: float,
+    test_fraction: float,
+    seed: int,
+) -> dict[str, str]:
+    """Assign each patient to train/val/test, stratified by study.
+
+    Every study contributes to every split in proportion, which the previous
+    version did not guarantee. That one pooled all patients, shuffled once and
+    sliced — so a study with few patients could land entirely in one split by
+    chance. It did: li_2025 had 0 validation cells and garcia_alonso_2021_c had
+    0, meaning those studies trained without ever being validated.
+
+    A patient seen in an earlier study keeps that assignment. Patient ids are
+    study-scoped in this corpus so it should not arise, but assigning the same
+    patient to two splits would put their cells on both sides of the wall and
+    the leak would be invisible.
+
+    Studies too small to divide (fewer than three patients) go entirely to
+    train, with a warning. A one-patient study cannot be split three ways, and
+    silently giving it a validation set of its only patient would leave it with
+    no training data at all.
+
+    Args:
+        raw_study_data:  (study_id, name, adata, patient_ids) per study.
+        val_fraction:    Share of each study's patients for validation.
+        test_fraction:   The same for test.
+        seed:            Base RNG seed; the study id is added so two studies do
+                         not receive the same permutation.
+
+    Returns:
+        patient id -> "train" | "val" | "test".
+    """
+    assignments: dict[str, str] = {}
+
+    for study_id, name, _adata, study_patients in raw_study_data:
+        patients = sorted(set(study_patients) - set(assignments))
+        if not patients:
+            continue
+
+        n = len(patients)
+        if n < 3:
+            for patient in patients:
+                assignments[patient] = "train"
+            logger.warning(
+                "Study '%s': %d patient(s) — too few to split, all to train. "
+                "It will train without ever being validated.",
+                name, n,
+            )
+            continue
+
+        rng = np.random.default_rng(seed + study_id)
+        order = [patients[i] for i in rng.permutation(n)]
+
+        n_test = max(1, math.floor(n * test_fraction))
+        n_val = max(1, math.floor(n * val_fraction))
+        n_train = n - n_val - n_test
+
+        for i, patient in enumerate(order):
+            if i < n_train:
+                assignments[patient] = "train"
+            elif i < n_train + n_val:
+                assignments[patient] = "val"
+            else:
+                assignments[patient] = "test"
+
+        logger.info(
+            "Study '%s': %d patients -> train=%d val=%d test=%d",
+            name, n, n_train, n_val, n_test,
+        )
+
+    return assignments
+
+
 def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
     """Build an (n_cells, N_TISSUE_LEVELS) int64 matrix of tissue hierarchy codes.
 
@@ -345,24 +420,10 @@ class EndometriosisDataset:
             all_patient_ids.extend(study_patients)
             raw_study_data.append((study_id, name, adata, study_patients))
 
-        # Build patient → split assignment
-        unique_patients = sorted(set(all_patient_ids))
-        rng = np.random.default_rng(seed)
-        perm = rng.permutation(len(unique_patients))
-
-        n_test = max(1, math.floor(len(unique_patients) * test_fraction))
-        n_val = max(1, math.floor(len(unique_patients) * val_fraction))
-        n_train = len(unique_patients) - n_val - n_test
-
-        split_assignments: dict[str, str] = {}
-        for i, idx in enumerate(perm):
-            patient = unique_patients[idx]
-            if i < n_train:
-                split_assignments[patient] = "train"
-            elif i < n_train + n_val:
-                split_assignments[patient] = "val"
-            else:
-                split_assignments[patient] = "test"
+        # Build patient → split assignment, stratified by study.
+        split_assignments = _assign_splits(
+            raw_study_data, val_fraction, test_fraction, seed
+        )
 
         logger.info(
             "Patient split (seed=%d): train=%d, val=%d, test=%d",

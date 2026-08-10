@@ -49,6 +49,7 @@ class LatentCollector:
 
     max_cells: int = 20000
     n_studies: int = 1
+    seed: int = 24
     mu_gauss: list = field(default_factory=list)
     mu_angle: list = field(default_factory=list)
     kappa: list = field(default_factory=list)
@@ -58,55 +59,55 @@ class LatentCollector:
     _n: int = 0
     _per_study: dict = field(default_factory=dict)
 
-    @property
-    def per_study_quota(self) -> int:
-        """How many cells any one study may contribute.
-
-        PerStudyBatchSampler emits every batch of one study before moving to
-        the next, so taking the first `max_cells` cells in loader order takes
-        them from whichever studies happen to come first. Run 50132670's
-        epoch-0 UMAP was 11,008 cells of shih_2022 and 8,992 of tan_2022 —
-        two studies out of eleven — and because those two happen to be
-        entirely eutopic and entirely ectopic respectively, the "by disease
-        status" panel was an exact relabelling of the "by study" panel. Every
-        conclusion the figure invites was an artefact of the order the loader
-        ran in.
-        """
-        return max(1, self.max_cells // max(self.n_studies, 1))
-
-    @property
-    def full(self) -> bool:
-        """True once no study can contribute anything further."""
-        return self._n >= self.max_cells
-
     def add(self, output: dict, batch: dict) -> None:
-        """Record one batch's latents, up to this study's quota."""
-        if self.full:
-            return
-        study = int(batch["study_id"][0].item())
-        used = self._per_study.get(study, 0)
-        room = min(self.max_cells - self._n, self.per_study_quota - used)
-        if room <= 0:
-            return
-        take = min(room, int(output["mu_gauss"].shape[0]))
-        self._per_study[study] = used + take
+        """Record every cell. Subsampling happens in `stacked`.
 
+        Deliberately unbounded. The previous version kept a per-study quota and
+        filled it from whichever batches arrived first, and validation is not
+        shuffled — so a study's sample was whatever sat at the top of its file.
+        fonseca_2023 carries eight anatomical sites and contributed cells from
+        one or two of them; bladder and rectum never appeared in any UMAP.
+
+        Holding everything costs about 31 MB for a 163k-cell split (48 floats
+        per cell), which is nothing next to a subsample that misrepresents the
+        data it is drawn from.
+        """
         def grab(t: Tensor) -> np.ndarray:
-            return t[:take].detach().float().cpu().numpy()
+            return t.detach().float().cpu().numpy()
 
         self.mu_gauss.append(grab(output["mu_gauss"]))
         self.mu_angle.append(grab(output["mu_angle"]))
         self.kappa.append(grab(output["kappa"]))
-        self.study_id.append(batch["study_id"][:take].cpu().numpy())
-        self.disease.append(batch["disease_status"][:take].cpu().numpy())
-        self.tissue.append(batch["tissue_levels"][:take].cpu().numpy())
-        self._n += take
+        self.study_id.append(batch["study_id"].cpu().numpy())
+        self.disease.append(batch["disease_status"].cpu().numpy())
+        self.tissue.append(batch["tissue_levels"].cpu().numpy())
+        self._n += int(output["mu_gauss"].shape[0])
+
+    def _subsample(self, study_id: np.ndarray) -> np.ndarray:
+        """Row indices for an even, random sample across studies.
+
+        Even because otherwise duempelmann_2026 and fonseca_2023 are 70% of the
+        validation split between them and a UMAP would mostly describe those
+        two. Random within each study because taking the first N of anything
+        sorted by sample takes one sample.
+        """
+        rng = np.random.default_rng(self.seed)
+        studies = np.unique(study_id)
+        quota = max(1, self.max_cells // max(len(studies), 1))
+
+        keep = []
+        for study in studies:
+            rows = np.flatnonzero(study_id == study)
+            if len(rows) > quota:
+                rows = rng.choice(rows, size=quota, replace=False)
+            keep.append(rows)
+        return np.sort(np.concatenate(keep))
 
     def stacked(self) -> dict[str, np.ndarray] | None:
-        """Concatenate everything collected, or None if nothing was."""
+        """Everything collected, evenly subsampled across studies."""
         if not self.mu_gauss:
             return None
-        return {
+        full = {
             "mu_gauss": np.concatenate(self.mu_gauss),
             "mu_angle": np.concatenate(self.mu_angle),
             "kappa": np.concatenate(self.kappa),
@@ -114,6 +115,8 @@ class LatentCollector:
             "disease": np.concatenate(self.disease),
             "tissue": np.concatenate(self.tissue),
         }
+        rows = self._subsample(full["study_id"])
+        return {name: values[rows] for name, values in full.items()}
 
 
 class EpochReporter:
@@ -169,7 +172,8 @@ class EpochReporter:
 
     def new_collector(self) -> LatentCollector:
         return LatentCollector(
-            max_cells=self.max_latent_cells, n_studies=self.n_studies
+            max_cells=self.max_latent_cells, n_studies=self.n_studies,
+            seed=self.seed,
         )
 
     def on_epoch_end(

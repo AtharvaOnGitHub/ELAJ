@@ -172,8 +172,9 @@ def main() -> int:
     collector = reporter.new_collector()
     precision = PrecisionPolicy(train_cfg.precision)
 
-    # Stop as soon as the collector is full. A full validation pass would be
-    # 163k cells to fill a 20k subsample.
+    # The whole split. The collector subsamples evenly across studies at the
+    # end, so stopping early would reintroduce exactly the bias this run exists
+    # to avoid — the first N cells of a study are one sample, not a sample.
     with torch.no_grad():
         for batch in loader:
             batch = {
@@ -182,8 +183,6 @@ def main() -> int:
             with precision.autocast(device):
                 output = model(batch)
             collector.add(output, batch)
-            if collector.full:
-                break
 
     latents = collector.stacked()
     if latents is None:

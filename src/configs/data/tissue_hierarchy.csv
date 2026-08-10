@@ -6,6 +6,6 @@ UBERON:0002358,peritoneum,2,3,4,0,
 UBERON:0001255,urinary bladder,3,4,5,0,
 UBERON:0001052,rectum,4,5,6,0,
 UBERON:0007106,chorionic villus,5,6,7,0,zhang_2022 only; excluded from the corpus
-UBERON:0007136,UNVERIFIED,0,0,0,0,"24759 cells in fonseca_2023 — look up and fill in"
-UBERON:0007111,UNVERIFIED,0,0,0,0,"21680 cells in fonseca_2023 — look up and fill in"
-UBERON:8480043,UNVERIFIED,0,0,0,0,"11485 cells in fonseca_2023 — look up and fill in"
+UBERON:0007136,uterosacral ligament,2,3,8,0,"fonseca_2023 anatomic location: left/right uterosacral ligament"
+UBERON:0007111,rectouterine pouch (cul-de-sac),2,3,9,0,"fonseca_2023: anterior/posterior cul-de-sac"
+UBERON:8480043,pelvic side wall,2,3,10,0,"fonseca_2023: left/right pelvic side wall"

@@ -102,24 +102,28 @@ class Trainer:
         self.baseline_gate = baseline_gate
         self._collector = None
 
-        # Everything the optimizer updates, so everything the optimizer updates
-        # is clipped.  This used to be `model.parameters()`, which silently
-        # excluded the DAB study classifier: it lives on CompositeLoss, and
-        # train.py passes `model.parameters() + composite_loss.parameters()` to
-        # AdamW.  The classifier was therefore optimised without a bound on its
-        # step size.
+        # Two clip groups, not one. `clip_grad_norm_` computes ONE norm over
+        # everything handed to it and scales everything by the same factor — so
+        # a single call over model + DAB classifier lets the classifier's
+        # gradient decide how far the model is allowed to step.
         #
-        # Run dab_soft is what that costs.  At lambda_dab 0.2 — a *fifth* of the
-        # scale that sat at chance — val_dab went 4.50, 18.51, 10.63 against a
-        # chance of 2.079.  A weaker reversal lets the classifier grow its
-        # logits unopposed, and an unclipped classifier has nothing to stop it;
-        # when the encoder does move, those confident predictions are confidently
-        # wrong and the cross-entropy is enormous.  Reading the parameter list
-        # off the optimizer means a head added later cannot reintroduce this.
-        self._clipped_parameters = [
+        # It does. In run s0_ref, |g| tracks `dab` almost linearly: dab 0.048 ->
+        # |g| 0.389, dab 2.004 -> |g| 5.021, dab 3.124 -> |g| 8.113. With the
+        # clip at 1.0 that scales the model's updates down 2x on a typical step
+        # and 8x on a high-dab one — an unintended learning-rate cut driven by a
+        # term that, at lambda_dab = 0, sends the encoder no gradient at all.
+        #
+        # Clipping them separately gives each its own budget. |g| now reports
+        # the model's norm, which is the one worth watching.
+        loss_params = {id(p) for p in composite_loss.parameters()}
+        self._model_parameters = [
             param
             for group in optimizer.param_groups
             for param in group["params"]
+            if id(param) not in loss_params
+        ]
+        self._loss_parameters = [
+            param for param in composite_loss.parameters() if param.requires_grad
         ]
 
         self.global_step = 0
@@ -256,14 +260,20 @@ class Trainer:
             # steps before anything goes non-finite.  Discarding it threw that
             # away, and clipping hides the climb from the loss curve.
             grad_norm = nn.utils.clip_grad_norm_(
-                self._clipped_parameters, self.config.grad_clip_norm
+                self._model_parameters, self.config.grad_clip_norm
+            )
+            # The classifier gets its own budget rather than sharing the model's.
+            loss_grad_norm = nn.utils.clip_grad_norm_(
+                self._loss_parameters, self.config.grad_clip_norm
             )
 
             # A non-finite gradient must not reach the optimiser: AdamW would
             # write NaN weights, and every later step would then fail on data
             # that is perfectly healthy.  Dropping the update leaves the model
             # exactly as it was before the batch.
-            if self.monitor.check_gradients(batch, grad_norm, losses):
+            # Guard on both: a non-finite gradient anywhere must not reach AdamW.
+            finite = torch.isfinite(grad_norm) & torch.isfinite(loss_grad_norm)
+            if finite and self.monitor.check_gradients(batch, grad_norm, losses):
                 self.optimizer.step()
             self.global_step += 1
 
@@ -292,7 +302,7 @@ class Trainer:
             # Latents are collected here rather than in a second pass: the
             # forward has already run, and re-running it would both cost an
             # extra pass and sample different dropout.
-            if self._collector is not None and not self._collector.full:
+            if self._collector is not None:
                 self._collector.add(output, batch)
 
         return val_logger.epoch_averages()

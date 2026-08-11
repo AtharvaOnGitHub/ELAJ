@@ -39,7 +39,7 @@ overrides:
   training.diagnostics.log_every: 50
   training.diagnostics.latent_every: 4
   training.max_epochs: 25
-  training.early_stop_patience: 8
+  training.early_stop_patience: 7
   training.early_stop_warmup_epochs: 5
 
   # The narrowest test of the mechanism. Adversary off so nothing actively
@@ -54,9 +54,15 @@ overrides:
   #
   # Watch kl_vmf specifically. If it climbs here and nowhere else, free_bits is
   # the whole answer and the next wave is a free_bits sweep.
+  #
+  # lambda 1e-3, not 0: a nudge rather than a push. Encoder pressure is
+  # lambda * w_dab = 5e-4, one hundredth of the 0.05 that emptied R2's latent.
+  # Expect it to behave almost identically to lambda 0 -- which is the point,
+  # since the classifier trains at w_dab regardless and val_dab stays a
+  # measurement either way.
   training.optimizer.lr: 1.0e-3
-  training.kl_annealing.beta_max: 0.5
+  training.kl_annealing.beta_max: 0.2
   model.loss.w_kl_vmf: 0.1
   model.loss.free_bits: 0.5
   model.loss.w_dab: 0.5
-  model.dab.lambda_dab: 0.0
+  model.dab.lambda_dab: 1.0e-3

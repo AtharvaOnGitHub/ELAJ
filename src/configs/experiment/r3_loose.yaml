@@ -39,7 +39,7 @@ overrides:
   training.diagnostics.log_every: 50
   training.diagnostics.latent_every: 4
   training.max_epochs: 25
-  training.early_stop_patience: 8
+  training.early_stop_patience: 7
   training.early_stop_warmup_epochs: 4
 
   # beta_max 0.1 and w_kl_vmf 0.05 make the latent almost free to use, and
@@ -62,4 +62,4 @@ overrides:
   model.loss.w_kl_vmf: 0.05
   model.loss.free_bits: 1.0
   model.loss.w_dab: 0.5
-  model.dab.lambda_dab: 0.0
+  model.dab.lambda_dab: 1.0e-4

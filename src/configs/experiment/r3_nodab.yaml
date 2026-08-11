@@ -1,0 +1,57 @@
+name: r3_nodab
+description: >
+  r1_ref's recipe on the current code. The control the wave needs.
+
+  Wave R3. Exploration, not a sweep. Wave R2 collapsed: at lambda_dab 0.1 the
+  circular branch fell from 1.4e-4 to 2.8e-7 nats by epoch 3, val_kl_gauss never
+  grew, and val_nb sat at 0.38 from epoch 0 for a final +0.78% over baseline
+  against r1_ref's +8.4%. The adversary parked exactly on chance (2.197), which
+  an empty latent achieves for free.
+
+  So these arms are recipes, deliberately several levers each. Reading one
+  variable at a time is what a later wave is for.
+
+  Two facts about the collapse that shape every arm here:
+
+  * A quiet circular dimension sits at kappa ~ 3e-4, where KL ~ kappa^2/4 and
+    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_vmf cannot rescue it -- the
+    penalty down there is already almost zero. free_bits can: clamp_min on the
+    per-dimension mean makes the KL term CONSTANT below the floor, so its
+    gradient is zero and reconstruction can pull the dimension back up without
+    paying. That is why free_bits appears in four of five arms and w_kl_vmf
+    barely moves.
+  * The model has little reason to use the latent at all. Its best val_nb
+    (0.37996) is 0.78% from a baseline that knows only the study (0.38293), so
+    the decoder plus library size plus DSBN already explain nearly everything.
+    Any KL cost then outweighs the reconstruction gain and storing nothing is
+    correct behaviour. Arms that raise w_nb or lower beta_max are attacking
+    that, not the symptom.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r3_nodab/
+seed: 24
+
+overrides:
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.max_epochs: 20
+  training.early_stop_patience: 6
+  training.early_stop_warmup_epochs: 5
+
+  # Three things changed between r1_ref (+8.4%) and r2_ref_s7 (+0.78%): lambda
+  # went 0 -> 0.1, the circular encoding was fixed, and the split became
+  # tissue-stratified. Only the first acts on the latent, but nothing so far
+  # rules the other two out. This arm restores r1_ref exactly and changes
+  # nothing else, so if it recovers, lambda did it; if it collapses too, the
+  # cause is in the code or the split and every other arm here is aimed wrong.
+  #
+  # Cheapest run in the wave and the one that decides what the others mean.
+  # Run it first.
+  training.optimizer.lr: 2.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.loss.w_dab: 1.0
+  model.dab.lambda_dab: 0.0

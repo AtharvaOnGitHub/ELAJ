@@ -100,7 +100,13 @@ class CompositeLoss(nn.Module):
             model_output2: Second forward pass for CCE (optional).
 
         Returns:
-            dict with keys: 'nb', 'kl_gauss', 'kl_vmf', 'dab', 'cce', 'total'.
+            dict with keys: 'elbo', 'nb', 'kl_gauss', 'kl_vmf', 'beta_kl',
+            'dab', 'cce', 'total'.
+
+            'elbo' is the model's objective — reconstruction plus the KL price.
+            'total' adds the study classifier's own loss, which trains the
+            classifier and, at lambda_dab = 0, reaches the encoder not at all.
+            Watch 'elbo'.
         """
         # Reconstruction
         x_meas = batch["counts"][:, model_output["measured_global_idxs"]]
@@ -154,15 +160,36 @@ class CompositeLoss(nn.Module):
             emb2 = torch.cat([model_output2["mu_gauss"], model_output2["mu_angle"]], dim=-1)
             cce_loss = self.cce(emb1, emb2)
 
-        total = (
+        # The model's own objective: reconstruction plus the price of what the
+        # latent stores. This is the number that says whether the model is
+        # getting better.
+        #
+        # `dab` is deliberately not in it. That term trains the study
+        # classifier, and how much of it reaches the ENCODER is set by
+        # lambda_dab inside the gradient reversal — at lambda_dab = 0 the answer
+        # is none, and the classifier's loss is a measurement riding along.
+        #
+        # Keeping them apart matters because dab is the larger and far more
+        # volatile of the two. In run r1_ref, across twenty epochs, val_nb moved
+        # 0.032 and val_dab moved 0.454 — fourteen times as much — so `total`
+        # was the dab curve with a near-constant offset, and a reader watching
+        # it learned nothing about the model. It is also what made early
+        # stopping and checkpointing pick the wrong epochs until both were moved
+        # onto val_nb.
+        elbo = (
             self.w_nb * nb
             + beta_kl * self.w_kl_gauss * kl_gauss
             + beta_kl * self.w_kl_vmf * kl_vmf
-            + self.w_dab * dab_loss
             + self.w_cce * cce_loss
         )
 
+        # What backward() actually descends. The classifier has to be trained
+        # for `dab` to mean anything — an untrained one reports chance whatever
+        # the latent holds — so its loss stays in the graph.
+        total = elbo + self.w_dab * dab_loss
+
         return {
+            "elbo": elbo,
             "nb": nb,
             "kl_gauss": kl_gauss,
             "kl_vmf": kl_vmf,

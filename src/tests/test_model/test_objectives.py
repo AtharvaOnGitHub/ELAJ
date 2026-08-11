@@ -187,8 +187,50 @@ class TestCompositeLoss:
         # beta_kl is the KL annealing weight, reported so metrics.csv records
         # which objective each epoch was actually optimising — the weights ramp,
         # so two epochs' totals are not otherwise comparable.
-        expected = {"nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce", "total"}
+        expected = {"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl",
+                    "dab", "cce", "total"}
         assert expected == set(out.keys())
+
+    def test_elbo_is_the_total_without_the_classifier(self):
+        """`elbo` and `dab` partition `total` exactly.
+
+        The two have to stay separable because they answer different
+        questions. `elbo` is whether the model improved; `dab` is what the
+        study classifier can still read off the latent. Summed into one number
+        the second drowns the first — in r1_ref val_dab's epoch-to-epoch range
+        was fourteen times val_nb's, so the total curve was the dab curve.
+        """
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0, w_dab=0.7)
+        out = comp(
+            _make_model_output(torch.arange(G_MEAS)),
+            _make_fake_batch(),
+            current_step=0, total_steps=100,
+        )
+        assert torch.allclose(
+            out["elbo"] + 0.7 * out["dab"], out["total"], atol=1e-6
+        )
+
+    def test_elbo_excludes_dab_even_when_dab_dominates(self):
+        """A large `dab` moves `total` and leaves `elbo` untouched.
+
+        w_dab is the scale on the classifier's loss inside `total`; changing it
+        must not change the model's own objective. This is the property that
+        makes the ELBO panel readable no matter how the adversary is tuned.
+        """
+        idxs, output, batch = torch.arange(G_MEAS), None, _make_fake_batch()
+        torch.manual_seed(0)
+        output = _make_model_output(idxs)
+
+        elbos, totals = [], []
+        for w_dab in (0.0, 50.0):
+            torch.manual_seed(0)
+            comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0, w_dab=w_dab)
+            out = comp(output, batch, current_step=0, total_steps=100)
+            elbos.append(float(out["elbo"]))
+            totals.append(float(out["total"]))
+
+        assert elbos[0] == pytest.approx(elbos[1], abs=1e-6)
+        assert totals[1] > totals[0] + 1.0
 
     def test_total_is_scalar_finite(self):
         comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0)

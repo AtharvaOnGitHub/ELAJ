@@ -39,63 +39,108 @@ def _elbo_series(history: dict, split: str) -> list[float]:
     return list(total)
 
 
+def _split_pair(ax, history: dict, key: str, title: str) -> None:
+    """One panel: a term's train and val curves against epoch."""
+    train, val = history.get(f"train_{key}", []), history.get(f"val_{key}", [])
+    ax.plot(range(len(train)), train, label="train", color=PALETTE.categorical[0])
+    ax.plot(range(len(val)), val, label="val", color=PALETTE.categorical[1])
+    ax.set_title(title)
+    ax.set_xlabel("epoch")
+
+
+def _elbo_panel(ax, history: dict) -> None:
+    """The model's objective, on its own axis.
+
+    Its own axis because it has to be. The ELBO runs ~0.38 per gene and the
+    total ~1.2-2.2, so drawing them together flattens the ELBO onto the axis
+    and the panel meant to show whether the model is improving shows nothing
+    — which is what run r2_ref_s7's losses.png did.
+    """
+    for split, colour in (("train", 0), ("val", 1)):
+        series = _elbo_series(history, split)
+        ax.plot(range(len(series)), series, label=split,
+                color=PALETTE.categorical[colour])
+    ax.set_title("Model objective (ELBO)")
+    ax.set_ylabel("NB + β·KL + CCE, per gene")
+    ax.set_xlabel("epoch")
+    ax.legend(frameon=False)
+
+
+def _total_panel(ax, history: dict) -> None:
+    """What backward() descends: the ELBO plus w_dab times the classifier loss.
+
+    Kept as a panel rather than dropped. It is the quantity being optimised and
+    a reader is entitled to see it; it is simply not the quantity that says
+    whether the model is learning, because dab dominates its movement — in
+    r1_ref val_nb moved 0.032 across twenty epochs while val_dab moved 0.454.
+    """
+    _split_pair(ax, history, "loss", "Total (ELBO + w_dab·DAB)")
+    # Upper right: both curves descend, so the floor of this panel is where the
+    # val line lives and a caption there sits on top of it.
+    ax.text(0.98, 0.97, "optimised, but dab dominates its movement",
+            transform=ax.transAxes, fontsize=7, ha="right", va="top",
+            color=PALETTE.muted)
+
+
+def _kl_panel(ax, history: dict) -> None:
+    """Both KL branches on one log axis: colour is the branch, dash is the split.
+
+    Combined because they are the same quantity — nats per gene held in the
+    latent — so one axis compares them honestly, and because the question
+    asked of them is always about both at once. In s1_cce kl_vmf fell to
+    3.75e-10 while kl_gauss rose, which is CCE moving information between
+    branches rather than adding any; on separate panels that trade is two
+    observations a reader has to join up.
+
+    Log scale, because these collapse across orders of magnitude and a linear
+    axis renders 5e-7 and 5e-3 as the same flat line on the floor.
+    """
+    branches = [("kl_gauss", "Gaussian", 0), ("kl_vmf", "Power Spherical", 2)]
+    everything = []
+    for key, label, colour in branches:
+        for split, style in (("train", "-"), ("val", "--")):
+            series = history.get(f"{split}_{key}", [])
+            everything += list(series)
+            ax.plot(range(len(series)), series, style, lw=1.4,
+                    label=f"{label} ({split})", color=PALETTE.categorical[colour])
+    if any(v > 0 for v in everything):
+        ax.set_yscale("log")
+    ax.set_title("KL — latent information (→ 0 = empty)")
+    ax.set_ylabel("nats per gene (log)")
+    ax.set_xlabel("epoch")
+    ax.legend(frameon=False, fontsize=6.5, loc="lower left")
+
+
 def loss_curves(history: dict) -> plt.Figure:
     """The model's objective by epoch, and each term that makes it up.
 
-    The headline panel carries both the ELBO — reconstruction plus the KL price
-    — and the total, which is the ELBO plus w_dab times the study classifier's
-    own loss. Drawn together because their separation is the quantity in
-    question: in r1_ref val_nb moved 0.032 across twenty epochs while val_dab
-    moved 0.454, so the total is the dab curve with an offset, and seeing the
-    flat solid line under the swinging dashed one is what makes that legible.
-    Plotting the total alone hid the model; plotting the ELBO alone hid the
-    classifier.
+    Five panels, one per question:
+
+    | panel | answers |
+    |---|---|
+    | ELBO | is the model getting better? |
+    | Total | what is actually being descended? |
+    | NB | is reconstruction improving? |
+    | KL | is either latent branch holding anything? |
+    | DAB | can the classifier still name the study? |
+
+    The ELBO and the total are separate panels rather than one. They differ by
+    roughly 3-6x in absolute value, so sharing an axis pins the ELBO flat to the
+    floor and destroys the only panel that says whether the model is learning.
 
     The per-term panels are the rest of the point. A single curve that stops
     falling cannot distinguish a reconstruction plateau from a posterior
     collapse, and in run 49817807 it was both — `nb` flat while `kl_gauss` and
     `kl_vmf` fell to zero. Read alone, that looked like ordinary convergence.
     """
-    terms = [
-        ("nb", "Reconstruction (NB)"),
-        ("kl_gauss", "KL — Gaussian"),
-        ("kl_vmf", "KL — Power Spherical"),
-        ("dab", "Adversarial (DAB)"),
-    ]
-    fig, axes = plt.subplots(1, 1 + len(terms), figsize=(4 * (1 + len(terms)), 3.4))
+    fig, axes = plt.subplots(1, 5, figsize=(20, 3.4))
 
-    ax = axes[0]
-    for split, colour in (("train", 0), ("val", 1)):
-        elbo = _elbo_series(history, split)
-        ax.plot(range(len(elbo)), elbo, label=f"{split} — ELBO",
-                color=PALETTE.categorical[colour])
-        total = history.get(f"{split}_loss", [])
-        ax.plot(range(len(total)), total, ls="--", lw=1.2,
-                label=f"{split} — total", color=PALETTE.categorical[colour])
-    ax.set_title("Model objective, and the total")
-    ax.set_ylabel("per gene")
-    ax.set_xlabel("epoch")
-    ax.legend(frameon=False, fontsize=7)
-    # Both, because the gap between them IS w_dab * dab and the reader should
-    # be able to see how much of the total is the classifier rather than the
-    # model. In r1_ref the dashed line is the solid one plus a term that swings
-    # fourteen times as hard, which is why the dashed line alone was
-    # unreadable — not a reason to stop drawing it.
-    ax.text(0.02, 0.03, "gap between the pair = the study classifier's loss",
-            transform=ax.transAxes, fontsize=7, va="bottom", color=PALETTE.muted)
-
-    for ax, (key, title) in zip(axes[1:], terms):
-        train, val = history.get(f"train_{key}", []), history.get(f"val_{key}", [])
-        ax.plot(range(len(train)), train, label="train", color=PALETTE.categorical[0])
-        ax.plot(range(len(val)), val, label="val", color=PALETTE.categorical[1])
-        ax.set_title(title)
-        ax.set_xlabel("epoch")
-        # KL terms collapse toward zero across orders of magnitude; a linear
-        # axis renders 5e-7 and 5e-3 as the same flat line on the floor, which
-        # is exactly the distinction that matters.
-        if key.startswith("kl") and any(v > 0 for v in train + val):
-            ax.set_yscale("log")
-    axes[1].legend(frameon=False)
+    _elbo_panel(axes[0], history)
+    _total_panel(axes[1], history)
+    _split_pair(axes[2], history, "nb", "Reconstruction (NB)")
+    axes[2].legend(frameon=False)
+    _kl_panel(axes[3], history)
+    _split_pair(axes[4], history, "dab", "Adversarial (DAB)")
 
     fig.suptitle("Loss terms by epoch")
     fig.tight_layout()

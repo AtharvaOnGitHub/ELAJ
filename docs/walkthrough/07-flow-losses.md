@@ -27,8 +27,10 @@ Two numbers, deliberately. `total` is what `backward()` descends — the
 classifier must be trained for `dab` to mean anything. `elbo` is the **model's**
 objective, and it is the one to read: in `r1_ref`, `val_nb` moved 0.032 across
 twenty epochs while `val_dab` moved 0.454, so `total` was the `dab` curve with an
-offset and said nothing about the model. Both are plotted, on one panel, so the
-gap between them shows how much of the total is the classifier.
+offset and said nothing about the model. Both are plotted, on **separate**
+panels of `losses.png`: they differ by 3-6x in absolute value, so one shared
+axis pins the ELBO flat to the floor and destroys the only panel that says
+whether the model is learning. That is what r2_ref_s7's figure did.
 
 ---
 

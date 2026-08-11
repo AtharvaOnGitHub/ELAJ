@@ -6,12 +6,19 @@ Sixteen panels plus a per-study CSV, in <output_dir>/corpus/.
 
     Compulsory              cells_and_patients, disease_status, tissue_site
     Structure and confound  gene_panel_overlap, disease_by_site,
-                            study_site_matrix, corpus_concentration
+                            study_site_matrix, within_site_contrasts,
+                            corpus_concentration
     Sample size             cells_per_donor, donors_by_status,
                             sampling_hierarchy
-    Coverage/completeness   vocabulary_coverage, metadata_completeness,
-                            age_distribution
+    Coverage                vocabulary_coverage, panel_size_vs_coverage
     Sequencing QC           library_size, genes_per_cell, detection_rate
+
+Two panels are drawn only when they would say something. samples_per_donor is
+skipped when every donor gave one sample, which is the case here.
+age_distribution and metadata_completeness are gone: no study in this corpus
+records donor age, so the first was twelve rows of "no age recorded" and the
+second was one 0% cell beside thirty 100% ones. Both facts are in the log and
+the CSV.
 
 Everything but the last three reads obs and var only and takes minutes. The QC
 three read X in row chunks — the slow part, roughly 20 GB of sparse data across
@@ -142,7 +149,6 @@ def main() -> int:
     from endo_model.data.tissue_hierarchy import ONTOLOGY_COLUMN, TissueHierarchy
     from endo_model.viz import apply_theme, save_figure
     from endo_model.viz.corpus_panels import (
-        age_distribution,
         cells_and_patients,
         cells_per_donor,
         composition_by_study,
@@ -153,11 +159,11 @@ def main() -> int:
         gene_panel_overlap,
         genes_per_cell,
         library_size,
-        metadata_completeness,
         panel_size_vs_coverage,
         samples_per_donor,
         sampling_hierarchy,
         study_site_matrix,
+        within_site_contrasts,
         vocabulary_coverage,
     )
     from endo_model.data.vocabulary import GeneVocabulary
@@ -196,6 +202,7 @@ def main() -> int:
     genes_by_study: dict[str, list] = {}
     detection_by_study: dict[str, list] = {}
     samples_per_donor_counts: dict[str, list[int]] = {}
+    triple: dict[tuple[str, str, str], int] = defaultdict(int)
 
     vocab = GeneVocabulary(str(Path(args.root) / data_cfg.vocabulary_path))
     # GeneVocabulary exposes membership, not a name list — build the set once
@@ -234,6 +241,7 @@ def main() -> int:
                     named.groupby([named, status], observed=True).size().items()
                 ):
                     cross[(str(tissue), str(stat))] += int(n)
+                    triple[(study.name, str(tissue), str(stat))] += int(n)
         else:
             site[study.name] = {}
 
@@ -331,6 +339,15 @@ def main() -> int:
         len(studies), f"{sum(cells.values()):,}", f"{sum(donors.values()):,}",
     )
 
+    recorded_age = {k: len(v) for k, v in ages.items() if v}
+    if not recorded_age:
+        logger.warning(
+            "No study records donor age — %d studies, 0 ages. age_distribution "
+            "and metadata_completeness are not drawn: one would be an empty "
+            "panel and the other a single 0%% cell beside five 100%% ones.",
+            len(ages),
+        )
+
     apply_theme()
     figures = {
         # Compulsory
@@ -354,10 +371,23 @@ def main() -> int:
             {k: len(v) for k, v in panels.items()}, measured,
             len(vocab_genes) or max(measured.values(), default=1),
         ),
-        "samples_per_donor": lambda: samples_per_donor(samples_per_donor_counts),
-        "metadata_completeness": lambda: metadata_completeness(completeness),
-        "age_distribution": lambda: age_distribution(ages),
+
+        "within_site_contrasts": lambda: within_site_contrasts(dict(triple)),
     }
+    # source_sample_id is 1:1 with patient_id in every study here, so
+    # samples_per_donor would be a solid bar of "1 sample" across the board and
+    # sampling_hierarchy's middle bar is already redundant with its top one.
+    # Drawn only if some study actually has a donor giving more than one sample.
+    if any(c > 1 for counts in samples_per_donor_counts.values() for c in counts):
+        figures["samples_per_donor"] = lambda: samples_per_donor(
+            samples_per_donor_counts
+        )
+    else:
+        logger.info(
+            "Every donor gave exactly one sample in every study — skipping "
+            "samples_per_donor, which would be one flat bar."
+        )
+
     if depth_by_study:
         figures["library_size"] = lambda: library_size(depth_by_study)
         figures["genes_per_cell"] = lambda: genes_per_cell(genes_by_study)

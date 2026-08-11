@@ -27,6 +27,41 @@ from matplotlib.patches import Patch
 from endo_model.viz.palette import PALETTE
 
 
+# One colour per disease status, fixed, used by every panel that draws them.
+#
+# Without this the categories were coloured by frequency order, which differs
+# between panels: `disease_status` counts cells and `donors_by_status` counts
+# donors, so 'control' was blue in one and orange in the other while 'adenomyosis'
+# swapped the other way. Two panels a page apart, same four words, different
+# colours — a reader comparing them is misled by the figure rather than by the
+# data.
+DISEASE_COLOURS = {
+    "eutopic": PALETTE.categorical[0],
+    "ectopic": PALETTE.categorical[1],
+    "control": PALETTE.categorical[2],
+    "adenomyosis": PALETTE.categorical[3],
+    "other": PALETTE.muted,
+}
+
+# Clinical order, not frequency order, so the legend reads the same way every
+# time and eutopic/ectopic sit next to each other where they are compared.
+DISEASE_ORDER = ("eutopic", "ectopic", "control", "adenomyosis", "other")
+
+
+def _disease_palette(categories):
+    """Colours for a set of status labels, falling back for anything unexpected."""
+    fallback = PALETTE.categorical_cycle(max(len(categories), 1))
+    return [
+        DISEASE_COLOURS.get(str(c), fallback[i]) for i, c in enumerate(categories)
+    ]
+
+
+def _ordered(categories, order):
+    """`categories` in `order`, with anything unlisted appended."""
+    known = [c for c in order if c in categories]
+    return known + sorted(c for c in categories if c not in order)
+
+
 def _label_colour(value: float, values: np.ndarray) -> str:
     """Readable text colour for a heatmap cell.
 
@@ -87,11 +122,15 @@ def composition_by_study(
     the absolute scale visible, which proportions alone would hide.
     """
     studies = sorted(counts, key=lambda s: -sum(counts[s].values()))
-    categories = order or sorted(
-        {k for per in counts.values() for k in per},
-        key=lambda k: -sum(per.get(k, 0) for per in counts.values()),
-    )
-    colors = PALETTE.categorical_cycle(max(len(categories), 1))
+    present = {k for per in counts.values() for k in per}
+    if present & set(DISEASE_COLOURS):
+        categories = order or _ordered(present, DISEASE_ORDER)
+        colors = _disease_palette(categories)
+    else:
+        categories = order or sorted(
+            present, key=lambda k: -sum(per.get(k, 0) for per in counts.values())
+        )
+        colors = PALETTE.categorical_cycle(max(len(categories), 1))
 
     fig, (left, right) = plt.subplots(
         1, 2, figsize=(max(9, 0.8 * len(studies) + 5), 5),
@@ -113,11 +152,14 @@ def composition_by_study(
     left.legend(frameon=False, fontsize=8, ncol=1, loc="upper left",
                 bbox_to_anchor=(1.02, 1.0))
 
+    # Labelled. Sharing the left panel's order is not enough — the two axes are
+    # separated by a legend, and a reader cannot count twelve bars across a gap
+    # to work out which total belongs to which study.
     right.barh(studies[::-1], [sum(counts[s].values()) for s in studies][::-1],
                color=PALETTE.muted)
     right.set_xlabel("cells")
     right.set_title("total")
-    right.set_yticks([])
+    right.tick_params(axis="y", labelsize=8)
     return fig
 
 
@@ -148,9 +190,14 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
     np.fill_diagonal(shown, np.nan)
     off_diagonal = shown[~np.isnan(shown)]
     high = float(off_diagonal.max()) if off_diagonal.size else 1.0
+    # Anchor the low end at the smallest real overlap, not at zero. Every pair
+    # in this corpus shares 0.64-0.96 of its genes, so a scale running from 0
+    # renders the whole matrix one shade of dark blue and the differences that
+    # do exist — marecko at 0.64, tan/fonseca at 0.96 — become invisible.
+    low = float(off_diagonal.min()) if off_diagonal.size else 0.0
 
     fig, ax = plt.subplots(figsize=(0.55 * n + 4, 0.55 * n + 3))
-    im = ax.imshow(shown, vmin=0, vmax=high, cmap="Blues")
+    im = ax.imshow(shown, vmin=low, vmax=high, cmap="Blues")
     ax.set_xticks(range(n), studies, rotation=60, ha="right")
     ax.set_yticks(range(n), studies)
     ax.set_title("Shared genes between studies (Jaccard)")
@@ -160,7 +207,8 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
                 continue
             ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center",
                     fontsize=7,
-                    color="white" if matrix[i, j] > high * 0.6 else PALETTE.ink)
+                    color="white" if matrix[i, j] > low + (high - low) * 0.55
+                    else PALETTE.ink)
     fig.colorbar(im, ax=ax, shrink=0.7, label="fraction of genes shared")
     return fig
 
@@ -173,7 +221,7 @@ def disease_by_site(counts: dict[tuple[str, str], int]) -> plt.Figure:
     contain, and those absences constrain what can be asked of it.
     """
     sites = sorted({site for site, _ in counts})
-    statuses = sorted({status for _, status in counts})
+    statuses = _ordered({status for _, status in counts}, DISEASE_ORDER)
     matrix = np.array(
         [[counts.get((site, status), 0) for status in statuses] for site in sites],
         dtype=float,
@@ -291,28 +339,61 @@ def genes_per_cell(values_by_study: dict) -> plt.Figure:
 
 
 def detection_rate(rates_by_study: dict) -> plt.Figure:
-    """Per gene, the fraction of cells in which it is detected.
+    """Per gene, the fraction of cells detecting it — corpus band, not one line
+    per study.
 
-    The x axis is what "sparse" means concretely for this corpus. It also sets
-    what the reconstruction task is: a gene detected in 1% of cells is one the
-    model is mostly asked to predict zero for, and getting that right is easy —
-    which is why the highly-variable-gene loss is reported separately.
+    The first version drew twelve curves. They landed on top of one another,
+    the palette cycled so four pairs shared a colour, and the legend was the
+    only thing distinguishing them. Twelve indistinguishable curves is a claim
+    that the studies differ, drawn as if they do not.
+
+    They mostly do not, and that is the finding: the shape is a property of
+    single-cell data rather than of any study. So the median is drawn once, with
+    the study-to-study range as a band, and only the studies that leave the band
+    are named.
     """
-    fig, ax = plt.subplots(figsize=(9, 5))
-    colors = PALETTE.categorical_cycle(max(len(rates_by_study), 1))
-    for (study, rates), color in zip(sorted(rates_by_study.items()), colors):
-        values = np.sort(np.asarray(rates, dtype=float))[::-1]
-        if not values.size:
-            continue
-        ax.plot(np.arange(1, values.size + 1), values, label=study,
-                color=color, linewidth=1.4)
+    studies = sorted(rates_by_study)
+    curves = [
+        np.sort(np.asarray(rates_by_study[s], dtype=float))[::-1]
+        for s in studies
+        if len(rates_by_study[s])
+    ]
+    if not curves:
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.set_title("Gene detection rate — no data")
+        return fig
+
+    # Studies have different gene counts; compare them on a common rank grid.
+    length = min(len(c) for c in curves)
+    grid = np.linspace(0, 1, min(length, 4000))
+    resampled = np.vstack([
+        np.interp(grid, np.linspace(0, 1, len(c)), c) for c in curves
+    ])
+    ranks = 1 + grid * (length - 1)
+
+    median = np.median(resampled, axis=0)
+    low, high = resampled.min(axis=0), resampled.max(axis=0)
+
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    ax.fill_between(ranks, low, high, color=PALETTE.primary, alpha=0.22,
+                    linewidth=0, label="range across studies")
+    ax.plot(ranks, median, color=PALETTE.primary, linewidth=2.0,
+            label="median study")
+
+    # Name only the extremes — the two studies a reader would otherwise have to
+    # find by eye.
+    area = resampled.sum(axis=1)
+    for index, colour in ((int(area.argmax()), PALETTE.secondary),
+                          (int(area.argmin()), PALETTE.bad)):
+        ax.plot(ranks, resampled[index], color=colour, linewidth=1.4,
+                label=studies[index])
+
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("genes, ranked by detection rate")
     ax.set_ylabel("fraction of cells detecting the gene")
     ax.set_title("Gene detection rate")
-    ax.legend(frameon=False, fontsize=8, ncol=1, loc="upper left",
-              bbox_to_anchor=(1.02, 1.0))
+    ax.legend(frameon=False, fontsize=9, loc="lower left")
     ax.grid(alpha=0.4)
     return fig
 
@@ -345,7 +426,8 @@ def vocabulary_coverage(measured: dict[str, int], vocab_size: int) -> plt.Figure
     for i, study in enumerate(studies):
         ax.text(i, covered[i] / 2, f"{covered[i] / vocab_size:.0%}",
                 ha="center", va="center", fontsize=8, color="white")
-    ax.legend(frameon=False, fontsize=8, loc="lower right")
+    ax.legend(frameon=False, fontsize=8, loc="upper left",
+              bbox_to_anchor=(1.01, 1.0))
     return fig
 
 
@@ -421,8 +503,8 @@ def donors_by_status(counts: dict[str, dict]) -> plt.Figure:
     beside it.
     """
     studies = sorted(counts, key=lambda s: -sum(counts[s].values()))
-    statuses = sorted({k for per in counts.values() for k in per})
-    colors = PALETTE.categorical_cycle(max(len(statuses), 1))
+    statuses = _ordered({k for per in counts.values() for k in per}, DISEASE_ORDER)
+    colors = _disease_palette(statuses)
 
     fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(studies) + 4), 5))
     bottom = np.zeros(len(studies))
@@ -438,7 +520,10 @@ def donors_by_status(counts: dict[str, dict]) -> plt.Figure:
     ax.tick_params(axis="x", rotation=60)
     for tick in ax.get_xticklabels():
         tick.set_ha("right")
-    ax.legend(frameon=False, fontsize=8, loc="upper right")
+    # Outside the axes: the tallest bar is on the left and its count label sits
+    # where an upper-right legend lands.
+    ax.legend(frameon=False, fontsize=8, loc="upper left",
+              bbox_to_anchor=(1.01, 1.0))
     return fig
 
 
@@ -623,4 +708,65 @@ def panel_size_vs_coverage(
     ax.set_title("Panel size against vocabulary coverage")
     ax.legend(frameon=False, fontsize=9, loc="lower right")
     ax.grid(alpha=0.4)
+    return fig
+
+
+def within_site_contrasts(counts: dict[tuple[str, str, str], int]) -> plt.Figure:
+    """Where a disease comparison can be made without crossing tissue or study.
+
+    disease_by_site showed that ectopic never appears outside ovary, peritoneum
+    and the pelvic sites, and that eutopic and control both appear only in
+    endometrium. So a naive "diseased versus not" split across the whole corpus
+    compares endometrium against ovary — the disease difference and the tissue
+    difference are the same difference, and no model can tell them apart.
+
+    The exception is endometrium, which carries control AND eutopic. That is the
+    one place where two disease states are measured in the same tissue, and this
+    panel is where those (study, site) blocks are.
+
+    Each row is a study x site block. A block with two or more filled dots is a
+    within-block contrast: same tissue, same study, so batch and anatomy are
+    held fixed and only the disease label varies. Those are the comparisons the
+    corpus actually supports.
+    """
+    blocks: dict[tuple[str, str], dict[str, int]] = {}
+    for (study, site, status), n in counts.items():
+        blocks.setdefault((study, site), {})[status] = n
+
+    paired = {k: v for k, v in blocks.items() if len(v) > 1}
+    single = {k: v for k, v in blocks.items() if len(v) == 1}
+    ordered = sorted(paired, key=lambda k: -sum(paired[k].values())) + sorted(
+        single, key=lambda k: -sum(single[k].values())
+    )
+    statuses = _ordered({s for v in blocks.values() for s in v}, DISEASE_ORDER)
+    colours = dict(zip(statuses, _disease_palette(statuses)))
+
+    fig, ax = plt.subplots(
+        figsize=(2.0 * len(statuses) + 7, 0.38 * len(ordered) + 3)
+    )
+    for row, key in enumerate(ordered):
+        for col, status in enumerate(statuses):
+            n = blocks[key].get(status, 0)
+            if not n:
+                ax.scatter([col], [row], s=26, facecolors="none",
+                           edgecolors=PALETTE.grid, linewidths=1.0)
+                continue
+            ax.scatter([col], [row], s=40 + 90 * np.log10(max(n, 10)) / 6,
+                       color=colours[status], zorder=3)
+            ax.annotate(f"{n:,}", (col, row), textcoords="offset points",
+                        xytext=(9, 0), va="center", fontsize=7,
+                        color=PALETTE.ink_soft)
+
+    ax.axhline(len(paired) - 0.5, ls="--", lw=1.2, color=PALETTE.muted)
+    ax.annotate("blocks above the line hold more than one disease status",
+                xy=(0.0, len(paired) - 0.35), xycoords=("axes fraction", "data"),
+                fontsize=8, color=PALETTE.muted)
+
+    ax.set_yticks(range(len(ordered)), [f"{st} · {si}" for st, si in ordered],
+                  fontsize=8)
+    ax.set_xticks(range(len(statuses)), statuses, rotation=20, ha="right")
+    ax.set_xlim(-0.6, len(statuses) - 0.1)
+    ax.invert_yaxis()
+    ax.set_title("Disease statuses available within each study and site")
+    ax.grid(axis="y", alpha=0.3)
     return fig

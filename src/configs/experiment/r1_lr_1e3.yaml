@@ -1,0 +1,47 @@
+name: r1_lr_1e3
+description: >
+  Learning rate halved to 1e-3.
+
+  Wave R1. Six arms around s1_circ_low's configuration, on the corrected corpus.
+
+  **s1_circ_low's 0.3605 is not the target and cannot be.** Three things changed
+  underneath it: wang_2022 joined (49,606 adenomyosis cells, 8 live studies to
+  9), the patient split is now stratified by study so the validation set is a
+  different set of donors, and the gradient clip no longer shares one budget
+  between the model and the DAB classifier. The baseline is recomputed per run
+  and will not be 0.3917 either. r1_ref re-runs the exact configuration so the
+  gap is measured rather than guessed; every other arm is read against r1_ref,
+  not against anything from before.
+
+  Read val_dab against ln(9) = 2.197, not ln(8) = 2.079 — wang_2022 adds a
+  ninth study the classifier can be asked about.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r1_lr_1e3/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+
+  # Early stopping is live and scores val_nb. A converged arm now ends itself
+  # and frees the queue for the next one, which matters at six runs two at a
+  # time.
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # ---- the variable ----
+  # The clip fix is why the learning-rate axis is being re-swept rather than
+  # assumed. clip_grad_norm_ used to take one norm over the model AND the DAB
+  # classifier and scale both by the same factor; in s0_ref |g| tracked dab
+  # almost linearly, so the model's updates were being cut 2-8x on a typical
+  # step. 2e-3 won partly by compensating for that. With each group on its own
+  # budget the optimum should move DOWN, and this is the first step down.
+  training.optimizer.lr: 1.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.dab.lambda_dab: 0.0

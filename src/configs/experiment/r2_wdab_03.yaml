@@ -1,28 +1,34 @@
 name: r2_wdab_03
 description: >
-  The adversary's weight at 0.3 rather than 1.0, at lambda 0.2.
+  The adversary's weight at 0.3 rather than 0.5, at lambda 0.2.
 
-  Wave R2. Six arms on the corrected corpus AND the corrected circular
-  encoding. Every wave before this one — s0, s1, r1 — fed the DAB classifier and
-  the CCE loss a raw angle where a coordinate was required, so theta = -pi and
-  theta = +pi, one direction on the circle, arrived 2*pi apart. Their DAB
-  numbers, CCE numbers and circular UMAPs all carry that seam and none of them
-  is comparable to an arm from this wave.
+  Wave R2. Six arms on the corrected corpus, the corrected circular encoding,
+  and the tissue-stratified split. Nothing from s0, s1 or r1 is comparable to
+  anything here: those waves fed the DAB classifier and the CCE loss a raw angle
+  where a coordinate was required, so theta = -pi and theta = +pi -- one
+  direction on the circle -- arrived 2*pi apart. Their DAB numbers, CCE numbers
+  and circular UMAPs all carry that seam. The split also holds out a different
+  set of donors now that strata are (study, tissue_type) rather than study, so
+  val_nb is not measuring the same cells either.
 
-  Two changes to how the adversary is configured:
+  Three settings are shared by every arm and are the wave's premises:
 
-  * lambda_dab is non-zero in every arm. DSBN already removes a per-study affine
-    shift at the token level; DAB is what removes what DSBN cannot reach. Five
-    of six R1 arms ran at lambda 0, which made the wave a no-batch-correction
-    sweep with one token adversarial run, and val_dab ended at 0.444 against a
-    chance of 2.197 — study identity was almost perfectly readable off the
-    latent.
-  * w_dab is now stated rather than defaulted. It was always reachable from
-    YAML and no experiment had ever set it, so the adversary's weight in the
-    objective was an untuned constant.
+  * w_kl_vmf 0.1. The circular penalty stays at s1_circ_low's level. That run
+    is the one that reached +8.0% and the only one whose circular branch both
+    survived and filled, so the penalty is held fixed while other things move.
+  * lambda_dab non-zero everywhere. DSBN already removes a per-study affine
+    shift at the token level; DAB removes what DSBN cannot reach. Five of six
+    R1 arms ran at lambda 0, which made that wave a no-batch-correction sweep,
+    and val_dab ended at 0.444 against a chance of 2.197 -- study identity was
+    almost perfectly readable off the latent.
+  * w_dab 0.5, down from the 1.0 default every previous run used by accident.
+    Now that reversed gradient actually reaches the encoder, the adversary's
+    share of the objective is cut pre-emptively rather than after a run is lost
+    to it. Note w_dab scales BOTH paths: the classifier's own training and,
+    multiplied by lambda, the push into the encoder. Encoder pressure is
+    lambda * w_dab.
 
-  Read val_dab against ln(9) = 2.197. Read the ELBO, not the total: the total
-  carries w_dab * dab, which in r1_ref swung fourteen times as hard as val_nb.
+  Read val_dab against ln(9) = 2.197. Read the ELBO, not the total.
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
@@ -39,14 +45,12 @@ overrides:
   training.early_stop_patience: 5
   training.early_stop_warmup_epochs: 3
 
-  # The other knob, tuned for the first time. w_dab scales BOTH paths: the
-  # classifier's own training and, multiplied by lambda, the reversed gradient
-  # into the encoder. Lowering it to 0.3 while raising lambda to 0.2 holds the
-  # encoder's pressure near r2_dab_02's (0.3 * 0.2 = 0.06 against 1.0 * 0.2 =
-  # 0.2 -- not equal, deliberately) while training the classifier more slowly.
+  # One variable from r2_dab_02: w_dab 0.3 against 0.5, same lambda, same lr.
+  # Encoder pressure 0.3 * 0.2 = 0.06 against r2_dab_02's 0.10, and the
+  # classifier also trains more slowly.
   #
-  # The question it answers: is a weaker, slower classifier a better adversary?
-  # A classifier that wins outright gives the encoder a gradient pointing at one
+  # The question: is a weaker, slower classifier a better adversary? One that
+  # wins outright hands the encoder a gradient pointing at a single
   # easily-defeated decision boundary rather than at study information in
   # general.
 

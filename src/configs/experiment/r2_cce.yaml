@@ -1,0 +1,64 @@
+name: r2_cce
+description: >
+  Contrastive embeddings on, at the reference adversary.
+
+  Wave R2. Six arms on the corrected corpus AND the corrected circular
+  encoding. Every wave before this one — s0, s1, r1 — fed the DAB classifier and
+  the CCE loss a raw angle where a coordinate was required, so theta = -pi and
+  theta = +pi, one direction on the circle, arrived 2*pi apart. Their DAB
+  numbers, CCE numbers and circular UMAPs all carry that seam and none of them
+  is comparable to an arm from this wave.
+
+  Two changes to how the adversary is configured:
+
+  * lambda_dab is non-zero in every arm. DSBN already removes a per-study affine
+    shift at the token level; DAB is what removes what DSBN cannot reach. Five
+    of six R1 arms ran at lambda 0, which made the wave a no-batch-correction
+    sweep with one token adversarial run, and val_dab ended at 0.444 against a
+    chance of 2.197 — study identity was almost perfectly readable off the
+    latent.
+  * w_dab is now stated rather than defaulted. It was always reachable from
+    YAML and no experiment had ever set it, so the adversary's weight in the
+    objective was an untuned constant.
+
+  Read val_dab against ln(9) = 2.197. Read the ELBO, not the total: the total
+  carries w_dab * dab, which in r1_ref swung fourteen times as hard as val_nb.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r2_cce/
+seed: 24
+
+overrides:
+  training.max_epochs: 16
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # Paired with r2_lr_1e3, which is this arm with CCE off and nothing else
+  # different. beta_max stays 1.0 so the comparison is one variable wide --
+  # s1_cce changed CCE and beta_max together and could not be read.
+  #
+  # CCE is the loss the circular fix should change most. InfoNCE scores pairs by
+  # cosine similarity, so it is entirely a statement about embedding geometry,
+  # and it was being computed on a coordinate with a seam in it.
+  #
+  # Watch kl_vmf. s1_cce drove it to 3.75e-10 -- the circular branch died while
+  # kl_gauss rose, so CCE moved information into the Gaussian half rather than
+  # adding any. Whether that was the loss or the broken encoding is the second
+  # question this arm answers.
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.1
+
+  # 16 rather than 20: two forward passes per batch put the epoch near 74
+  # minutes against ~37, and 20 would run past the 24 h walltime.
+
+  # ---- the variables ----
+  training.optimizer.lr: 1.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.loss.w_dab: 1.0
+  model.dab.lambda_dab: 0.1

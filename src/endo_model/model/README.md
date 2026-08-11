@@ -24,6 +24,7 @@ model/
 │   ├── gaussian_vae.py       — GaussianBranch: mu, logvar, reparameterised z
 │   ├── vonmises_vae.py       — VonMisesBranch: mu_angle, kappa, (cos θ, sin θ) pairs
 │   ├── power_spherical.py    — PowerSpherical: exact reparameterised directional sampler + KL
+│   ├── circular.py           — angles_to_cartesian: θ ↦ (cos θ, sin θ) for every consumer
 │   ├── latent_space.py       — BifurcatedLatentSpace: joins Gaussian + directional
 │   └── grad_reversal.py      — GradientReversalFunction: negates gradient for DAB
 ├── decoder/
@@ -59,9 +60,70 @@ batch
 | DSBN requires single-study batches | BatchNorm stats are meaningless across studies |
 | `group_indices` = GLOBAL vocab indices | Used for count gathering; `torch.arange(G_k)` used for embedding lookup |
 | No softmax inside BilinearDecoder | Applied in EndoFoundationModel after library-size scaling |
-| DAB input = concat(mu_gauss, mu_angle), not sampled z | Deterministic means give stable adversarial gradients |
+| DAB input = concat(mu_gauss, cos/sin of mu_angle), not sampled z | Deterministic means give stable adversarial gradients; the pair removes the wrap-point seam (see below) |
+| Every consumer of `mu_angle` calls `angles_to_cartesian` | A raw angle is not a coordinate; −π and +π are one direction 2π apart on the number line |
 | DNS → learned dns_embedding, not zero | "Not observed" is epistemologically distinct from "zero count" |
 | Directional branch uses Power Spherical | `torch.distributions.VonMises` has `has_rsample = False`; Power Spherical is vMF-like with an exact reparameterised sampler |
+
+## Circular coordinates (`latent/circular.py`)
+
+`VonMisesBranch.forward` returns `mu_angle`, the mean angle θ of each circular
+latent dimension, straight out of an unbounded `nn.Linear`.  An angle is a
+perfectly good *parameter*.  It is not a coordinate, and anything that treats it
+as one is wrong at the wrap point:
+
+```
+θ = −π   and   θ = +π    are the same direction
+              as numbers  they are 2π apart — the widest gap in the range
+```
+
+The fix is the standard embedding of the circle S¹ into the plane:
+
+```
+θ  ↦  (cos θ, sin θ)
+```
+
+Two properties are what make it the right encoding:
+
+**Periodic.** `cos` and `sin` have period 2π, so θ and θ + 2π land on the same
+point and the seam disappears.
+
+**Metric-preserving.** For angles α and β the squared straight-line distance
+between their images is
+
+```
+‖(cos α, sin α) − (cos β, sin β)‖²
+    = (cos α − cos β)² + (sin α − sin β)²
+    = cos²α − 2 cos α cos β + cos²β + sin²α − 2 sin α sin β + sin²β
+    = (cos²α + sin²α) + (cos²β + sin²β) − 2(cos α cos β + sin α sin β)
+    = 1 + 1 − 2 cos(α − β)
+    = 2 − 2 cos(α − β)
+```
+
+using `cos²x + sin²x = 1` and the cosine difference identity
+`cos(α − β) = cos α cos β + sin α sin β`.  The result depends on `α − β` alone,
+so distance in the embedding is a function of the angle between the two
+directions and of nothing else.  It runs from 0 at α = β to 2 at α − β = π.
+
+Cost is one extra dimension per circular latent: `n_vMF` angles become `2*n_vMF`
+coordinates.
+
+**Who must use it.** Every consumer that reads `mu_angle` as a position:
+
+| Consumer | What it does with the coordinate |
+|----------|----------------------------------|
+| `DABClassifier` | `nn.Linear` — multiplies each input by a weight |
+| `InfoNCELoss` (CCE) | cosine similarity between two embeddings |
+| Circular UMAP panel | Euclidean nearest neighbours |
+
+`BilinearDecoder` never needed the helper: `VonMisesBranch` already gives it
+`z_vmf` as `(cos θ, sin θ)` pairs, which is the same embedding computed inside
+the branch.
+
+**What this was before.** All three consumers above received the raw angle. The
+classifier and the contrastive loss saw a discontinuity that is in the encoding
+and not in the cells, and the circular UMAP drew a seam through its own input.
+Every run up to and including `r1_ref` and `r1_cce` has it.
 
 ## Directional latent (`latent/power_spherical.py`)
 

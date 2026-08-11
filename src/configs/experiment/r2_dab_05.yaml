@@ -1,0 +1,53 @@
+name: r2_dab_05
+description: >
+  The adversary at lambda 0.5, the top of the range this wave tests.
+
+  Wave R2. Six arms on the corrected corpus AND the corrected circular
+  encoding. Every wave before this one — s0, s1, r1 — fed the DAB classifier and
+  the CCE loss a raw angle where a coordinate was required, so theta = -pi and
+  theta = +pi, one direction on the circle, arrived 2*pi apart. Their DAB
+  numbers, CCE numbers and circular UMAPs all carry that seam and none of them
+  is comparable to an arm from this wave.
+
+  Two changes to how the adversary is configured:
+
+  * lambda_dab is non-zero in every arm. DSBN already removes a per-study affine
+    shift at the token level; DAB is what removes what DSBN cannot reach. Five
+    of six R1 arms ran at lambda 0, which made the wave a no-batch-correction
+    sweep with one token adversarial run, and val_dab ended at 0.444 against a
+    chance of 2.197 — study identity was almost perfectly readable off the
+    latent.
+  * w_dab is now stated rather than defaulted. It was always reachable from
+    YAML and no experiment had ever set it, so the adversary's weight in the
+    objective was an untuned constant.
+
+  Read val_dab against ln(9) = 2.197. Read the ELBO, not the total: the total
+  carries w_dab * dab, which in r1_ref swung fourteen times as hard as val_nb.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r2_dab_05/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # s0/s1's lambda 0.2 run (50375976) diverged: val_dab went 4.50 -> 18.51 ->
+  # 10.63 against a chance of 2.079, i.e. the classifier was driven to be
+  # confidently WRONG, which is the encoder winning an arms race rather than
+  # removing a batch effect. That run also predates the two clip groups and the
+  # circular fix, so it does not settle whether 0.5 is reachable now. This arm
+  # settles it. If val_dab overshoots chance again, 0.2 is the ceiling.
+
+  # ---- the variables ----
+  training.optimizer.lr: 1.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.loss.w_dab: 1.0
+  model.dab.lambda_dab: 0.5

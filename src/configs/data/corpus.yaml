@@ -20,6 +20,10 @@ splits:
 # everywhere; only the translation was missing. Set to null to go back to that.
 tissue_hierarchy_csv: configs/data/tissue_hierarchy.csv
 
+# Names for the integer level codes the file above produces. Figures only —
+# the tissue UMAP panels legended "1 (16,074)" without it, which names nothing.
+tissue_level_names_csv: configs/data/tissue_level_names.csv
+
 dns_sentinel: -1
 max_cells_per_study: null      # null = use all; integer = cap for debugging
 

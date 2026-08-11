@@ -42,13 +42,14 @@ def _elbo_series(history: dict, split: str) -> list[float]:
 def loss_curves(history: dict) -> plt.Figure:
     """The model's objective by epoch, and each term that makes it up.
 
-    The headline is the ELBO — reconstruction plus the KL price — and not the
-    total, because the total also contains the study classifier's own loss.
-    That term is both larger and far more volatile than the rest: in run r1_ref
-    val_nb moved 0.032 across twenty epochs while val_dab moved 0.454, so the
-    total curve and the dab curve were the same shape and the total said
-    nothing about the model. It says even less when lambda_dab is 0, where the
-    gradient reversal passes none of dab back to the encoder.
+    The headline panel carries both the ELBO — reconstruction plus the KL price
+    — and the total, which is the ELBO plus w_dab times the study classifier's
+    own loss. Drawn together because their separation is the quantity in
+    question: in r1_ref val_nb moved 0.032 across twenty epochs while val_dab
+    moved 0.454, so the total is the dab curve with an offset, and seeing the
+    flat solid line under the swinging dashed one is what makes that legible.
+    Plotting the total alone hid the model; plotting the ELBO alone hid the
+    classifier.
 
     The per-term panels are the rest of the point. A single curve that stops
     falling cannot distinguish a reconstruction plateau from a posterior
@@ -65,13 +66,23 @@ def loss_curves(history: dict) -> plt.Figure:
 
     ax = axes[0]
     for split, colour in (("train", 0), ("val", 1)):
-        series = _elbo_series(history, split)
-        ax.plot(range(len(series)), series, label=split,
+        elbo = _elbo_series(history, split)
+        ax.plot(range(len(elbo)), elbo, label=f"{split} — ELBO",
                 color=PALETTE.categorical[colour])
-    ax.set_title("Model objective (ELBO)")
-    ax.set_ylabel("NB + β·KL, per gene")
+        total = history.get(f"{split}_loss", [])
+        ax.plot(range(len(total)), total, ls="--", lw=1.2,
+                label=f"{split} — total", color=PALETTE.categorical[colour])
+    ax.set_title("Model objective, and the total")
+    ax.set_ylabel("per gene")
     ax.set_xlabel("epoch")
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, fontsize=7)
+    # Both, because the gap between them IS w_dab * dab and the reader should
+    # be able to see how much of the total is the classifier rather than the
+    # model. In r1_ref the dashed line is the solid one plus a term that swings
+    # fourteen times as hard, which is why the dashed line alone was
+    # unreadable — not a reason to stop drawing it.
+    ax.text(0.02, 0.03, "gap between the pair = the study classifier's loss",
+            transform=ax.transAxes, fontsize=7, va="bottom", color=PALETTE.muted)
 
     for ax, (key, title) in zip(axes[1:], terms):
         train, val = history.get(f"train_{key}", []), history.get(f"val_{key}", [])

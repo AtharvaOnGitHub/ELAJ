@@ -14,12 +14,21 @@ that would leave the adversary frozen at initialisation and the whole DAB
 mechanism inert.
 
 ```
-total = w_nb·NB
+elbo  = w_nb·NB
       + β(t)·w_kl_gauss·KL_gauss / G_meas
       + β(t)·w_kl_vmf·KL_vmf     / G_meas
-      + w_dab·CE(dab_logits, study_id)      ← λ(t) is inside, via gradient reversal
       + w_cce·InfoNCE
+
+total = elbo
+      + w_dab·CE(dab_logits, study_id)      ← λ(t) is inside, via gradient reversal
 ```
+
+Two numbers, deliberately. `total` is what `backward()` descends — the
+classifier must be trained for `dab` to mean anything. `elbo` is the **model's**
+objective, and it is the one to read: in `r1_ref`, `val_nb` moved 0.032 across
+twenty epochs while `val_dab` moved 0.454, so `total` was the `dab` curve with an
+offset and said nothing about the model. Both are plotted, on one panel, so the
+gap between them shows how much of the total is the classifier.
 
 ---
 
@@ -202,18 +211,59 @@ gradient and therefore **ascends** — it is pushed to make study id unpredictab
 ### `DABClassifier` — [`adversarial.py:18`](../../src/endo_model/model/objectives/adversarial.py:18)
 
 ```python
-dab_input = cat([mu_gauss, mu_angle], -1)      # (B, d_gauss + n_vMF)
+circular  = angles_to_cartesian(mu_angle)        # (B, 2·n_vMF)
+dab_input = cat([mu_gauss, circular], -1)        # (B, d_gauss + 2·n_vMF)
 reversed  = GradientReversalFunction.apply(dab_input, lambda_dab)
-return self.classifier(reversed)               # (B, n_studies)
+return self.classifier(reversed)                 # (B, n_studies)
 ```
 
 Two-layer MLP: `Linear(d_in, hidden) → ReLU → Dropout → Linear(hidden, n_studies)`.
 
 > **Decision:** the input is the **deterministic means**, not the sampled `z`.
 > Sampling noise would appear to the classifier as variance unrelated to study
-> identity, weakening the adversarial signal. Note this uses `mu_angle` (the raw
-> `n_vMF` angles), not `z_vmf` (the `2·n_vMF` cos/sin pair) — hence
-> `d_in = d_gauss + n_vMF`, which is what `CompositeLoss.__init__` passes.
+> identity, weakening the adversarial signal.
+
+### Why the circular half is a (cos, sin) pair
+
+`mu_angle` is an angle θ in radians, produced by an unbounded `nn.Linear`.
+`nn.Linear` multiplies whatever it is given by a weight, i.e. it reads its input
+as a **coordinate**. An angle is not one:
+
+```
+θ = −π   and   θ = +π    are the same direction
+              as numbers  they are 2π apart — the widest gap in the range
+```
+
+So the classifier saw a discontinuity that lives in the encoding and not in the
+cells, and two identical cells straddling the seam looked maximally different.
+
+The embedding of the circle S¹ into the plane removes it:
+
+```
+θ  ↦  (cos θ, sin θ)
+```
+
+**Periodic**, because `cos` and `sin` have period 2π, so θ and θ + 2π give the
+same pair. **Metric-preserving**, because for two angles α and β:
+
+```
+‖(cos α, sin α) − (cos β, sin β)‖²
+    = (cos α − cos β)² + (sin α − sin β)²
+    = (cos²α + sin²α) + (cos²β + sin²β) − 2(cos α cos β + sin α sin β)
+    = 1 + 1 − 2 cos(α − β)                    [cos²x + sin²x = 1;
+    = 2 − 2 cos(α − β)                         cos(α−β) = cos α cos β + sin α sin β]
+```
+
+The distance depends on `α − β` and nothing else: 0 when the angles agree, 2
+when they are opposite, and continuous across the wrap point. Cost is one extra
+dimension per circular latent, hence `d_in = d_gauss + 2·n_vMF`.
+
+The same helper — [`circular.py`](../../src/endo_model/model/latent/circular.py)
+— is used by CCE (§5) and by the circular UMAP panel. `BilinearDecoder` never
+needed it: `VonMisesBranch` already hands it `z_vmf` as cos/sin pairs.
+
+> **Every run up to and including `r1_ref` and `r1_cce` predates this.** Their
+> DAB numbers, CCE numbers and circular UMAPs all carry the seam.
 
 ### λ ramp — [`composite.py:107`](../../src/endo_model/model/objectives/composite.py:107)
 
@@ -242,9 +292,15 @@ outright, i.e. study identity is trivially recoverable. `dab` rising towards
 Only active when `model_output2` is not `None`.
 
 ```python
-emb1 = cat([out1["mu_gauss"], out1["mu_angle"]], -1)
-emb2 = cat([out2["mu_gauss"], out2["mu_angle"]], -1)
+emb1 = cat([out1["mu_gauss"], angles_to_cartesian(out1["mu_angle"])], -1)
+emb2 = cat([out2["mu_gauss"], angles_to_cartesian(out2["mu_angle"])], -1)
 ```
+
+Same `(cos θ, sin θ)` embedding as DAB, and for the same reason with more force:
+InfoNCE scores pairs by **cosine similarity**, which is purely a statement about
+the geometry of the embedding. On raw angles, two views of one cell landing at
+θ = −π and θ = +π — one point on the circle — were being pushed apart as though
+they were opposite.
 
 `InfoNCELoss.forward`: L2-normalise both, cosine-similarity matrix `(B, B)`
 scaled by `1/τ`, cross-entropy against `arange(B)` in **both directions**,
@@ -269,22 +325,42 @@ there is no wasted compute.
 
 | Weight | Default | Set from |
 |---|---|---|
-| `w_nb` | 1.0 | hardcoded default |
-| `w_kl_gauss` | 1.0 | hardcoded default |
-| `w_kl_vmf` | 1.0 | hardcoded default |
-| `w_dab` | 1.0 | hardcoded default |
+| `w_nb` | 1.0 | `model.loss.w_nb` |
+| `w_kl_gauss` | 1.0 | `model.loss.w_kl_gauss` |
+| `w_kl_vmf` | 1.0 | `model.loss.w_kl_vmf` |
+| `w_dab` | 1.0 | `model.loss.w_dab` |
 | `w_cce` | 0.0 | `model.cce.lambda_cce if enabled` |
 | `lambda_dab_max` | 1.0 | `model.dab.lambda_dab` |
 | `cce_temperature` | 0.1 | `model.cce.temperature` |
 
-⚠ Only three of seven are reachable from YAML. `w_nb`, `w_kl_gauss`,
-`w_kl_vmf`, `w_dab` are constructor defaults that `train.py` never overrides —
+All seven are reachable from YAML. `train.py` passes each of the `model.loss.*`
+weights into `CompositeLoss` and logs the resolved values at startup, so a run's
+log states what it actually used.
 
-Note `w_dab = 1.0` is why `dab` still appears in `total` and the classifier still
-trains even at `lambda_dab: 0.0`. `lambda_dab` is the **gradient-reversal
-scale**, not the loss weight: at 0 no reversed gradient reaches the encoder, but
-the number stays comparable across arms. That is deliberate — it is what lets
-`s0_ref` report how readable study identity is from an unopposed latent.
+**`w_dab` has never been set by any experiment config.** Every run to date used
+the 1.0 default, so the adversary's weight in the objective has been a constant
+that was never treated as a hyperparameter. It is one.
+
+### Two knobs, two jobs
+
+`w_dab` and `lambda_dab` are not alternatives and neither is redundant. The
+gradient-reversal layer sits on the classifier's **input**, so gradient reaching
+the classifier's own weights never passes through it:
+
+| Recipient | Gradient it receives |
+|---|---|
+| classifier weights `θ_c` | `w_dab · ∂dab/∂θ_c` — unaffected by λ |
+| encoder `h` | `−λ · w_dab · ∂dab/∂h` |
+
+So `w_dab` scales both paths and λ scales only the encoder's. Putting λ into the
+loss instead would leave the classifier untrained at λ = 0, and an untrained
+classifier reports chance whatever the latent holds — the diagnostic would be
+dead. Keeping them apart is what lets a λ = 0 arm report how readable study
+identity is from an *unopposed* latent.
+
+The consequence for reading `metrics.csv`: `dab` reflects classifier accuracy,
+not adversarial pressure. `total` = `elbo` + `w_dab · dab`, and with λ = 0 the
+`dab` half of that sum reaches the encoder not at all.
 
 **Read `dab` against `ln(n_live_studies)`, not `ln(n_configured)`.** Four of the
 twelve configured studies contribute no cells after the disease filter, and the

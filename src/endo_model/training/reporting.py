@@ -131,6 +131,8 @@ class EpochReporter:
         latent_every:   Epochs between latent figures. 0 disables them.
         max_latent_cells: Size of the fixed val subsample used for UMAP.
         seed:           UMAP seed, so consecutive epochs are comparable.
+        tissue_names:   Level column index -> {code -> label}, for the tissue
+                        legends. Absent, those panels legend integers.
     """
 
     def __init__(
@@ -143,10 +145,12 @@ class EpochReporter:
         latent_every: int = 10,
         max_latent_cells: int = 20000,
         seed: int = 24,
+        tissue_names: dict[int, dict[int, str]] | None = None,
     ) -> None:
         self.fig_dir = Path(out_dir) / "figures"
         self.n_studies = n_studies
         self.id_to_name = id_to_name or {}
+        self.tissue_names = tissue_names or {}
         self.baseline_all = baseline_all
         self.baseline_hvg = baseline_hvg
         self.latent_every = latent_every
@@ -214,8 +218,20 @@ class EpochReporter:
             # input. Leaving the old "CIRCULAR" warning up would have argued
             # against our own result.
             "by disease status": (latents["disease"], _DISEASE_NAMES, None),
-            "by tissue compartment": (latents["tissue"][:, 0], None, None),
-            "by organ": (latents["tissue"][:, 1], None, None),
+            # Named, not numbered. These two panels used to legend themselves
+            # "1 (17,303)" and "2 (2,009)", which says how many cells carry a
+            # code and nothing about what the code is.
+            "by tissue compartment": (
+                latents["tissue"][:, 0], self.tissue_names.get(0), None,
+            ),
+            "by organ": (latents["tissue"][:, 1], self.tissue_names.get(1), None),
+            # tissue_type is where endometrium and myometrium separate, and it
+            # is the level with the most distinct values actually present in
+            # this corpus. Omitting it left the two tissue panels dominated by
+            # a single category — organ was 16,074 of 19,312 cells in code 1.
+            "by tissue type": (
+                latents["tissue"][:, 2], self.tissue_names.get(2), None,
+            ),
         }
         self._draw(
             f"latent_umap_epoch{epoch:03d}",
@@ -235,14 +251,19 @@ class EpochReporter:
         that run was the first with six live circular dimensions. The study
         information had somewhere else to go. This panel is where to look for it.
 
-        Plotted from the angles directly rather than from (cos, sin) pairs: the
-        pair is how the model hands the angle to the decoder, but for a
-        neighbour embedding it doubles the width for no added information.
+        Plotted from (cos θ, sin θ) pairs and not from the angles. The earlier
+        version passed the angles straight in, on the reasoning that the pair
+        doubles the width for no added information. That reasoning was wrong:
+        UMAP builds its graph from Euclidean distances, and on a raw angle two
+        cells at θ = −π and θ = +π sit 2π apart while occupying the same point
+        on the circle. Every circular UMAP before this change carried a seam
+        that belonged to the encoding rather than to the cells.
         """
         angles = latents.get("mu_angle")
         if angles is None or angles.shape[1] < 2:
             return
-        coords = safe_umap(angles, seed=self.seed)
+        circular = np.concatenate([np.cos(angles), np.sin(angles)], axis=1)
+        coords = safe_umap(circular, seed=self.seed)
         if coords is None:
             return
         self._draw(

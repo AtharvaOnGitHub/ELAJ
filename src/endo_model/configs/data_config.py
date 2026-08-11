@@ -172,6 +172,9 @@ class DataConfig:
     # UBERON -> tissue level mapping. None disables it and every cell
     # reads level 0, which is what every run before this one did.
     tissue_hierarchy_csv: Optional[str] = None
+    # Integer level code -> readable name, for figure legends only. Nothing the
+    # model reads comes from here; None just leaves the legends numeric.
+    tissue_level_names_csv: Optional[str] = None
 
     def resolve_studies(self, root: str = ".") -> List[StudyConfig]:
         """Return the study list, loading from CSV if studies_csv is configured.
@@ -212,4 +215,5 @@ class DataConfig:
                 str(s) for s in d.get("include_disease_statuses", [])
             ],
             tissue_hierarchy_csv=d.get("tissue_hierarchy_csv"),
+            tissue_level_names_csv=d.get("tissue_level_names_csv"),
         )

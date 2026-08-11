@@ -275,6 +275,7 @@ def main() -> None:
         latent_every=train_cfg.diagnostics.latent_every,
         max_latent_cells=train_cfg.diagnostics.max_latent_cells,
         seed=exp_cfg.seed,
+        tissue_names=_tissue_level_names(root, data_cfg),
     )
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
@@ -348,6 +349,28 @@ def main() -> None:
             monitor.skipped_steps,
         )
     logger.info("Training complete. Outputs written to %s", out_dir)
+
+
+def _tissue_level_names(root: str, data_cfg) -> dict[int, dict[int, str]]:
+    """Level column index -> {code -> label}, for the tissue UMAP legends.
+
+    Returns empty on any failure. These names are decoration on a diagnostic
+    figure; a missing or malformed CSV must not stop a training run that is
+    otherwise ready to go.
+    """
+    if not data_cfg.tissue_level_names_csv:
+        return {}
+    from endo_model.data.tissue_level_names import LEVEL_ORDER, TissueLevelNames
+
+    try:
+        names = TissueLevelNames(Path(root) / data_cfg.tissue_level_names_csv)
+    except Exception as exc:  # noqa: BLE001 — legends are not load-bearing
+        logger.warning(
+            "Tissue level names unavailable (%s: %s); tissue legends will show "
+            "integer codes.", type(exc).__name__, exc,
+        )
+        return {}
+    return {i: names.for_index(i) for i in range(len(LEVEL_ORDER))}
 
 
 def _save_run_config(out_dir: Path, exp_cfg, model_cfg, train_cfg, data_cfg) -> None:

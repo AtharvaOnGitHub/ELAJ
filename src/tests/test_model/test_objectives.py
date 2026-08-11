@@ -1,5 +1,7 @@
 """Tests for all objective loss functions."""
 
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -107,21 +109,48 @@ class TestVonMisesKL:
 # ── DABClassifier ─────────────────────────────────────────────────────────────
 
 class TestDABClassifier:
+    # d_in is D_GAUSS + 2*N_VMF: each circular latent enters as a (cos, sin)
+    # pair, not as a raw angle.
     def test_output_shape(self):
-        dab = DABClassifier(D_GAUSS + N_VMF, N_STUDIES)
+        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES)
         mu_gauss = torch.randn(B, D_GAUSS)
         mu_angle = torch.randn(B, N_VMF)
         out = dab(mu_gauss, mu_angle, lambda_dab=1.0)
         assert out.shape == (B, N_STUDIES)
 
     def test_gradient_reversal_in_backward(self):
-        dab = DABClassifier(D_GAUSS + N_VMF, N_STUDIES)
+        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES)
         mu_gauss = torch.randn(B, D_GAUSS, requires_grad=True)
         mu_angle = torch.randn(B, N_VMF, requires_grad=True)
         out = dab(mu_gauss, mu_angle, lambda_dab=1.0)
         out.sum().backward()
         # With reversal, gradient at mu_gauss is negated
         assert mu_gauss.grad is not None
+
+    def test_angles_two_pi_apart_are_the_same_input(self):
+        """theta and theta + 2*pi are one direction, so one set of logits.
+
+        This is the defect the (cos, sin) embedding fixes. Feeding the raw angle
+        to nn.Linear made -pi and +pi the two most distant points in the range
+        while they name the same place on the circle.
+        """
+        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES).eval()
+        mu_gauss = torch.randn(B, D_GAUSS)
+        mu_angle = torch.rand(B, N_VMF) * 2 * math.pi - math.pi
+
+        out = dab(mu_gauss, mu_angle, lambda_dab=0.0)
+        wrapped = dab(mu_gauss, mu_angle + 2 * math.pi, lambda_dab=0.0)
+        assert torch.allclose(out, wrapped, atol=1e-4)
+
+    def test_gradient_reaches_the_angle_head(self):
+        """d/dtheta of cos and sin is not identically zero at generic angles."""
+        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES)
+        mu_gauss = torch.randn(B, D_GAUSS)
+        mu_angle = torch.randn(B, N_VMF, requires_grad=True)
+        dab(mu_gauss, mu_angle, lambda_dab=1.0).sum().backward()
+        assert mu_angle.grad is not None
+        assert torch.isfinite(mu_angle.grad).all()
+        assert mu_angle.grad.abs().sum() > 0
 
 
 # ── InfoNCELoss ───────────────────────────────────────────────────────────────

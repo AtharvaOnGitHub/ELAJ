@@ -16,6 +16,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from endo_model.model.latent.circular import angles_to_cartesian
+
 from .adversarial import DABClassifier
 from .contrastive import InfoNCELoss
 from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
@@ -74,13 +76,28 @@ class CompositeLoss(nn.Module):
         self.nb_loss = NegativeBinomialLoss()
         self.gauss_kl = GaussianKLLoss()
         self.vmf_kl = PowerSphericalKLLoss()
+        # d_gauss + 2*n_vMF: the classifier receives each circular latent as a
+        # (cos, sin) pair rather than as a raw angle. See
+        # endo_model/model/latent/circular.py.
         self.dab = DABClassifier(
-            d_in=d_gauss + n_vMF,
+            d_in=d_gauss + 2 * n_vMF,
             n_studies=n_studies,
             hidden_dim=dab_hidden_dim,
             dropout=dab_dropout,
         )
         self.cce = InfoNCELoss(temperature=cce_temperature) if w_cce > 0.0 else None
+
+    @staticmethod
+    def _embedding(model_output: dict[str, Tensor]) -> Tensor:
+        """One cell's deterministic latent, laid out for a distance-based loss.
+
+        The Gaussian mean as-is, then each circular mean angle as a (cos, sin)
+        pair. Width is d_gauss + 2*n_vMF.
+        """
+        return torch.cat(
+            [model_output["mu_gauss"], angles_to_cartesian(model_output["mu_angle"])],
+            dim=-1,
+        )
 
     def forward(
         self,
@@ -152,12 +169,17 @@ class CompositeLoss(nn.Module):
         )
         dab_loss = F.cross_entropy(dab_logits, batch["study_id"])
 
-        # CCE — contrastive loss over concat(mu_gauss, mu_angle) so circular
-        # latent dims are included in the alignment objective.
+        # CCE — contrastive loss over concat(mu_gauss, cos/sin of mu_angle) so
+        # circular latent dims are included in the alignment objective.
+        #
+        # InfoNCE scores pairs by cosine similarity, which is a function of the
+        # embedding's geometry, so feeding it a raw angle had the same defect
+        # the classifier had: two cells at θ = −π and θ = +π occupy one point on
+        # the circle and were being pushed apart as though they were opposite.
         cce_loss = torch.tensor(0.0, device=nb.device)
         if self.cce is not None and model_output2 is not None:
-            emb1 = torch.cat([model_output["mu_gauss"], model_output["mu_angle"]], dim=-1)
-            emb2 = torch.cat([model_output2["mu_gauss"], model_output2["mu_angle"]], dim=-1)
+            emb1 = self._embedding(model_output)
+            emb2 = self._embedding(model_output2)
             cce_loss = self.cce(emb1, emb2)
 
         # The model's own objective: reconstruction plus the price of what the

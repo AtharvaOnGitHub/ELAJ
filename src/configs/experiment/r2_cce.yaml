@@ -1,6 +1,6 @@
 name: r2_cce
 description: >
-  Contrastive embeddings on, at lambda 0.5.
+  Contrastive embeddings on. r2_lr_1e3 with CCE and nothing else.
 
   Wave R2. Six arms on the corrected corpus, the corrected circular encoding,
   and the tissue-stratified split. Nothing from s0, s1 or r1 is comparable to
@@ -54,16 +54,26 @@ overrides:
   # half rather than adding any. Whether that was the loss or the broken
   # encoding is the second question this arm asks.
   #
-  # !! TWO VARIABLES. This arm turns CCE on AND raises lambda_dab from 0.1 to
-  # 0.5 -- five times r2_lr_1e3, and the highest lambda in the wave. Its pairing
-  # with r2_lr_1e3 is therefore broken: a difference in val_nb between them is
-  # CCE, or the adversary, or both, and nothing in the run separates the two.
-  # s1_cce failed the same way (CCE and beta_max moved together) and could not
-  # be read. Setting lambda_dab to 0.1 here restores the pairing at the cost of
-  # leaving 0.5 untested; adding an r2_dab_05 arm tests 0.5 cleanly instead.
+  # ONE VARIABLE, and it has to stay that way. Every setting below is
+  # r2_lr_1e3's, so a difference in val_nb between the two arms is CCE and
+  # nothing else. lambda_dab in particular is 0.1 here because it is 0.1 there;
+  # an earlier draft had it at 0.5 and that alone would have made the pair
+  # unreadable, since a difference could then have been CCE, or the adversary,
+  # or both. s1_cce failed in exactly this way -- it moved CCE and beta_max
+  # together and its +1.2% could not be attributed to either.
+  #
+  # The cost is that lambda 0.5 goes untested in this wave. That is the right
+  # trade: an untested setting can be tested later, an unreadable run cannot be
+  # read later. A clean r2_dab_05 arm with CCE off is how 0.5 gets measured.
   #
   # 15 epochs: two forward passes per batch put an epoch near 74 minutes against
   # ~37, so 20 would run past the 24 h walltime.
+  #
+  # That is the one asymmetry the pairing cannot remove, and it is not a
+  # hyperparameter -- it is a budget. r2_lr_1e3 gets five more epochs to improve
+  # in, so compare the two at their best epoch ON OR BEFORE 15 as well as at
+  # their overall best. r1_ref was still improving at epoch 18, so the
+  # difference is unlikely to be nothing.
   model.cce.enabled: true
   model.cce.lambda_cce: 0.1
 
@@ -71,4 +81,4 @@ overrides:
   training.optimizer.lr: 1.0e-3
   model.loss.w_kl_vmf: 0.1
   model.loss.w_dab: 0.5
-  model.dab.lambda_dab: 0.5
+  model.dab.lambda_dab: 0.1

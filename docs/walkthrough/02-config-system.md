@@ -218,6 +218,27 @@ the feature exists to prevent. Excluding everything also raises.
 call it once each on freshly-loaded configs, so no aliasing bug exists today —
 it is a latent hazard if a caller ever reuses a list.
 
+#### The two tissue CSVs
+
+| Key | Read by | Reaches the model? |
+|---|---|---|
+| `tissue_hierarchy_csv` | `TissueHierarchy` | **yes** — UBERON term → four integer levels, which condition the decoder and stratify the split |
+| `tissue_level_names_csv` | `TissueLevelNames` | **no** — those integers → readable names, for the split coverage log and the UMAP legends |
+
+The second exists because the names cannot be recovered from the first. That
+file is keyed by term, and a level code is deliberately shared by several terms:
+`organ = 1` covers both endometrium and myometrium, and the name for the pair is
+"uterus", which appears nowhere in it. Setting it to `null` costs nothing but
+legibility — legends and log lines fall back to integer codes.
+
+#### `SplitConfig.seed` is not `ExperimentConfig.seed`
+
+`data.splits.seed` fixes which patients are held out; `seed` at the top of an
+experiment YAML fixes initialisation, dropout and batch order. Varying the
+second alone gives a replicate scored on identical held-out cells, which is what
+`r2_ref_s7` is for. Collapsing them into one seed would make every replicate a
+different problem and there would be no way to measure run-to-run noise at all.
+
 ---
 
 ## 3. Model-side YAML files

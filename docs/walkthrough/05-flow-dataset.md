@@ -44,19 +44,21 @@ global index space — a test fixture that would hide index bugs otherwise.
 
 ---
 
-## 2. `EndometriosisDataset.__init__` — [`dataset.py:197`](../../src/endo_model/data/dataset.py:197)
+## 2. `EndometriosisDataset.__init__` — [`dataset.py:318`](../../src/endo_model/data/dataset.py:318)
 
 Runs in two passes over the studies, and the two-pass structure is forced by the
 split.
 
-### Pass 1 — collect every patient id — [`:227`](../../src/endo_model/data/dataset.py:227)
+### Pass 1 — collect every patient id — [`:362`](../../src/endo_model/data/dataset.py:362)
 
 Opens every `.h5ad`, requires `obs["patient_id"]` (raises `KeyError` naming the
 study if absent), and accumulates ids across **all** studies.
 
-> **Decision:** the split is global, not per-study, so every patient must be
-> known before any can be assigned. That is why all files are opened before any
-> records are built.
+> **Decision:** every study's patients must be known before any can be
+> assigned, so all files are opened before any records are built. The split was
+> once a single global shuffle, which is where the two-pass structure came from;
+> it is now stratified per (study, tissue), and the two passes are still needed
+> because a patient's stratum depends on the tissue mix of all their cells.
 
 ### Split assignment — [`splits.py`](../../src/endo_model/data/splits.py)
 
@@ -121,15 +123,15 @@ on best-epoch `val_nb` was ~0.3 % under study-only stratification; it should be
 re-measured against a two-seed pair before arms separated by less than that are
 believed.
 
-### Pass 2 — build records — [`:275`](../../src/endo_model/data/dataset.py:275)
+### Pass 2 — build records — [`:419`](../../src/endo_model/data/dataset.py:419)
 
 Per study:
 
-1. **Map genes to global indices** [`:277`](../../src/endo_model/data/dataset.py:277).
+1. **Map genes to global indices** [`:437`](../../src/endo_model/data/dataset.py:437).
    Walk `adata.var_names`; keep those in the vocabulary, recording both the
    global index and the study-local position. Genes in the study but not the
    vocabulary are dropped; genes in the vocabulary but not the study become DNS.
-2. **Select this split's cells** [`:297`](../../src/endo_model/data/dataset.py:297).
+2. **Select this split's cells** [`:449`](../../src/endo_model/data/dataset.py:449).
    `split_assignments.get(pid, "train")` — an unseen patient defaults to train.
 3. **Optional subsample** to `max_cells_per_study`, with a separate RNG seeded
    `seed + 1` so subsampling cannot perturb the split.
@@ -137,14 +139,14 @@ Per study:
    `_disease_status_codes`. Vectorised deliberately: the per-cell loop below then
    does array indexing rather than pandas `.iloc`, which is orders of magnitude
    slower per row.
-5. **Slice and keep sparse** [`:322`](../../src/endo_model/data/dataset.py:322):
+5. **Slice and keep sparse** [`:477`](../../src/endo_model/data/dataset.py:477):
    `x_matrix.tocsr()[cell_idx_arr][:, local_idx_arr]` — subset to this split's
    cells and this study's vocabulary genes in one go, then hand to `StudyPanel`.
 6. **Emit one `_CellRecord` per cell** pointing at `(panel, panel_row)`.
 
 ### The obs coercion helpers
 
-**`_tissue_level_matrix`** [`:58`](../../src/endo_model/data/dataset.py:58) —
+**`_tissue_level_matrix`** [`:87`](../../src/endo_model/data/dataset.py:87) —
 builds `(n_cells, 4)` int64 from four obs columns. Each is coerced with
 `pd.to_numeric(errors="coerce")`; all-NaN means the column is treated as absent
 (level 0) with a warning.
@@ -155,14 +157,14 @@ builds `(n_cells, 4)` int64 from four obs columns. Each is coerced with
 > CELLxGENE-derived study fails to load. Partially-numeric columns keep their
 > valid values and default only the rest.
 
-**`_disease_status_codes`** [`:109`](../../src/endo_model/data/dataset.py:109) —
+**`_disease_status_codes`** [`:230`](../../src/endo_model/data/dataset.py:230) —
 maps strings through `DISEASE_STATUS_TO_INT` after `.strip().str.lower()`.
 Already-integer columns pass through as codes. Unrecognised labels become
 `other` (3) **and are logged with the actual distinct values found**, because a
 silent fallback here is how a whole study's labels can be wrong without anyone
 noticing.
 
-### `_CellRecord` — [`:152`](../../src/endo_model/data/dataset.py:152)
+### `_CellRecord` — [`:274`](../../src/endo_model/data/dataset.py:274)
 
 Seven fields; **counts are not among them**. The record holds `panel` (a shared
 reference) and `panel_row` (an int).
@@ -245,7 +247,7 @@ worker, which is why the CPU count in the sbatch script matters.
 
 ---
 
-## 4. `__getitem__` — [`dataset.py:363`](../../src/endo_model/data/dataset.py:363)
+## 4. `__getitem__` — [`dataset.py:514`](../../src/endo_model/data/dataset.py:514)
 
 Six keys. `counts` is `rec.panel.counts(rec.panel_row)`; the rest are stored
 scalars. `patient_id` rides along but is **not** used by the model — it exists

@@ -92,7 +92,7 @@ the naïve `np.concatenate` it replaced would have raised a shape error.
 | group → its global indices | `GeneVocabulary.global_indices_for_group` | [vocabulary.py:121](../../src/endo_model/data/vocabulary.py:121) |
 | global → (group, within) | `MeasuredGeneLayoutCache`, per study | [gene_layout.py](../../src/endo_model/model/gene_layout.py) |
 | global → measured position | `global_to_meas_pos` (rebuilt per forward) | [endo_model.py:181](../../src/endo_model/model/endo_model.py:181) |
-| study-local → global | `global_idx_arr` in the Dataset loop | [dataset.py:293](../../src/endo_model/data/dataset.py:293) |
+| study-local → global | `global_idx_arr` in the Dataset loop | [dataset.py:437](../../src/endo_model/data/dataset.py:437) |
 
 There is a fourth, transient space: **study-local index**, the column position in
 that study's own `.h5ad`. It exists only inside `EndometriosisDataset.__init__`

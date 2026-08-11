@@ -175,7 +175,7 @@ patient; that patient lands in one split; cells from the other study leak.
 
 ## I11 — Patient-held-out splits; never cell-level
 
-**Enforced by** `EndometriosisDataset.__init__` ([dataset.py:246](../../src/endo_model/data/dataset.py:246)).
+**Enforced by** `EndometriosisDataset.__init__` ([dataset.py:392](../../src/endo_model/data/dataset.py:392)).
 **If violated:** *silent.* Validation loss drops and means nothing — single-cell
 replicates from one donor are far more similar than cells from different donors.
 
@@ -224,12 +224,28 @@ encoder carries no study information. DAB becomes a slow no-op.
 
 ---
 
-## I16 — `mu_angle` feeds DAB, not `z_vmf`
+## I16 — every consumer reads the circular latent as (cos θ, sin θ)
 
-**Enforced by** `DABClassifier.forward` and `d_in = d_gauss + n_vMF` in
+**Enforced by** `angles_to_cartesian`
+([circular.py](../../src/endo_model/model/latent/circular.py)), called by
+`DABClassifier.forward`
+([adversarial.py:64](../../src/endo_model/model/objectives/adversarial.py:64)),
+`CompositeLoss._embedding` for CCE
+([composite.py:91](../../src/endo_model/model/objectives/composite.py:91)), and
+`EpochReporter._draw_circular_umap`. `d_in = d_gauss + 2·n_vMF` in
 `CompositeLoss.__init__`.
-**If violated:** *loud* — a `(B, d_gauss + 2·n_vMF)` input into a
-`Linear(d_gauss + n_vMF, …)`.
+
+**Why:** `mu_angle` is an angle θ out of an unbounded `nn.Linear`. Anything that
+treats it as a *coordinate* — a linear layer, a cosine similarity, a Euclidean
+neighbour graph — is wrong at the wrap point, because θ = −π and θ = +π are one
+direction sitting 2π apart on the number line. The decoder is exempt:
+`VonMisesBranch` already hands it `z_vmf` as cos/sin pairs.
+
+**If violated:** *loud* if the width is wrong — a `(B, d_gauss + n_vMF)` input
+into a `Linear(d_gauss + 2·n_vMF, …)`. *Silent* if a new consumer simply reads
+`mu_angle` directly, which is how this went unnoticed through waves s0, s1 and
+r1: the classifier, the contrastive loss and every circular UMAP carried a seam
+that is in the encoding and not in the cells.
 
 ---
 

@@ -277,13 +277,19 @@ half). Slower than the KL ramp, deliberately: a strong adversary early destroys
 features before they exist.
 
 Note λ scales the **gradient reversal**, not the loss. `w_dab * dab_loss` enters
-`total` at full weight throughout; what ramps is how hard that gradient pushes
-back into the encoder. So `dab` in `metrics.csv` reflects classifier accuracy,
-not adversarial pressure.
+`total` at `w_dab` throughout; what ramps is how hard that gradient pushes back
+into the encoder. So `dab` in `metrics.csv` reflects classifier accuracy, not
+adversarial pressure. See §6 for how the two knobs divide the work.
 
 **What to watch:** `dab` collapsing to ~0 early means the classifier is winning
-outright, i.e. study identity is trivially recoverable. `dab` rising towards
-`log(n_studies) = log(11) ≈ 2.40` means the encoder is succeeding.
+outright, i.e. study identity is trivially recoverable — `r1_ref` ended at 0.444.
+`dab` rising towards `ln(n_live_studies)` means the encoder is succeeding.
+
+**Use the live count, not the configured one.** Studies emptied by the disease
+filter are studies the classifier is never asked about, and including them moves
+the line. The corpus has **nine** live studies since wang_2022 was re-collated,
+so the line is `ln(9) = 2.197`. `train.py` computes it and passes it to
+`EpochReporter`; the figure draws it labelled.
 
 ---
 
@@ -377,16 +383,21 @@ Also note the config default for `cce.temperature` is 0.07 while
 
 ---
 
-## 7. Return value — [`composite.py:130`](../../src/endo_model/model/objectives/composite.py:130)
+## 7. Return value — [`composite.py:213`](../../src/endo_model/model/objectives/composite.py:213)
 
 ```python
-{"nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce", "total"}
+{"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce", "total"}
 ```
 
 All tensors. `Trainer` calls `.item()` on each for logging, and `.backward()` on
 `total` only. `beta_kl` is a plain `torch.tensor(beta_kl)` with no device or
 grad — fine for `.item()`, and it is the reason the annealing curve shows up in
 `metrics.csv`.
+
+`elbo` is the model's own objective and the one to read. `total` is what
+`backward()` descends. They differ by `w_dab · dab`, and both reach
+`metrics.csv` — `elbo` as `train_elbo`/`val_elbo` via `_record`, `total` as
+`train_loss`/`val_loss`.
 
 ---
 

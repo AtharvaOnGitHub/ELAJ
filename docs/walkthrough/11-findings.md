@@ -7,8 +7,10 @@ inferred.
 
 ## The run ledger
 
-Seven training runs. **One is a valid measurement.** That is the most important
-fact on this page, and the reason for the rest of it.
+### Waves 0–1: the debugging runs
+
+Seven training runs. **One is a valid measurement.** That was the most important
+fact on this page when it was written, and the reason for the rest of it.
 
 | # | Job | What was new | Outcome | Verdict |
 |---|---|---|---|---|
@@ -19,6 +21,47 @@ fact on this page, and the reason for the rest of it.
 | 5 | 50361462 `kl_check_no_dab` | as above, λ_dab 0 | `val_nb` 0.399/0.394/0.401 | **void** |
 | 6 | 50375975 `dab_off` | circular KL fixed, HVG fixed, chance line fixed | HVG better than baseline all 3 epochs | **partial** |
 | 7 | 50375976 `dab_soft` | λ_dab 0.2 | `val_dab` 4.50 → **18.51** → 10.63 (chance 2.079) | **void** |
+
+### Waves s0, s1, r1: the tuning runs
+
+Ten more runs once the model trained. These are measurements rather than
+debugging, but **none of them is comparable to a wave-R2 arm** — see the
+invalidation note below.
+
+| Wave | Arms | What it settled |
+|---|---|---|
+| s0 | `s0_ref`, `s0_ref_seed7`, `s0_lr_low`, `s0_lr_high`, `s0_dab` | LR wants to be high; the surviving circular dimension was near-Gaussian; the seed floor (§A9) |
+| s1 | `s1_freebits`, `s1_circ_low`, `s1_cce` | `w_kl_vmf` 0.1 is the setting that keeps the circular branch alive; `s1_cce` drove `kl_vmf` to 3.75e-10, killing it outright |
+| r1 | `r1_ref`, `r1_cce` | `r1_ref` reproduced `s1_circ_low` on the corrected corpus; `r1_cce` was cancelled mid-flight |
+
+`r1_ref` in full, since it is the best measurement the project has:
+
+| | best epoch | model | baseline | gap |
+|---|---|---|---|---|
+| all measured genes | 18 | 0.3778 | 0.41235 | **+8.4%** |
+| highly variable genes | 18 | 1.0652 | 1.18626 | **+10.2%** |
+
+`kl_vmf` rose monotonically 1.89e-4 → 1.43e-3 and was still climbing at epoch 19
+— the circular branch was filling, not collapsing. `val_dab` ended at 0.444
+against a chance of `ln(9) = 2.197`, which is the classifier naming the study
+almost perfectly; `lambda_dab` was 0 in that arm, so nothing opposed it.
+
+### ⚠ Why waves s0, s1 and r1 do not transfer to R2
+
+Three changes since, any one of which breaks comparability:
+
+1. **The circular encoding.** DAB and CCE received `mu_angle` as a raw angle,
+   where θ = −π and θ = +π are one direction 2π apart on the number line. Every
+   `dab` number, every `cce` number and every circular UMAP in those waves
+   carries that seam. See [07](07-flow-losses.md) §4 and [10](10-invariants.md) I16.
+2. **The split.** Strata are now (study, tissue_type) rather than study, so a
+   different set of donors is held out and `val_nb` is not measuring the same
+   cells. See [05](05-flow-dataset.md).
+3. **The corpus.** `wang_2022` was re-collated and is now nine live studies, not
+   eight, so the DAB chance line moved from `ln(8) = 2.079` to `ln(9) = 2.197`.
+
+`r2_ref` is the new reference. Its gap to `r1_ref` is not attributable to any
+single one of these.
 
 Why each void run is void, with a confidence on the attribution:
 
@@ -134,7 +177,7 @@ is a place for a fix to land and do nothing.
 
 ---
 
-### A9 — The seed noise floor is ~4%, and every earlier claim predates knowing it
+### A9 — The seed noise floor, and which number to use
 
 `s0_ref` and `s0_ref_seed7` are identical but for `exp_cfg.seed`. Because the
 patient split is held by `data.splits.seed` and stays at 24, both are scored on
@@ -147,17 +190,25 @@ exactly the same held-out cells.
 | 2 | **3.8%** | **4.2%** |
 | 3 | 0.8% | 0.8% |
 
-**Nothing smaller than ~4% is a result.** Several conclusions recorded earlier in
-this project — including "dab_off beats baseline by 2.7% on HVG" and
-"overfitting starts at epoch 1" — sit inside that band. The second was checked
-and was noise: epoch 3 is the best epoch in both seeds.
+⚠ **This table is a comparison of matched single epochs, and that is the wrong
+comparison.** An earlier revision of this page read ~4% off it and declared
+"nothing smaller than ~4% is a result". That over-states the floor by an order
+of magnitude, because a single epoch is a point on a moving curve and two seeds
+reach the same place at slightly different times.
 
-What *is* robust is direction and consistency: HVG beat baseline in **8 of 8**
-epoch-seed cells. Sign agreement across replicates carries information that a
-single magnitude does not.
+The quantity arms are actually ranked on is **best-epoch `val_nb`**, and on that
+the same pair agrees to **~0.3%**; a late-epoch mean sits at ~0.4–0.6%. Use
+0.3%. The single-epoch spread of ±4% is real but describes a measurement nobody
+makes.
 
-⚠ Still unknown for every other axis. Two arms cannot settle a 3% difference,
-which constrains how the LR sweep can be read.
+What is robust either way is direction and consistency: HVG beat baseline in
+**8 of 8** epoch-seed cells. Sign agreement across replicates carries
+information a single magnitude does not.
+
+⚠ **The 0.3% figure predates the tissue-stratified split** and was measured
+under study-only stratification. More and smaller strata should widen it. `r2_ref`
+and `r2_ref_s7` exist to re-measure it, and until they land no R2 margin below
+~0.5% should be believed.
 
 ---
 
@@ -324,14 +375,24 @@ a docstring. `CompositeLoss` hardcodes `0.20`
 Editing `beta_max` or `warmup_fraction` in a YAML does nothing. Worse than a
 missing feature — it looks configured.
 
-### B2 — Four of seven loss weights cannot be set from YAML
+### B2 — ✅ FIXED — Four of seven loss weights could not be set from YAML
 
-[`train.py:134`](../../src/scripts/train.py:134) passes only `w_cce`,
-`lambda_dab_max`, `cce_temperature`, `dab_hidden_dim`. `w_nb`, `w_kl_gauss`,
-`w_kl_vmf`, `w_dab` stay at their constructor defaults of 1.0.
+`train.py` passed only `w_cce`, `lambda_dab_max`, `cce_temperature`,
+`dab_hidden_dim`; `w_nb`, `w_kl_gauss`, `w_kl_vmf` and `w_dab` stayed at their
+constructor defaults of 1.0, so the reconstruction/KL balance — the main thing
+you would tune in a VAE — required editing `composite.py`.
 
-The reconstruction/KL balance is the main thing you would tune in a VAE, and it
-currently requires editing `composite.py`.
+All four now come from `model.loss.*`
+([train.py:179](../../src/scripts/train.py:179)) and the resolved values are
+logged at startup, so a run's log states what it actually used.
+
+**`w_dab` outlived the fix by several waves.** It was reachable but no
+experiment config had ever set it, so every run through `r1_cce` used 1.0 by
+default rather than by choice, and the adversary's weight in the objective was
+an untuned constant that nobody had noticed was a hyperparameter. Wave R2 sets
+it explicitly (0.5, and 0.3 in `r2_wdab_03`). Reachable is not the same as
+tuned, and a walkthrough that says "reachable" should not be read as saying the
+value was chosen.
 
 ### B3 — ✅ FIXED (`99345e9`) — `metrics.csv` dropped the per-term loss breakdown
 
@@ -434,7 +495,7 @@ before the first step.
 
 ### C4 — One Python object per cell
 
-`_CellRecord` is a plain dataclass ([dataset.py:152](../../src/endo_model/data/dataset.py:152)),
+`_CellRecord` is a plain dataclass ([dataset.py:274](../../src/endo_model/data/dataset.py:274)),
 instantiated ~1.65 M times, each holding a numpy slice and four scalars. At
 ~200 bytes plus a 4-element array each, that is several hundred MB of pure Python
 overhead before any counts are stored.

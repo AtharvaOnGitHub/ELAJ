@@ -183,12 +183,23 @@ for epoch in range(self.current_epoch, self.config.max_epochs):
     if epoch % self.config.val_check_interval == 0:
         val_metrics = self._val_epoch()
         self.baseline_gate.evaluate(epoch, val_metrics)   # before everything else
-        if self.ckpt_manager: self.ckpt_manager.save(...)
-        if self.early_stopping.step(val_loss): break
+        stop_metric = val_metrics.get("nb", val_loss)     # NOT val_loss
+        if self.ckpt_manager: self.ckpt_manager.save(..., stop_metric, ...)
+        if self.early_stopping.step(stop_metric): break
 
     if self.scheduler is not None:
         self.scheduler.step()
 ```
+
+**Both early stopping and checkpoint ranking score `val_nb`, not `val_loss`**
+([trainer.py:180](../../src/endo_model/training/trainer.py:180)). `val_loss` is
+the composite total, which contains the study classifier's loss, and that term
+is both larger and far more volatile than the model's own objective — in
+`r1_ref`, `val_nb` moved 0.032 across twenty epochs while `val_dab` moved 0.454.
+Ranking on the total therefore ranked on `dab`: replayed against `r1_ref`'s
+`metrics.csv`, the total names epoch 11 the best while `val_nb` and the ELBO both
+name epoch 18. `s1_circ_low` kept epochs 11/15/16 and discarded epoch 18, its
+actual best, for exactly this reason.
 
 Four ordering decisions worth noticing:
 
@@ -328,9 +339,11 @@ for batch in self.train_loader:
 
 ⚠ If the val loader yields **zero batches**, `epoch_averages()` returns only
 `{"epoch_time_s": …}` and `val_metrics["total"]` raises `KeyError`. That is
-reachable: the global unstratified split can leave a study with no val cells,
-and with `drop_last=True` a study with fewer than `batch_size` val cells yields
-nothing. See [11](11-findings.md).
+still reachable, though less easily than it was: the split now guarantees every
+(study, tissue) stratum of three or more donors reaches validation, but a
+stratum below that goes entirely to train, and with `drop_last=True` a study
+with fewer than `batch_size` val cells yields nothing. See
+[11](11-findings.md).
 
 ### `_to_device` — [`:177`](../../src/endo_model/training/trainer.py:221)
 
@@ -393,8 +406,9 @@ to it regardless of which batch it is given.
 
 ### `EarlyStopping` — [`:7`](../../src/endo_model/training/callbacks.py:7)
 
-`step(val_loss)` returns `True` when `patience` epochs pass without improvement
-beyond `min_delta`. Improvement resets the counter.
+`step(metric)` returns `True` when `patience` epochs pass without improvement
+beyond `min_delta`. Improvement resets the counter. `Trainer` passes `val_nb`,
+not the composite total — see §3.
 
 ### `MetricLogger` — [`:46`](../../src/endo_model/training/callbacks.py:46)
 
@@ -409,11 +423,13 @@ exact for training. It is not exact if `drop_last` is ever turned off.
 ## 5. `CheckpointManager` — [`checkpointing.py:16`](../../src/endo_model/training/checkpointing.py:16)
 
 `save` [`:30`](../../src/endo_model/training/checkpointing.py:30) writes
-`epoch_{epoch:04d}_step_{step:07d}.pt` containing epoch, step, val_loss, model
-state, optimizer state, plus `extra` (both metric dicts).
+`epoch_{epoch:04d}_step_{step:07d}.pt` containing epoch, step, the ranking
+metric, model state, optimizer state, plus `extra` (both metric dicts).
 
-Retention: `_history` is sorted ascending by val_loss and anything past
-`max_to_keep=3` is popped **from the end** (worst) and unlinked.
+Retention: `_history` is sorted ascending by that metric and anything past
+`max_to_keep=3` is popped **from the end** (worst) and unlinked. The metric is
+`val_nb`; when it was the composite total, `s1_circ_low` retained epochs
+11/15/16 and deleted epoch 18, which was its best.
 
 ⚠ `_history` is in-memory only. On resume it starts empty, so the manager cannot
 see or prune checkpoints from the previous job — it will keep 3 *new* ones
@@ -437,8 +453,16 @@ is how `evaluate.py` and `infer.py` load weights without constructing one.
 `history` carries `train_loss` / `val_loss` (the composite totals) plus every
 other loss term under `train_`/`val_` prefixes, folded in by `_record`
 ([trainer.py:221](../../src/endo_model/training/trainer.py:221)). So
-`metrics.csv` has `train_nb`, `train_kl_gauss`, `train_beta_kl`, `train_dab`, and
-their `val_` counterparts.
+`metrics.csv` has `train_elbo`, `train_nb`, `train_kl_gauss`, `train_beta_kl`,
+`train_dab`, and their `val_` counterparts.
+
+`train_elbo` / `val_elbo` need no trainer change: `_record` iterates whatever
+keys `CompositeLoss` returns, so adding `elbo` to the dict added the column.
+Runs before `r2` have no such column, and `training_panels._elbo_series`
+back-fills them as `total − dab`, which is exact whenever `w_dab` is 1.0 — true
+of every run up to and including `r1_cce`. From R2 on `w_dab` is 0.5, so the
+back-fill is wrong for those runs and the logged column is the only correct
+source. This is why the column exists rather than being derived at plot time.
 
 `"total"` is deliberately skipped by `_record` — it is already `train_loss`, and
 a duplicate column reads as though the two could disagree.

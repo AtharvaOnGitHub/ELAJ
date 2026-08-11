@@ -154,6 +154,8 @@ def main() -> int:
         genes_per_cell,
         library_size,
         metadata_completeness,
+        panel_size_vs_coverage,
+        samples_per_donor,
         sampling_hierarchy,
         study_site_matrix,
         vocabulary_coverage,
@@ -193,6 +195,7 @@ def main() -> int:
     depth_by_study: dict[str, list] = {}
     genes_by_study: dict[str, list] = {}
     detection_by_study: dict[str, list] = {}
+    samples_per_donor_counts: dict[str, list[int]] = {}
 
     vocab = GeneVocabulary(str(Path(args.root) / data_cfg.vocabulary_path))
     # GeneVocabulary exposes membership, not a name list — build the set once
@@ -239,6 +242,18 @@ def main() -> int:
             int(obs["source_sample_id"].astype(str).nunique())
             if "source_sample_id" in obs.columns else 0
         )
+
+        # Samples per donor: the middle level of the nesting. sampling_hierarchy
+        # shows the three totals; this shows whether a study's samples come from
+        # many donors once each or a few donors repeatedly.
+        if "source_sample_id" in obs.columns and "patient_id" in obs.columns:
+            samples_per_donor_counts[study.name] = (
+                obs.groupby(obs["patient_id"].astype(str), observed=True)[
+                    "source_sample_id"
+                ].nunique().tolist()
+            )
+        else:
+            samples_per_donor_counts[study.name] = []
 
         # Age per DONOR, not per cell — a 200k-cell study from six donors would
         # otherwise contribute six values 200k times to an age histogram.
@@ -333,9 +348,13 @@ def main() -> int:
         "sampling_hierarchy": lambda: sampling_hierarchy(cells, samples, donors),
         # Coverage and completeness
         "vocabulary_coverage": lambda: vocabulary_coverage(
-            measured, len(vocab_genes) or max(measured.values(), default=1),
-            {k: len(v) for k, v in panels.items()},
+            measured, len(vocab_genes) or max(measured.values(), default=1)
         ),
+        "panel_size_vs_coverage": lambda: panel_size_vs_coverage(
+            {k: len(v) for k, v in panels.items()}, measured,
+            len(vocab_genes) or max(measured.values(), default=1),
+        ),
+        "samples_per_donor": lambda: samples_per_donor(samples_per_donor_counts),
         "metadata_completeness": lambda: metadata_completeness(completeness),
         "age_distribution": lambda: age_distribution(ages),
     }

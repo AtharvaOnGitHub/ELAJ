@@ -27,6 +27,20 @@ from matplotlib.patches import Patch
 from endo_model.viz.palette import PALETTE
 
 
+def _label_colour(value: float, values: np.ndarray) -> str:
+    """Readable text colour for a heatmap cell.
+
+    Guards the case where every cell holds the same number: the usual
+    "fraction of the maximum" rule divides by a range of zero, and a NaN
+    threshold makes every label the same colour as its background.
+    """
+    finite = values[np.isfinite(values)]
+    if not finite.size or not np.isfinite(value):
+        return PALETTE.ink
+    high = float(finite.max())
+    return "white" if high > 0 and value > high * 0.6 else PALETTE.ink
+
+
 # ── Compulsory ───────────────────────────────────────────────────────────────
 
 
@@ -127,16 +141,26 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
             union = len(a | b)
             matrix[i, j] = matrix[j, i] = len(a & b) / union if union else 0.0
 
+    # Mask the diagonal. Every study shares 100% of its genes with itself, so
+    # those cells carry no information and, worse, pin the colour scale to 1.0 —
+    # which compresses the range the off-diagonal values actually occupy.
+    shown = matrix.copy()
+    np.fill_diagonal(shown, np.nan)
+    off_diagonal = shown[~np.isnan(shown)]
+    high = float(off_diagonal.max()) if off_diagonal.size else 1.0
+
     fig, ax = plt.subplots(figsize=(0.55 * n + 4, 0.55 * n + 3))
-    im = ax.imshow(matrix, vmin=0, vmax=1, cmap="Blues")
+    im = ax.imshow(shown, vmin=0, vmax=high, cmap="Blues")
     ax.set_xticks(range(n), studies, rotation=60, ha="right")
     ax.set_yticks(range(n), studies)
     ax.set_title("Shared genes between studies (Jaccard)")
     for i in range(n):
         for j in range(n):
+            if i == j:
+                continue
             ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center",
                     fontsize=7,
-                    color="white" if matrix[i, j] > 0.55 else PALETTE.ink)
+                    color="white" if matrix[i, j] > high * 0.6 else PALETTE.ink)
     fig.colorbar(im, ax=ax, shrink=0.7, label="fraction of genes shared")
     return fig
 
@@ -166,8 +190,9 @@ def disease_by_site(counts: dict[tuple[str, str], int]) -> plt.Figure:
             value = matrix[i, j]
             ax.text(j, i, f"{int(value):,}" if value else "—",
                     ha="center", va="center", fontsize=8,
-                    color="white" if value and np.log10(value) > np.nanmax(np.log10(shown)) * 0.6
-                    else PALETTE.ink)
+                    color=_label_colour(
+                        np.log10(value) if value else np.nan, np.log10(shown)
+                    ))
     fig.colorbar(im, ax=ax, shrink=0.7, label="log₁₀ cells")
     return fig
 
@@ -295,9 +320,7 @@ def detection_rate(rates_by_study: dict) -> plt.Figure:
 # ── Coverage, completeness, provenance ───────────────────────────────────────
 
 
-def vocabulary_coverage(
-    measured: dict[str, int], vocab_size: int, panel_size: dict[str, int]
-) -> plt.Figure:
+def vocabulary_coverage(measured: dict[str, int], vocab_size: int) -> plt.Figure:
     """How much of the model's gene vocabulary each study actually assayed.
 
     The model marks any vocabulary gene a study did not measure as
@@ -369,8 +392,9 @@ def age_distribution(ages_by_study: dict) -> plt.Figure:
         values = np.asarray(ages_by_study[study], dtype=float)
         values = values[np.isfinite(values)]
         if not values.size:
-            ax.text(0.01, i, "no age recorded", transform=ax.get_yaxis_transform(),
-                    va="center", fontsize=8, color=PALETTE.muted)
+            ax.annotate("no age recorded", xy=(0.02, i),
+                        xycoords=("axes fraction", "data"),
+                        va="center", fontsize=8, color=PALETTE.muted)
             continue
         jitter = (rng.random(values.shape) - 0.5) * 0.3
         ax.scatter(values, np.full(values.shape, i) + jitter, s=26, alpha=0.75,
@@ -472,8 +496,9 @@ def study_site_matrix(counts: dict[str, dict]) -> plt.Figure:
             value = matrix[i, j]
             ax.text(j, i, f"{int(value):,}" if value else "—", ha="center",
                     va="center", fontsize=7,
-                    color="white" if value and np.log10(value) > np.nanmax(np.log10(shown)) * 0.65
-                    else PALETTE.ink)
+                    color=_label_colour(
+                        np.log10(value) if value else np.nan, np.log10(shown)
+                    ))
     fig.colorbar(im, ax=ax, shrink=0.7, label="log₁₀ cells")
     return fig
 
@@ -501,8 +526,12 @@ def sampling_hierarchy(
             (donors, "donors", PALETTE.muted),
         ),
     ):
-        widths = [max(values.get(s, 0), 0.9) for s in studies]
-        ax.barh(y + offset, widths, height=height, label=label, color=color)
+        # A log axis has no zero. Padding a missing count up to 0.9 drew a
+        # visible bar for a study with no samples recorded, which reads as
+        # "one" rather than "not known".
+        counts = np.array([values.get(s, 0) for s in studies], float)
+        drawn = np.where(counts > 0, counts, np.nan)
+        ax.barh(y + offset, drawn, height=height, label=label, color=color)
 
     ax.set_xscale("log")
     ax.set_yticks(y, studies)
@@ -511,4 +540,87 @@ def sampling_hierarchy(
     ax.set_title("Sampling hierarchy: cells, samples, donors")
     ax.legend(frameon=False, fontsize=9, loc="lower right")
     ax.grid(axis="x", alpha=0.4)
+    return fig
+
+
+def samples_per_donor(counts: dict[str, list[int]]) -> plt.Figure:
+    """How many samples each donor contributed, per study.
+
+    sampling_hierarchy gives the three totals; this gives the middle level's
+    shape. A study with 40 samples from 40 donors and one with 40 samples from
+    8 donors have the same two totals and different independence: in the second,
+    five samples move together whenever a donor effect does.
+
+    Integer counts, so bars rather than a violin — a smooth density over the
+    values 1, 2, 3 invents intermediate values that cannot occur.
+    """
+    studies = sorted(counts, key=lambda s: -len(counts[s]))
+    studies = [s for s in studies if counts[s]]
+    if not studies:
+        studies = sorted(counts)
+
+    high = max((max(counts[s]) for s in studies if counts[s]), default=1)
+    levels = list(range(1, int(high) + 1))
+    colors = PALETTE.categorical_cycle(max(len(levels), 1))
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(studies) + 4), 5))
+    bottom = np.zeros(len(studies))
+    for level, color in zip(levels, colors):
+        share = np.array(
+            [
+                sum(1 for c in counts[s] if c == level) / max(len(counts[s]), 1)
+                for s in studies
+            ],
+            dtype=float,
+        )
+        ax.bar(studies, share, bottom=bottom, color=color,
+               label=f"{level} sample{'s' if level > 1 else ''}")
+        bottom += share
+
+    ax.set_ylabel("fraction of donors")
+    ax.set_ylim(0, 1)
+    ax.set_title("Samples per donor")
+    ax.tick_params(axis="x", rotation=60)
+    for tick in ax.get_xticklabels():
+        tick.set_ha("right")
+    ax.legend(frameon=False, fontsize=8, loc="upper left",
+              bbox_to_anchor=(1.02, 1.0))
+    return fig
+
+
+def panel_size_vs_coverage(
+    panel: dict[str, int], measured: dict[str, int], vocab_size: int
+) -> plt.Figure:
+    """Each study's gene panel size against how much of the vocabulary it covers.
+
+    vocabulary_coverage says a study is missing genes; this says why. A study
+    low and left assayed few genes. A study low and right assayed plenty, just
+    different ones — its panel and the vocabulary disagree rather than its panel
+    being small. Those are different problems and only one is fixable by
+    changing the vocabulary.
+
+    The dashed line is where every gene assayed is a vocabulary gene; distance
+    below it is panel spent outside the vocabulary.
+    """
+    studies = sorted(panel)
+    x = np.array([panel[s] for s in studies], dtype=float)
+    y = np.array([measured.get(s, 0) / max(vocab_size, 1) for s in studies], float)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(x, y, s=90, color=PALETTE.primary, zorder=3)
+    for study, xi, yi in zip(studies, x, y):
+        ax.annotate(study, (xi, yi), textcoords="offset points", xytext=(7, 4),
+                    fontsize=8, color=PALETTE.ink_soft)
+
+    ceiling = np.linspace(max(x.min() * 0.9, 1), x.max() * 1.05, 100)
+    ax.plot(ceiling, np.minimum(ceiling / max(vocab_size, 1), 1.0), ls="--",
+            lw=1.2, color=PALETTE.muted,
+            label="every assayed gene is a vocabulary gene")
+
+    ax.set_xlabel("genes assayed by the study")
+    ax.set_ylabel(f"fraction of the {vocab_size:,}-gene vocabulary covered")
+    ax.set_ylim(0, 1.02)
+    ax.set_title("Panel size against vocabulary coverage")
+    ax.legend(frameon=False, fontsize=9, loc="lower right")
+    ax.grid(alpha=0.4)
     return fig

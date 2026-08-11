@@ -138,6 +138,10 @@ def main() -> int:
             str(Path(root) / data_cfg.tissue_hierarchy_csv)
             if data_cfg.tissue_hierarchy_csv else None
         ),
+        tissue_level_names_path=(
+            str(Path(root) / data_cfg.tissue_level_names_csv)
+            if data_cfg.tissue_level_names_csv else None
+        ),
     )
     loader = DataLoader(
         val_dataset,

@@ -9,7 +9,10 @@ Data contracts, vocabulary, and the full scRNA-seq loading pipeline.
 | `constants.py` | `DNS_SENTINEL`, tissue level count, disease status mapping |
 | `schema.py` | `Batch` TypedDict — the complete type contract for model inputs |
 | `vocabulary.py` | `GeneVocabulary` class + `generate_synthetic_vocabulary` helper |
-| `dataset.py` | `EndometriosisDataset` — loads .h5ad files, applies DNS logic, patient-level splits |
+| `dataset.py` | `EndometriosisDataset` — loads .h5ad files, applies DNS logic, builds per-cell records |
+| `splits.py` | `assign_splits` — patient-held-out train/val/test, stratified by (study, tissue) |
+| `tissue_hierarchy.py` | `TissueHierarchy` — UBERON term → four numeric hierarchy levels |
+| `tissue_level_names.py` | `TissueLevelNames` — those levels' integer codes → readable names, for logs and legends |
 | `panel.py` | `StudyPanel` — sparse per-study count storage, densified one cell at a time |
 | `samplers.py` | `PerStudyBatchSampler` — enforces single-study batches for DSBN |
 | `collate.py` | `collate_fn` / `make_collate_fn` — builds `Batch` from per-cell dicts |

@@ -43,6 +43,7 @@ from endo_model.data.constants import (
     N_TISSUE_LEVELS,
 )
 from endo_model.data.panel import StudyPanel
+from endo_model.data.splits import StudyPatients, assign_splits, log_coverage
 from endo_model.data.vocabulary import GeneVocabulary
 
 logger = logging.getLogger(__name__)
@@ -55,80 +56,32 @@ _TISSUE_LEVEL_COLUMNS = (
     "tissue_microsite",
 )
 
+# Which hierarchy level the train/val/test split stratifies on. tissue_type is
+# where endometrium and myometrium separate — coarse enough that most values
+# have several donors behind them, fine enough that the split guarantees
+# something the decoder's conditioning actually distinguishes. microsite would
+# split peritoneum four ways over a handful of fonseca_2023 donors.
+_TISSUE_STRATIFY_LEVEL = 2
 
-def _assign_splits(
-    raw_study_data: list,
-    val_fraction: float,
-    test_fraction: float,
-    seed: int,
-) -> dict[str, str]:
-    """Assign each patient to train/val/test, stratified by study.
 
-    Every study contributes to every split in proportion, which the previous
-    version did not guarantee. That one pooled all patients, shuffled once and
-    sliced — so a study with few patients could land entirely in one split by
-    chance. It did: li_2025 had 0 validation cells and garcia_alonso_2021_c had
-    0, meaning those studies trained without ever being validated.
+def _load_tissue_names(path: Optional[str]) -> dict[int, str]:
+    """Names for the stratification level's codes, for logs. {} on any failure.
 
-    A patient seen in an earlier study keeps that assignment. Patient ids are
-    study-scoped in this corpus so it should not arise, but assigning the same
-    patient to two splits would put their cells on both sides of the wall and
-    the leak would be invisible.
-
-    Studies too small to divide (fewer than three patients) go entirely to
-    train, with a warning. A one-patient study cannot be split three ways, and
-    silently giving it a validation set of its only patient would leave it with
-    no training data at all.
-
-    Args:
-        raw_study_data:  (study_id, name, adata, patient_ids) per study.
-        val_fraction:    Share of each study's patients for validation.
-        test_fraction:   The same for test.
-        seed:            Base RNG seed; the study id is added so two studies do
-                         not receive the same permutation.
-
-    Returns:
-        patient id -> "train" | "val" | "test".
+    A missing or malformed names file changes how the coverage table reads and
+    nothing else, so it must not stop a dataset from loading.
     """
-    assignments: dict[str, str] = {}
+    if not path:
+        return {}
+    from endo_model.data.tissue_level_names import TissueLevelNames
 
-    for study_id, name, _adata, study_patients in raw_study_data:
-        patients = sorted(set(study_patients) - set(assignments))
-        if not patients:
-            continue
-
-        n = len(patients)
-        if n < 3:
-            for patient in patients:
-                assignments[patient] = "train"
-            logger.warning(
-                "Study '%s': %d patient(s) — too few to split, all to train. "
-                "It will train without ever being validated.",
-                name, n,
-            )
-            continue
-
-        rng = np.random.default_rng(seed + study_id)
-        order = [patients[i] for i in rng.permutation(n)]
-
-        n_test = max(1, math.floor(n * test_fraction))
-        n_val = max(1, math.floor(n * val_fraction))
-        n_train = n - n_val - n_test
-
-        for i, patient in enumerate(order):
-            if i < n_train:
-                assignments[patient] = "train"
-            elif i < n_train + n_val:
-                assignments[patient] = "val"
-            else:
-                assignments[patient] = "test"
-
-        logger.info(
-            "Study '%s': %d patients -> train=%d val=%d test=%d",
-            name, n, n_train, n_val, n_test,
+    try:
+        return TissueLevelNames(path).for_index(_TISSUE_STRATIFY_LEVEL)
+    except Exception as exc:  # noqa: BLE001 — log decoration is not load-bearing
+        logger.warning(
+            "Tissue level names unavailable (%s: %s); the split coverage table "
+            "will show integer codes.", type(exc).__name__, exc,
         )
-
-    return assignments
+        return {}
 
 
 def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
@@ -373,6 +326,7 @@ class EndometriosisDataset:
         max_cells_per_study: Optional[int] = None,
         include_disease_statuses: Optional[list[str]] = None,
         tissue_hierarchy_path: Optional[str] = None,
+        tissue_level_names_path: Optional[str] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -384,6 +338,9 @@ class EndometriosisDataset:
         self._tissue_hierarchy = (
             TissueHierarchy(tissue_hierarchy_path) if tissue_hierarchy_path else None
         )
+        # Names for the split coverage log only. A stratum reported as
+        # "tissue 6" tells the reader nothing about which site went unvalidated.
+        self._tissue_names = _load_tissue_names(tissue_level_names_path)
 
         self._vocab = vocab
         self._split = split
@@ -418,12 +375,35 @@ class EndometriosisDataset:
 
             study_patients = adata.obs["patient_id"].astype(str).tolist()
             all_patient_ids.extend(study_patients)
-            raw_study_data.append((study_id, name, adata, study_patients))
+            # Resolved here rather than in the per-study loop below because the
+            # split needs it: a patient's stratum is the tissue holding most of
+            # their cells. Carried forward so it is not built twice.
+            tissue_matrix = _tissue_level_matrix(
+                adata.obs, name, self._tissue_hierarchy
+            )
+            raw_study_data.append(
+                (study_id, name, adata, study_patients, tissue_matrix)
+            )
 
-        # Build patient → split assignment, stratified by study.
-        split_assignments = _assign_splits(
-            raw_study_data, val_fraction, test_fraction, seed
+        # Build patient → split assignment, stratified by study AND by tissue.
+        # Column 2 of the level matrix is tissue_type — the level where
+        # endometrium and myometrium separate, and the finest one with enough
+        # donors behind each value to divide.
+        split_assignments, coverage = assign_splits(
+            [
+                StudyPatients(
+                    study_id=study_id,
+                    name=name,
+                    patients=patients,
+                    tissue_codes=tissue[:, _TISSUE_STRATIFY_LEVEL],
+                )
+                for study_id, name, _adata, patients, tissue in raw_study_data
+            ],
+            val_fraction,
+            test_fraction,
+            seed,
         )
+        log_coverage(coverage, self._tissue_names)
 
         logger.info(
             "Patient split (seed=%d): train=%d, val=%d, test=%d",
@@ -436,7 +416,7 @@ class EndometriosisDataset:
         # Build records for the requested split
         rng_subsample = np.random.default_rng(seed + 1)
 
-        for study_id, name, adata, study_patients in raw_study_data:
+        for study_id, name, adata, study_patients, tissue_matrix in raw_study_data:
             # Map study genes → global vocabulary indices
             study_gene_names = list(adata.var_names)
             global_idxs: list[int] = []      # global idx for each study gene
@@ -460,7 +440,7 @@ class EndometriosisDataset:
             # Coerce all obs-derived metadata once per study (vectorised), so
             # the per-cell loop below does array indexing rather than pandas
             # .iloc row access.
-            tissue_matrix = _tissue_level_matrix(adata.obs, name, self._tissue_hierarchy)
+            # tissue_matrix already resolved in the loading loop above.
             age_arr = _age_vector(adata.obs)
             disease_arr = _disease_status_codes(adata.obs, name)
 

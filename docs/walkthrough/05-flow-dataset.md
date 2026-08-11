@@ -58,30 +58,68 @@ study if absent), and accumulates ids across **all** studies.
 > known before any can be assigned. That is why all files are opened before any
 > records are built.
 
-### Split assignment — [`:246`](../../src/endo_model/data/dataset.py:246)
-
-```python
-unique_patients = sorted(set(all_patient_ids))
-rng  = np.random.default_rng(seed)
-perm = rng.permutation(len(unique_patients))
-n_test = max(1, floor(n * test_fraction))
-n_val  = max(1, floor(n * val_fraction))
-n_train = n - n_val - n_test
-```
-
-`sorted(set(...))` before permuting is what makes the split reproducible —
-`set` iteration order is not stable across runs, so permuting it directly would
-give a different split each time even with a fixed seed.
-
-`max(1, ...)` guarantees non-empty val/test on tiny corpora.
+### Split assignment — [`splits.py`](../../src/endo_model/data/splits.py)
 
 **Contract:** patient-held-out. The same patient's cells never appear in two
 splits. Cell-level splitting would leak — single-cell replicates from one donor
 are far more similar to each other than to another donor's.
 
-⚠ Because the split is global and unstratified, a study with few patients can
-contribute **zero** cells to val. `garcia_alonso_2021_c` has 3 patients and a
-~62 % chance of no val cells. Deliberately deferred; see [11](11-findings.md).
+Stratification is a separate question from the wall: not "is the wall intact"
+but "does each split contain the things we intend to measure". Two levels of it,
+so the unit being divided is a **(study, tissue) stratum**:
+
+```
+for each study:
+    patient -> tissue     = the tissue holding most of that patient's cells
+    stratum               = (study_id, tissue_type code)
+    if len(stratum) < 3   -> all to train, recorded as a coverage gap
+    else                  -> shuffle with rng(seed + study_id*1000 + tissue)
+                             n_test = max(1, floor(n * test_fraction))
+                             n_val  = max(1, floor(n * val_fraction))
+```
+
+**By study**, because a study that lands entirely in train is never validated.
+That happened under the earlier global shuffle: `li_2025` and
+`garcia_alonso_2021_c` both had 0 validation cells and nothing said so.
+
+**By tissue**, because the same failure exists one level down and costs more.
+The decoder is conditioned on the tissue hierarchy; if every bladder donor lands
+in train, no claim about that conditioning is testable and no tissue panel can
+show the site. `tissue_type` is the level used — coarse enough that most values
+have several donors, fine enough to separate endometrium from myometrium.
+`microsite` would divide peritoneum four ways over a handful of donors.
+
+Three details that are load-bearing:
+
+- **Sorted before permuting.** `set` iteration order is not stable across runs,
+  so permuting it directly would give a different split each time even with a
+  fixed seed.
+- **`seed + study_id*1000 + tissue`.** `seed + study_id` alone put the same
+  positional patients in validation for two studies of equal size; the multiplier
+  keeps the study term dominant so a tissue code cannot collide with the next
+  study's seed.
+- **A multi-tissue donor stays whole**, assigned by their dominant tissue. Ties
+  break on the lower code so the result does not depend on dict order. Splitting
+  a donor across strata would buy coverage by breaking the patient wall, which
+  is never the trade to make.
+
+⚠ **Smaller strata is the real cost, and it is reported rather than hidden.**
+A stratum of one or two donors cannot be divided three ways and goes entirely to
+train, exactly as a tiny study does. `log_coverage` writes the full stratum
+table and then warns, by name, for every (study, tissue) pair that ended with no
+validation donor:
+
+```
+fonseca_2023   endometrium      30 patients -> train=22 val=4 test=4
+fonseca_2023   peritoneum        9 patients -> train=7  val=1 test=1
+fonseca_2023   urinary bladder   2 patients -> train=2  val=0 test=0
+WARNING  1 of 3 (study, tissue) strata have NO validation donor.
+```
+
+More strata also means higher seed-to-seed variance in `val_nb`. The noise floor
+on best-epoch `val_nb` was ~0.3 % under study-only stratification; it should be
+re-measured against a two-seed pair before arms separated by less than that are
+believed.
 
 ### Pass 2 — build records — [`:275`](../../src/endo_model/data/dataset.py:275)
 

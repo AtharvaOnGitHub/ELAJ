@@ -34,11 +34,50 @@ logger = logging.getLogger(__name__)
 # is one that stores something.
 _COLLAPSE_KAPPA = 0.2
 
-# Small-kappa KL to the uniform circular prior, in nats. Reported alongside
-# kappa because a concentration is hard to size by eye and an information
-# content is not.
+# Circular latents live on S^1, embedded in a 2-D ambient space. Matches
+# vonmises_vae._CIRCLE_DIM.
+_CIRCLE_DIM = 2
+
+
 def _kl_nats(kappa: np.ndarray) -> np.ndarray:
-    return kappa ** 2 / 4.0
+    """KL( PowerSpherical(mu, kappa) || Uniform(S^1) ), in nats.
+
+    Reported alongside kappa because a concentration is hard to size by eye and
+    an information content is not.
+
+    This used to return `kappa**2 / 4`, which is the small-kappa expansion and
+    is only valid below kappa ~ 1. Above that it diverges from the truth without
+    limit: at kappa = 280 it printed 2.0e+04 nats where the real answer is about
+    3.3, and r3_nodab's figure carried eight such labels. A circular dimension
+    cannot hold twenty thousand nats -- one dimension of one cell holds
+    ~0.5*ln(kappa) -- so the number was not merely imprecise, it was impossible.
+
+    This is the same closed form as
+    `endo_model.model.latent.power_spherical.power_spherical_kl_uniform`,
+    written against scipy so that `viz` stays torch-free: these figures are
+    drawn by scripts that deliberately do not import torch.
+    """
+    from scipy.special import digamma, gammaln
+
+    kappa = np.asarray(kappa, dtype=np.float64)
+    dim = _CIRCLE_DIM
+    alpha = (dim - 1) / 2.0 + kappa
+    beta = (dim - 1) / 2.0
+
+    log_normalizer = (
+        (alpha + beta) * np.log(2.0)
+        + beta * np.log(np.pi)
+        + gammaln(alpha)
+        - gammaln(alpha + beta)
+    )
+    log_uniform_surface = (
+        np.log(2.0) + (dim / 2.0) * np.log(np.pi) - gammaln(dim / 2.0)
+    )
+    return (
+        -log_normalizer
+        + kappa * (np.log(2.0) + digamma(alpha) - digamma(alpha + beta))
+        + log_uniform_surface
+    )
 
 
 def safe_umap(z: np.ndarray, seed: int = 24) -> np.ndarray | None:

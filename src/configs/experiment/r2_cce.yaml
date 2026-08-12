@@ -1,0 +1,84 @@
+name: r2_cce
+description: >
+  Contrastive embeddings on. r2_lr_1e3 with CCE and nothing else.
+
+  Wave R2. Six arms on the corrected corpus, the corrected circular encoding,
+  and the tissue-stratified split. Nothing from s0, s1 or r1 is comparable to
+  anything here: those waves fed the DAB classifier and the CCE loss a raw angle
+  where a coordinate was required, so theta = -pi and theta = +pi -- one
+  direction on the circle -- arrived 2*pi apart. Their DAB numbers, CCE numbers
+  and circular UMAPs all carry that seam. The split also holds out a different
+  set of donors now that strata are (study, tissue_type) rather than study, so
+  val_nb is not measuring the same cells either.
+
+  Three settings are shared by every arm and are the wave's premises:
+
+  * w_kl_vmf 0.1. The circular penalty stays at s1_circ_low's level. That run
+    is the one that reached +8.0% and the only one whose circular branch both
+    survived and filled, so the penalty is held fixed while other things move.
+  * lambda_dab non-zero everywhere. DSBN already removes a per-study affine
+    shift at the token level; DAB removes what DSBN cannot reach. Five of six
+    R1 arms ran at lambda 0, which made that wave a no-batch-correction sweep,
+    and val_dab ended at 0.444 against a chance of 2.197 -- study identity was
+    almost perfectly readable off the latent.
+  * w_dab 0.5, down from the 1.0 default every previous run used by accident.
+    Now that reversed gradient actually reaches the encoder, the adversary's
+    share of the objective is cut pre-emptively rather than after a run is lost
+    to it. Note w_dab scales BOTH paths: the classifier's own training and,
+    multiplied by lambda, the push into the encoder. Encoder pressure is
+    lambda * w_dab.
+
+  Read val_dab against ln(9) = 2.197. Read the ELBO, not the total.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r2_cce/
+seed: 24
+
+overrides:
+  training.max_epochs: 15
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # CCE is the loss the circular fix should change most. InfoNCE scores pairs by
+  # cosine similarity, so it is entirely a statement about embedding geometry,
+  # and it was being computed on a coordinate with a seam in it.
+  #
+  # Watch kl_vmf. s1_cce drove it to 3.75e-10 -- the circular branch died
+  # outright while kl_gauss rose, so CCE moved information into the Gaussian
+  # half rather than adding any. Whether that was the loss or the broken
+  # encoding is the second question this arm asks.
+  #
+  # ONE VARIABLE, and it has to stay that way. Every setting below is
+  # r2_lr_1e3's, so a difference in val_nb between the two arms is CCE and
+  # nothing else. lambda_dab in particular is 0.1 here because it is 0.1 there;
+  # an earlier draft had it at 0.5 and that alone would have made the pair
+  # unreadable, since a difference could then have been CCE, or the adversary,
+  # or both. s1_cce failed in exactly this way -- it moved CCE and beta_max
+  # together and its +1.2% could not be attributed to either.
+  #
+  # The cost is that lambda 0.5 goes untested in this wave. That is the right
+  # trade: an untested setting can be tested later, an unreadable run cannot be
+  # read later. A clean r2_dab_05 arm with CCE off is how 0.5 gets measured.
+  #
+  # 15 epochs: two forward passes per batch put an epoch near 74 minutes against
+  # ~37, so 20 would run past the 24 h walltime.
+  #
+  # That is the one asymmetry the pairing cannot remove, and it is not a
+  # hyperparameter -- it is a budget. r2_lr_1e3 gets five more epochs to improve
+  # in, so compare the two at their best epoch ON OR BEFORE 15 as well as at
+  # their overall best. r1_ref was still improving at epoch 18, so the
+  # difference is unlikely to be nothing.
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.1
+
+  # ---- the variables ----
+  training.optimizer.lr: 1.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.1

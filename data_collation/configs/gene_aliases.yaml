@@ -1,0 +1,19 @@
+# Manual overrides for gene symbol mapping.
+#
+# The pipeline writes genes it cannot resolve to data/processed/gene_mapping_issues.csv.
+# After manual review, add entries here and re-run — this file is consulted before
+# any automated lookup so resolved genes are never re-queried.
+#
+# Format:
+#   aliases:
+#     "RAW_SYMBOL": "CORRECT_HGNC_SYMBOL"   # map to a valid approved symbol
+#     "RAW_SYMBOL": null                      # explicitly drop this gene everywhere
+#
+# Rules:
+#   - Keys are the raw gene names exactly as they appear in the source data
+#   - Values must be current HGNC approved symbols (https://www.genenames.org)
+#   - null means the gene is intentionally excluded from all studies
+#   - Entries here take precedence over mygene.info lookups
+#   - Add a short comment explaining why each entry exists
+
+aliases: {}

@@ -1,0 +1,30 @@
+name: s2_lr_only
+description: >
+  lr 2e-3 with the circular penalty left alone. 20 epochs, ~11.5 h.
+
+  s1_circ_low changed three things at once against s0_lr_high — circular penalty
+  divided by ten, lr 1e-3 -> 2e-3, and 10 -> 20 epochs — and won. This arm moves
+  only the learning rate, so the win becomes attributable.
+
+    lands near 0.3605  ->  the learning rate did it
+    lands near 0.3700  ->  the circular penalty did it, and that is the lever
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s2_lr_only/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.optimizer.lr: 2.0e-3
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 2
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # Left at its default 1.0 — this is the variable being held fixed.
+  model.loss.w_kl_vmf: 1.0
+  model.dab.lambda_dab: 0.0

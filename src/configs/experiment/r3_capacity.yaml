@@ -1,0 +1,73 @@
+name: r3_capacity
+description: >
+  More room and more weight on reconstruction, trained slower.
+
+  Wave R3. Exploration, not a sweep. Wave R2 collapsed: at lambda_dab 0.1 the
+  circular branch fell from 1.4e-4 to 2.8e-7 nats by epoch 3, val_kl_gauss never
+  grew, and val_nb sat at 0.38 from epoch 0 for a final +0.78% over baseline
+  against r1_ref's +8.4%. The adversary parked exactly on chance (2.197), which
+  an empty latent achieves for free.
+
+  So these arms are recipes, deliberately several levers each. Reading one
+  variable at a time is what a later wave is for.
+
+  Two facts about the collapse that shape every arm here:
+
+  * A quiet circular dimension sits at kappa ~ 3e-4, where KL ~ kappa^2/4 and
+    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_vmf cannot rescue it -- the
+    penalty down there is already almost zero. free_bits can: clamp_min on the
+    per-dimension mean makes the KL term CONSTANT below the floor, so its
+    gradient is zero and reconstruction can pull the dimension back up without
+    paying. That is why free_bits appears in four of five arms and w_kl_vmf
+    barely moves.
+  * The model has little reason to use the latent at all. Its best val_nb
+    (0.37996) is 0.78% from a baseline that knows only the study (0.38293), so
+    the decoder plus library size plus DSBN already explain nearly everything.
+    Any KL cost then outweighs the reconstruction gain and storing nothing is
+    correct behaviour. Arms that raise w_nb or lower beta_max are attacking
+    that, not the symptom.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r3_capacity/
+seed: 24
+
+overrides:
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.max_epochs: 30
+  training.early_stop_patience: 10
+  training.early_stop_warmup_epochs: 6
+
+  # Your lever 2. Four changes, all pointing the same way:
+  #
+  #   d_dec      64 -> 128   the width where genes and the latent meet, so the
+  #                          decoder can express more per latent direction
+  #   d_gauss    32 -> 48    more Gaussian dimensions
+  #   n_vMF       8 -> 12    more circular ones
+  #   w_nb      1.0 -> 2.0   reconstruction worth twice as much against every
+  #                          other term, which is the same as halving all of
+  #                          them but states the intent
+  #
+  # lr drops to 5e-4 and patience rises to 10 over 30 epochs: a bigger model on
+  # a harder objective needs longer, and r2_ref_s7 stopping at epoch 6 was
+  # patience 5 doing its job on a run that had genuinely stopped moving.
+  #
+  # lambda 0.02 rather than 0: enough for val_dab to mean something as a
+  # measurement, far below the 0.1 that emptied the latent.
+  #
+  # Note the parameter count rises here, so a better val_nb is not by itself
+  # evidence that capacity was the constraint -- compare kl_vmf and kl_gauss
+  # against r3_free before concluding anything.
+  training.optimizer.lr: 5.0e-4
+  model.d_dec: 128
+  model.d_gauss: 48
+  model.n_vMF: 12
+  model.loss.w_nb: 2.0
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02

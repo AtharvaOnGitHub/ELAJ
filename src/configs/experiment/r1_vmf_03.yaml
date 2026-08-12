@@ -1,0 +1,43 @@
+name: r1_vmf_03
+description: >
+  Circular penalty raised to 0.3, at the middle learning rate.
+
+  Wave R1. Six arms around s1_circ_low's configuration, on the corrected corpus.
+
+  **s1_circ_low's 0.3605 is not the target and cannot be.** Three things changed
+  underneath it: wang_2022 joined (49,606 adenomyosis cells, 8 live studies to
+  9), the patient split is now stratified by study so the validation set is a
+  different set of donors, and the gradient clip no longer shares one budget
+  between the model and the DAB classifier. The baseline is recomputed per run
+  and will not be 0.3917 either. r1_ref re-runs the exact configuration so the
+  gap is measured rather than guessed; every other arm is read against r1_ref,
+  not against anything from before.
+
+  Read val_dab against ln(9) = 2.197, not ln(8) = 2.079 — wang_2022 adds a
+  ninth study the classifier can be asked about.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r1_vmf_03/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+
+  # Early stopping is live and scores val_nb. A converged arm now ends itself
+  # and frees the queue for the next one, which matters at six runs two at a
+  # time.
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # ---- the variable ----
+  # The other side of 0.1, which has only ever been approached from below.
+  # 1.0 killed the branch and 0.1 revived it; nobody has looked in between.
+  training.optimizer.lr: 1.0e-3
+  model.loss.w_kl_vmf: 0.3
+  model.dab.lambda_dab: 0.0

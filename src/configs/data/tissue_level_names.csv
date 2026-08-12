@@ -1,0 +1,26 @@
+level,code,name
+compartment,0,unknown
+compartment,1,pelvic reproductive
+compartment,2,peritoneal
+compartment,3,urinary
+compartment,4,bowel
+compartment,5,extraembryonic
+organ,0,unknown
+organ,1,uterus
+organ,2,ovary
+organ,3,peritoneum
+organ,4,urinary bladder
+organ,5,rectum
+organ,6,chorionic villus
+tissue_type,0,unknown
+tissue_type,1,endometrium
+tissue_type,2,myometrium
+tissue_type,3,ovary
+tissue_type,4,peritoneum
+tissue_type,5,urinary bladder
+tissue_type,6,rectum
+tissue_type,7,chorionic villus
+microsite,0,site unspecified
+microsite,1,uterosacral ligament
+microsite,2,rectouterine pouch
+microsite,3,pelvic side wall

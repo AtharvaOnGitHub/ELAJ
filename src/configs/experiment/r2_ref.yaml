@@ -1,0 +1,58 @@
+name: r2_ref
+description: >
+  The reference. Every other arm is read against this one.
+
+  Wave R2. Six arms on the corrected corpus, the corrected circular encoding,
+  and the tissue-stratified split. Nothing from s0, s1 or r1 is comparable to
+  anything here: those waves fed the DAB classifier and the CCE loss a raw angle
+  where a coordinate was required, so theta = -pi and theta = +pi -- one
+  direction on the circle -- arrived 2*pi apart. Their DAB numbers, CCE numbers
+  and circular UMAPs all carry that seam. The split also holds out a different
+  set of donors now that strata are (study, tissue_type) rather than study, so
+  val_nb is not measuring the same cells either.
+
+  Three settings are shared by every arm and are the wave's premises:
+
+  * w_kl_vmf 0.1. The circular penalty stays at s1_circ_low's level. That run
+    is the one that reached +8.0% and the only one whose circular branch both
+    survived and filled, so the penalty is held fixed while other things move.
+  * lambda_dab non-zero everywhere. DSBN already removes a per-study affine
+    shift at the token level; DAB removes what DSBN cannot reach. Five of six
+    R1 arms ran at lambda 0, which made that wave a no-batch-correction sweep,
+    and val_dab ended at 0.444 against a chance of 2.197 -- study identity was
+    almost perfectly readable off the latent.
+  * w_dab 0.5, down from the 1.0 default every previous run used by accident.
+    Now that reversed gradient actually reaches the encoder, the adversary's
+    share of the objective is cut pre-emptively rather than after a run is lost
+    to it. Note w_dab scales BOTH paths: the classifier's own training and,
+    multiplied by lambda, the push into the encoder. Encoder pressure is
+    lambda * w_dab.
+
+  Read val_dab against ln(9) = 2.197. Read the ELBO, not the total.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r2_ref/
+seed: 24
+
+overrides:
+  training.max_epochs: 20
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 3
+
+  # r1_ref reached val_nb 0.3778 (+8.4% on its baseline) at lambda 0 and
+  # w_dab 1.0, on the broken encoding and the study-only split. This arm is the
+  # nearest thing to it that the current code can produce, and the gap between
+  # the two numbers is not attributable to any single change -- three things
+  # moved at once. It is a fresh reference, not a comparison.
+
+  # ---- the variables ----
+  training.optimizer.lr: 2.0e-3
+  model.loss.w_kl_vmf: 0.1
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.1

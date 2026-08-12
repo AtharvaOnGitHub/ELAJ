@@ -1,0 +1,60 @@
+name: r3_combo
+description: >
+  Your lever 3: capacity and looseness together, adversary alive.
+
+  Wave R3. Exploration, not a sweep. Wave R2 collapsed: at lambda_dab 0.1 the
+  circular branch fell from 1.4e-4 to 2.8e-7 nats by epoch 3, val_kl_gauss never
+  grew, and val_nb sat at 0.38 from epoch 0 for a final +0.78% over baseline
+  against r1_ref's +8.4%. The adversary parked exactly on chance (2.197), which
+  an empty latent achieves for free.
+
+  So these arms are recipes, deliberately several levers each. Reading one
+  variable at a time is what a later wave is for.
+
+  Two facts about the collapse that shape every arm here:
+
+  * A quiet circular dimension sits at kappa ~ 3e-4, where KL ~ kappa^2/4 and
+    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_vmf cannot rescue it -- the
+    penalty down there is already almost zero. free_bits can: clamp_min on the
+    per-dimension mean makes the KL term CONSTANT below the floor, so its
+    gradient is zero and reconstruction can pull the dimension back up without
+    paying. That is why free_bits appears in four of five arms and w_kl_vmf
+    barely moves.
+  * The model has little reason to use the latent at all. Its best val_nb
+    (0.37996) is 0.78% from a baseline that knows only the study (0.38293), so
+    the decoder plus library size plus DSBN already explain nearly everything.
+    Any KL cost then outweighs the reconstruction gain and storing nothing is
+    correct behaviour. Arms that raise w_nb or lower beta_max are attacking
+    that, not the symptom.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r3_combo/
+seed: 24
+
+overrides:
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 4
+  training.max_epochs: 30
+  training.early_stop_patience: 10
+  training.early_stop_warmup_epochs: 6
+
+  # The arm most likely to be the one that ships, if any of them is. Wider
+  # decoder, reconstruction weighted up, KL ceiling at 0.3, free_bits 0.5, and
+  # an adversary at 0.05 -- half the setting that collapsed R2, with all the
+  # anti-collapse machinery that R2 lacked underneath it.
+  #
+  # If this arm holds its latent AND keeps val_dab meaningfully above r1_ref's
+  # 0.444, it is the first configuration in the project to do batch correction
+  # without paying for it by forgetting. That is the actual goal.
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.3
+  model.d_dec: 128
+  model.loss.w_nb: 2.0
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.5
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.05

@@ -1,0 +1,11 @@
+uberon,label,compartment,organ,tissue_type,microsite,note
+UBERON:0001295,endometrium,1,1,1,0,
+UBERON:0001296,myometrium,1,1,2,0,
+UBERON:0000992,ovary,1,2,3,0,"includes ovarian cyst/fossa — fonseca maps them all to the same term"
+UBERON:0002358,peritoneum,2,3,4,0,"site not further specified"
+UBERON:0007136,uterosacral ligament,2,3,4,1,"peritoneal, microsite 1"
+UBERON:0007111,rectouterine pouch (cul-de-sac),2,3,4,2,"peritoneal, microsite 2"
+UBERON:8480043,pelvic side wall,2,3,4,3,"peritoneal, microsite 3"
+UBERON:0001255,urinary bladder,3,4,5,0,
+UBERON:0001052,rectum,4,5,6,0,
+UBERON:0007106,chorionic villus,5,6,7,0,zhang_2022 only; excluded from the corpus

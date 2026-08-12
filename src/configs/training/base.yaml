@@ -1,0 +1,70 @@
+optimizer:
+  name: AdamW
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  betas: [0.9, 0.999]
+
+scheduler:
+  name: CosineAnnealingLR
+  # No T_max: the cosine period has to equal the run length, so train.py
+  # derives it from max_epochs. A second number here could only disagree.
+
+batch_size: 256
+max_epochs: 50
+
+# "off" or "bf16".  Measured on an A100 at the real training shapes, one SDPA
+# call forward+backward: fp32 449.97 ms, bf16 174.87 ms, bf16 without the
+# padding mask 62.60 ms.  FlashAttention has no fp32 kernel — bf16 is the only
+# way to reach it, and it additionally refuses a non-null attn_mask, which is
+# what the size bucketing below is for.
+# The Power Spherical sampler and the NB loss force fp32 back on regardless of
+# this setting; see endo_model/precision.py for why each one has to.
+precision: bf16
+
+# DataLoader worker processes.  null auto-sizes to the job's CPU allocation
+# (cores visible to the process, minus one for the training step itself), so the
+# same config is correct whether SLURM grants 4 cores or 16.  Set 0 to load in
+# the main process — only useful for debugging, since it serialises the dense
+# per-cell count rebuild against the GPU step.
+num_workers: null
+grad_clip_norm: 1.0
+early_stop_patience: 10
+# Do not early-stop while the loss weights are still ramping.  val_loss includes
+# beta_kl * kl and lambda_dab * dab, and both schedules are derived from
+# total_steps = steps_per_epoch * max_epochs — so an epoch late in the ramp is
+# scored by a *heavier* objective than epoch 0 and looks worse even when the
+# model improved.  Run 49817807 stopped at epoch 10 for exactly this reason.
+# lambda_dab completes at 50% of training, so nothing before then is comparable.
+early_stop_warmup_epochs: 25
+val_check_interval: 1
+
+kl_annealing:
+  beta_max: 1.0
+  warmup_fraction: 0.20    # KL weight ramps 0 → beta_max over first 20% of steps
+
+diagnostics:
+  # Per-step progress lines: step number, total loss, the loss breakdown, and
+  # the pre-clip gradient norm.  Without these a crash mid-epoch leaves no
+  # record of how far the run got, and the gradient norm is the only cheap
+  # early warning that an optimisation is diverging.
+  log_every: 50
+  # Attribute a NaN produced in backward to the forward op that made the node.
+  # 2-4x slower; turn on only once a run shows the fault arriving via gradients.
+  detect_anomaly: false
+  # Write the failing batch to output_dir/faults/ so it can be replayed offline
+  # without rebuilding a Dataset.
+  dump_faults: true
+  # Drop an update whose gradients are non-finite instead of ending the run.
+  # The Power Spherical sampler draws once per cell per circular latent, and a
+  # boundary draw has an undefined derivative; losing a run to one draw in 10^5
+  # is the wrong trade.  Consecutive skips mean a real divergence and abort.
+  skip_nonfinite_steps: true
+  max_consecutive_skips: 5
+  # Latent figures (UMAP of the Gaussian branch, polar view of the circular
+  # branch) every N epochs, on a fixed subsample of val cells. Fixed so
+  # consecutive epochs are comparable; UMAP is single-threaded once seeded,
+  # so the full 244k-cell split would outlast the epoch that produced it.
+  latent_every: 10
+  max_latent_cells: 20000
+
+resume_from_checkpoint: null    # path to a checkpoint; null = train from scratch

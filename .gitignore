@@ -23,6 +23,9 @@ env/
 /data/
 outputs/
 
+# temp files
+src/tmp/
+
 # Checkpoints
 *.pt
 *.pth

@@ -1,0 +1,35 @@
+name: s0_ref_seed7
+description: >
+  The reference arm again, seed 7 — the noise floor.
+
+  Stage 0/2 of the tuning plan. All five arms share one base and differ only in
+  the line under "the variable" below, so any difference between them is
+  attributable. Ten epochs because dab_off turned upward on val_nb after epoch
+  1 and we need to see whether that is overfitting or noise.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/s0_ref_seed7/
+seed: 7
+
+overrides:
+  training.max_epochs: 10
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+
+  # Nothing may early-stop an arm whose purpose is the shape of a curve. Every
+  # epoch is checkpointed, so the best one can be recovered afterwards.
+  training.early_stop_warmup_epochs: 99
+
+  # Latent figures every other epoch: enough to see a branch die, not so many
+  # that UMAP fitting starts to matter against a 31-minute epoch.
+  training.diagnostics.latent_every: 2
+
+  # ---- the variable ----
+  # Identical to s0_ref except the seed. Whatever these two differ by is what
+  # a difference has to exceed before it means anything. Seven runs of
+  # decisions have been made on single-seed gaps of 1-3% without knowing this
+  # number, and twice a gap that size turned out to be an artefact.
+  model.dab.lambda_dab: 0.0

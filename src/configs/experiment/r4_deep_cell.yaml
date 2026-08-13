@@ -1,0 +1,90 @@
+name: r4_deep_cell
+description: >
+  Capacity moved from the group encoders to the cell-level encoder.
+
+  Wave R4. Shrink the model and remove the confound, at a live adversary.
+
+  Everything before this made the model bigger, looser, or more strongly
+  regularised, and none of it changed the one number that matters: kNN study
+  purity, the share of a cell's 30 nearest neighbours that come from its own
+  study. Perfect mixing here is 0.125. r3_nodab reached 0.756, r3_loose 0.959,
+  r3_capacity 0.982 -- and r3_capacity was the LARGEST model with the strongest
+  adversary. Bigger has been worse every time.
+
+  So this wave goes the other way. A latent with 8 Gaussian and 4 circular
+  dimensions cannot hold forty separate study clumps the way a 48+12 one can;
+  if the room to keep studies apart is removed, the model has to put cells
+  somewhere shared or lose reconstruction. That is a hypothesis, not a
+  prediction, and purity is what tests it.
+
+  lambda_dab is 0.02 in every arm with w_dab 0.5, so encoder pressure is 0.01.
+  That is r3_capacity's setting: high enough that the classifier reached chance,
+  low enough that the latent did not empty as it did at 0.1 in wave R2.
+
+  Read purity from the end-of-run log line, not the UMAP. Read val_dab against
+  the label entropy printed alongside it, not ln(n_studies) -- studies are not
+  equally frequent and ln(9) is roughly 0.6 nats too generous.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r4_deep_cell/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, carried from the best of wave R3 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # ---- the tiny latent, as in r4_tiny_latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+
+  # Option 3, and the only arm in any wave that moves capacity rather than
+  # adding or removing it. Group encoders drop to 1 block, the cell-level
+  # encoder rises to 4 -- fewer parameters overall than r4_tiny_latent, but
+  # twice the depth at the one place where genes from different pathways meet.
+  #
+  # The reasoning: every wave that added capacity did worse, so this asks
+  # whether the problem was where the capacity sat rather than how much there
+  # was. Cross-pathway biology has had two blocks over 45 summary vectors to
+  # emerge in; this gives it four.
+  #
+  # Read against r4_thin_groups, which is this arm with a 2-block cell encoder
+  # instead of 4 -- one variable apart.
+  model.group_encoder.n_layers: 1
+  model.aggregation_encoder.n_layers: 4
+
+  # Where the parameters sit in ELAJ_small, at 1,875,960 total:
+  #
+  #   45 group encoders, 2 blocks each   1,143,360   61%
+  #   gene identity embeddings             480,000   26%
+  #   cell-level encoder, 2 blocks          99,968    5%
+  #   decoder, DSBN, latent heads, CLS     137,632    7%
+  #   per-gene dispersion                   15,000    1%
+  #
+  # Three fifths of the model is spent on 45 encoders that never see each
+  # other's genes, and the only place information from different pathways can
+  # combine is the 5% at the cell level, two blocks deep over 45 summary
+  # vectors. A gene token passes four attention blocks in total. scGPT runs
+  # twelve at d_model 512 with every gene in one sequence, so every gene can
+  # attend to every other gene at every layer.
+  #
+  # These two arms and r4_tiny_latent form a ladder on that allocation, with
+  # the latent, the adversary and everything else held fixed:
+  #
+  #   r4_tiny_latent     groups 2, cell 2   (~1.29 M encoder params)
+  #   r4_thin_groups     groups 1, cell 2   (~0.67 M)
+  #   r4_deep_cell       groups 1, cell 4   (~0.77 M)

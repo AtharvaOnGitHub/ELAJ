@@ -196,13 +196,20 @@ class EpochReporter:
         self._draw("adversarial", lambda: adversarial_panel(history, self.n_studies))
 
         if latents is not None:
-            self._draw(
-                f"latent_circular_epoch{epoch:03d}",
-                lambda: circular_latent(
-                    latents["mu_angle"], latents["kappa"], epoch
-                ),
-            )
-            self._draw_umap(epoch, latents)
+            self.draw_latents(epoch, latents)
+
+    def draw_latents(self, epoch: int, latents: dict) -> None:
+        """Every figure derived from latent codes, for one set of them.
+
+        Public and separate from `on_epoch_end` because `FinalReporter` redraws
+        exactly these from the best checkpoint once training ends, and must not
+        also redraw the loss panels — it has no history to draw them from.
+        """
+        self._draw(
+            f"latent_circular_epoch{epoch:03d}",
+            lambda: circular_latent(latents["mu_angle"], latents["kappa"], epoch),
+        )
+        self._draw_umap(epoch, latents)
 
     def _draw_umap(self, epoch: int, latents: dict[str, np.ndarray]) -> None:
         coords = safe_umap(latents["mu_gauss"], seed=self.seed)

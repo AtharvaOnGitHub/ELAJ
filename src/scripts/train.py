@@ -352,6 +352,17 @@ def main() -> None:
             "%d update(s) were skipped for non-finite gradients over the run.",
             monitor.skipped_steps,
         )
+    # ── Final figures from the best checkpoint ───────────────────────────────
+    # The per-epoch figures land on `latent_every`, which is almost never the
+    # epoch early stopping actually chose: r3_capacity's best was 27 and its
+    # last figure is 28, r3_loose's best was 21 and its last is 24. Redraw them
+    # once from the checkpoint that was selected.
+    from endo_model.training.final_report import FinalReporter
+
+    FinalReporter(
+        reporter=reporter, loader=val_loader, device=device, out_dir=out_dir,
+    ).render(model, trainer.ckpt_manager.best_path() if trainer.ckpt_manager else None)
+
     logger.info("Training complete. Outputs written to %s", out_dir)
 
 

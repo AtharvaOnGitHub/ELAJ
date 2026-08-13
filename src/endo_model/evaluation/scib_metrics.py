@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 def _has_package(name: str) -> bool:
-    import importlib
+    # importlib.util, not importlib. The submodule is not imported as a side
+    # effect of importing the package, so `import importlib` alone leaves
+    # `importlib.util` undefined unless something else in the process already
+    # pulled it in. That made this an AttributeError that appeared or vanished
+    # depending on import order, and it takes the whole endo_model.evaluation
+    # package down with it — including baseline_gate, which training needs.
+    import importlib.util
     return importlib.util.find_spec(name) is not None
 
 

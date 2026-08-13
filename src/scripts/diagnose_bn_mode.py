@@ -62,11 +62,53 @@ logger = logging.getLogger("elaj.bn_mode")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", required=True)
-    p.add_argument("--checkpoint", required=True)
+    p.add_argument(
+        "--checkpoint", default="auto",
+        help="Path to a .pt, or 'auto' to pick the retained checkpoint whose "
+             "epoch has the lowest val_nb in the run's metrics.csv.",
+    )
     p.add_argument("--root", default=None)
     p.add_argument("--k", type=int, default=30, help="Neighbours for purity.")
     p.add_argument("--out", default=None, help="Figure directory.")
     return p.parse_args()
+
+
+def resolve_checkpoint(out_dir: Path) -> Path:
+    """The retained checkpoint at the best-val_nb epoch.
+
+    CheckpointManager keeps the best three and encodes the epoch in the
+    filename as `epoch_XXXX_step_YYYYYYY.pt`. metrics.csv holds val_nb per
+    epoch, so the two together identify the one to load without the caller
+    having to read a directory listing and do the join by hand.
+    """
+    import csv
+
+    ckpt_dir = out_dir / "checkpoints"
+    available = sorted(ckpt_dir.glob("epoch_*.pt"))
+    if not available:
+        raise FileNotFoundError(f"no checkpoints in {ckpt_dir}")
+
+    rows = list(csv.DictReader((out_dir / "metrics.csv").open()))
+    best = min(rows, key=lambda r: float(r["val_nb"]))
+    want = f"epoch_{int(best['epoch']):04d}_"
+
+    for path in available:
+        if path.name.startswith(want):
+            logger.info(
+                "Best val_nb %.5f at epoch %s -> %s",
+                float(best["val_nb"]), best["epoch"], path.name,
+            )
+            return path
+
+    # The best epoch's checkpoint can have been evicted: retention keeps three
+    # and ranks by val_nb, so this should not happen, but a resumed run starts
+    # with an empty in-memory history and can prune inconsistently.
+    fallback = available[-1]
+    logger.warning(
+        "No checkpoint for best epoch %s (kept: %s). Using %s instead.",
+        best["epoch"], ", ".join(p.name for p in available), fallback.name,
+    )
+    return fallback
 
 
 def set_batchnorm_training(model, training: bool) -> int:
@@ -142,10 +184,16 @@ def main() -> None:
         num_workers=0,
     )
 
+    run_dir = Path(root) / exp_cfg.output_dir
+    ckpt = (
+        resolve_checkpoint(run_dir) if args.checkpoint == "auto"
+        else Path(args.checkpoint)
+    )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EndoFoundationModel(vocab, model_cfg).to(device)
-    CheckpointManager.load(args.checkpoint, model, None, map_location=device)
-    logger.info("Loaded %s", args.checkpoint)
+    CheckpointManager.load(str(ckpt), model, None, map_location=device)
+    logger.info("Loaded %s", ckpt)
 
     out_dir = Path(args.out or (Path(root) / exp_cfg.output_dir / "figures"))
     reporter = EpochReporter(

@@ -3,12 +3,22 @@
 A single source of truth for colour so every figure in the project reads as
 one visual system.  Import these names rather than hard-coding hex strings.
 
+Berry and cream, matching the thesis deck: berry #6D2E46 for emphasis, dusty
+rose #A26769 for the second series, cream #ECE2D0 for fills, on white.
+
 Design goals
 ------------
 - Simple: a small, deliberate set of colours, not a rainbow.
-- Functional: the categorical palette is the Okabe–Ito colour-blind-safe set,
-  distinguishable under all common forms of colour-vision deficiency.
-- Good-looking: a restrained ink-on-paper base with two brand accents.
+- Coherent with the written thesis: a figure dropped onto a slide should not
+  announce that it came from somewhere else.
+- Muted: nothing saturated, so no single series shouts over the others.
+
+⚠ The categorical scale is no longer Okabe–Ito. That set is colour-blind safe
+and this one is only partly so — the twelve study colours sweep hue from berry
+through olive to indigo, which survives the common deficiencies better than a
+red/green pair would, but it has not been verified. Where colour is the *only*
+identifier — `study_scale` — keep a key beside the figure. `study_key` in
+`corpus_panels` draws one.
 """
 
 from __future__ import annotations
@@ -24,52 +34,88 @@ class Palette:
     (primary emphasis), and scales (categorical + sequential) for data marks.
     """
 
-    # ── Neutrals — page structure and text ──────────────────────────────────
-    ink: str = "#22223b"          # primary text, strong axis labels
-    ink_soft: str = "#4a4a63"     # secondary text, tick labels
-    grid: str = "#e7e7ee"         # gridlines
-    spine: str = "#c9c9d6"        # axis spines
-    paper: str = "#ffffff"        # figure/axes background
-    paper_alt: str = "#f7f7fb"    # subtle panel fill
+    # ── Neutrals — page structure and text, warmed to sit with cream ────────
+    ink: str = "#4A2B35"          # primary text: berry, desaturated
+    ink_soft: str = "#8A7078"     # secondary text, tick labels
+    grid: str = "#EDE4DC"         # gridlines: cream, lightened
+    spine: str = "#D9C8C0"        # axis spines
+    paper: str = "#FFFFFF"        # figure/axes background — the slides are white
+    paper_alt: str = "#FBF6EF"    # subtle panel fill
 
-    # ── Brand accents — primary emphasis ────────────────────────────────────
-    primary: str = "#2a9d8f"      # teal — main series, chosen operating point
-    secondary: str = "#e76f51"    # coral — contrast series, highlights
-    muted: str = "#8d99ae"        # de-emphasised / reference marks
+    # ── Brand accents — the deck's own three ────────────────────────────────
+    primary: str = "#6D2E46"      # berry — main series, emphasis
+    secondary: str = "#A26769"    # dusty rose — contrast series
+    cream: str = "#ECE2D0"        # card fills, area shading, "empty" bar segments
+    muted: str = "#B3A29C"        # de-emphasised / reference marks
 
-    # ── Categorical scale — Okabe–Ito, colour-blind safe ────────────────────
+    # ── Categorical scale ───────────────────────────────────────────────────
+    # Order is load-bearing: corpus_panels maps disease status onto the first
+    # four (eutopic, ectopic, control, adenomyosis) and training_panels uses
+    # 0 and 1 for train and val.
     categorical: tuple[str, ...] = (
-        "#0072B2",  # blue
-        "#E69F00",  # orange
-        "#009E73",  # green
-        "#CC79A7",  # reddish purple
-        "#56B4E9",  # sky blue
-        "#D55E00",  # vermillion
-        "#F0E442",  # yellow
-        "#999999",  # grey
+        "#A26769",  # dusty rose
+        "#6D2E46",  # berry
+        "#A98C63",  # khaki
+        "#4E7C82",  # teal slate
+        "#8A9463",  # olive
+        "#B87D6A",  # clay
+        "#5C6B99",  # dusty indigo
+        "#7A5C8A",  # muted purple
     )
 
-    # ── Sequential scale — perceptually ordered teal ramp ───────────────────
+    # ── Study scale — colour as the identifier for a study ──────────────────
+    # Twelve, because the corpus has twelve studies and their names
+    # ("garcia_alonso_2021_a") eat half of any axis they are printed on. Warm
+    # to cool so that a study's colour is memorable across figures; assign with
+    # `study_colours`, which fixes the mapping in one place.
+    study_scale: tuple[str, ...] = (
+        "#6D2E46",  # berry
+        "#A24E5E",  # deep rose
+        "#A26769",  # dusty rose
+        "#B87D6A",  # clay
+        "#C89A72",  # warm sand
+        "#A98C63",  # khaki
+        "#8A9463",  # olive
+        "#5F8068",  # moss
+        "#4E7C82",  # teal slate
+        "#5C6B99",  # dusty indigo
+        "#7A5C8A",  # muted purple
+        "#8C6A79",  # taupe rose
+    )
+
+    # ── Sequential scale — cream to berry ───────────────────────────────────
     # Light → dark; use for ordered/continuous encodings (e.g. a swept dial).
     sequential: tuple[str, ...] = (
-        "#e8f6f4",
-        "#b9e3dd",
-        "#8ad0c6",
-        "#5bbdb0",
-        "#2a9d8f",
-        "#1f7a6f",
-        "#155a52",
+        "#FCF8F3",
+        "#F0E4D6",
+        "#DFC3B9",
+        "#CB9B9C",
+        "#B27585",
+        "#8E4E67",
+        "#6D2E46",
     )
 
     # ── Semantic — status colours ───────────────────────────────────────────
-    good: str = "#009E73"         # positive / selected
-    warn: str = "#E69F00"         # caution
-    bad: str = "#D55E00"          # negative / excluded
+    good: str = "#5F8068"         # positive / selected
+    warn: str = "#C89A72"         # caution
+    bad: str = "#A24E5E"          # negative / excluded
 
     def categorical_cycle(self, n: int) -> list[str]:
         """Return n categorical colours, cycling if n exceeds the base set."""
         base = self.categorical
         return [base[i % len(base)] for i in range(n)]
+
+    def study_colours(self, studies) -> dict[str, str]:
+        """study name -> colour, in the order given.
+
+        The order is the caller's choice and it matters: pass studies largest
+        first and the biggest contributors wear the deepest berry tones, which
+        is what the eye reaches for. Whatever order is chosen, use the same one
+        everywhere in a document or the same study changes colour between
+        figures. Cycles if there are more studies than colours.
+        """
+        scale = self.study_scale
+        return {name: scale[i % len(scale)] for i, name in enumerate(studies)}
 
     def sequential_sampled(self, n: int) -> list[str]:
         """Return n colours sampled evenly across the sequential ramp."""

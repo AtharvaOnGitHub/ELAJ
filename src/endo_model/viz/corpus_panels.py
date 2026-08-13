@@ -19,6 +19,8 @@ Two groups:
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -46,6 +48,58 @@ DISEASE_COLOURS = {
 # Clinical order, not frequency order, so the legend reads the same way every
 # time and eutopic/ectopic sit next to each other where they are compared.
 DISEASE_ORDER = ("eutopic", "ectopic", "control", "adenomyosis", "other")
+
+
+# study -> colour for the whole run, so a study is the same colour in every
+# panel. `set_study_order` fills it; until it is called the panels fall back to
+# the palette's flat primary, which is what every figure did before.
+_STUDY_COLOURS: dict[str, str] = {}
+
+
+def set_study_order(studies) -> dict[str, str]:
+    """Fix the study→colour mapping for every panel drawn afterwards.
+
+    Call once, with studies in the order that should read as most-to-least
+    important — largest first gives the biggest contributors the deepest berry
+    tones. Returns the mapping so a caller can draw a key from it.
+    """
+    _STUDY_COLOURS.clear()
+    _STUDY_COLOURS.update(PALETTE.study_colours(list(studies)))
+    return dict(_STUDY_COLOURS)
+
+
+def study_colour(study: str) -> str:
+    """One study's colour, or the palette primary if no order was set."""
+    return _STUDY_COLOURS.get(study, PALETTE.primary)
+
+
+def study_colours(studies) -> list[str]:
+    """Colours for a list of studies, in the order given."""
+    return [study_colour(s) for s in studies]
+
+
+def study_key(studies=None, columns: int = 4) -> plt.Figure:
+    """A standalone colour key naming every study.
+
+    Exists because the panels identify studies by colour as well as by tick
+    label, and a slide that crops the tick labels to fit still needs the names
+    somewhere. Drop this in a corner and the colours become readable.
+    """
+    names = list(studies) if studies is not None else list(_STUDY_COLOURS)
+    rows = math.ceil(len(names) / columns) if names else 1
+    fig, ax = plt.subplots(figsize=(3.1 * columns, 0.32 * rows + 0.15))
+
+    for i, name in enumerate(names):
+        col, row = i % columns, i // columns
+        x, y = col / columns, 1.0 - (row + 0.62) / rows
+        ax.add_patch(plt.Rectangle((x, y), 0.016, 0.5 / rows,
+                                   color=study_colour(name),
+                                   transform=ax.transAxes, clip_on=False))
+        ax.text(x + 0.024, y + 0.25 / rows, name.replace("_", " "),
+                transform=ax.transAxes, va="center", fontsize=9,
+                color=PALETTE.ink)
+    ax.axis("off")
+    return fig
 
 
 def _disease_palette(categories):
@@ -93,13 +147,14 @@ def cells_and_patients(
         2, 1, figsize=(max(8, 0.75 * len(studies) + 3), 7), sharex=True
     )
 
-    top.bar(studies, [cells[s] for s in studies], color=PALETTE.primary)
+    top.bar(studies, [cells[s] for s in studies], color=study_colours(studies))
     top.set_ylabel("cells")
     top.set_title("Cells per study")
     for i, s in enumerate(studies):
         top.text(i, cells[s], f"{cells[s]:,}", ha="center", va="bottom", fontsize=8)
 
-    bottom.bar(studies, [patients.get(s, 0) for s in studies], color=PALETTE.secondary)
+    bottom.bar(studies, [patients.get(s, 0) for s in studies],
+               color=study_colours(studies))
     bottom.set_ylabel("donors")
     bottom.set_title("Donors per study")
     for i, s in enumerate(studies):
@@ -263,7 +318,7 @@ def cells_per_donor(per_donor: dict[str, list[int]]) -> plt.Figure:
         y = np.full(values.shape, i, dtype=float)
         y += (np.random.default_rng(24).random(values.shape) - 0.5) * 0.35
         ax.scatter(values, y, s=18, alpha=0.7, linewidths=0,
-                   color=PALETTE.primary)
+                   color=study_colour(study))
         ax.scatter([np.median(values)], [i], marker="|", s=340, linewidths=2,
                    color=PALETTE.bad, zorder=3)
 
@@ -272,7 +327,7 @@ def cells_per_donor(per_donor: dict[str, list[int]]) -> plt.Figure:
     ax.set_xlabel("cells per donor (log scale)")
     ax.set_title("Cells per donor")
     ax.legend(handles=[
-        Patch(facecolor=PALETTE.primary, label="one donor"),
+        Patch(facecolor=PALETTE.muted, label="one donor"),
         Patch(facecolor=PALETTE.bad, label="study median"),
     ], frameon=False, fontsize=8, loc="lower right")
     ax.grid(axis="x", alpha=0.4)
@@ -414,8 +469,9 @@ def vocabulary_coverage(measured: dict[str, int], vocab_size: int) -> plt.Figure
     missing = vocab_size - covered
 
     fig, ax = plt.subplots(figsize=(max(8, 0.75 * len(studies) + 3), 5))
-    ax.bar(studies, covered, color=PALETTE.primary, label="in vocabulary (measured)")
-    ax.bar(studies, missing, bottom=covered, color=PALETTE.grid,
+    ax.bar(studies, covered, color=study_colours(studies),
+           label="in vocabulary (measured)")
+    ax.bar(studies, missing, bottom=covered, color=PALETTE.cream,
            label="in vocabulary, not measured (DNS)")
     ax.axhline(vocab_size, ls="--", lw=1.2, color=PALETTE.muted)
     ax.set_ylabel("genes")

@@ -349,7 +349,16 @@ def main() -> int:
         )
 
     apply_theme()
+
+    # Fix the study->colour mapping for the whole run, largest study first, so
+    # a study is the same colour in every panel and the deepest berry tones go
+    # to the biggest contributors. study_key then names them; the panels carry
+    # the colour.
+    from endo_model.viz.corpus_panels import set_study_order, study_key
+    set_study_order(sorted(cells, key=lambda s: -cells[s]))
+
     figures = {
+        "study_key": lambda: study_key(),
         # Compulsory
         "cells_and_patients": lambda: cells_and_patients(cells, donors),
         "disease_status": lambda: composition_by_study(disease, "disease_status"),

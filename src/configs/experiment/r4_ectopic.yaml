@@ -1,0 +1,74 @@
+name: r4_ectopic
+description: >
+  Ectopic cells only. The other half of the same control.
+
+  Wave R4. Shrink the model and remove the confound, at a live adversary.
+
+  Everything before this made the model bigger, looser, or more strongly
+  regularised, and none of it changed the one number that matters: kNN study
+  purity, the share of a cell's 30 nearest neighbours that come from its own
+  study. Perfect mixing here is 0.125. r3_nodab reached 0.756, r3_loose 0.959,
+  r3_capacity 0.982 -- and r3_capacity was the LARGEST model with the strongest
+  adversary. Bigger has been worse every time.
+
+  So this wave goes the other way. A latent with 8 Gaussian and 4 circular
+  dimensions cannot hold forty separate study clumps the way a 48+12 one can;
+  if the room to keep studies apart is removed, the model has to put cells
+  somewhere shared or lose reconstruction. That is a hypothesis, not a
+  prediction, and purity is what tests it.
+
+  lambda_dab is 0.02 in every arm with w_dab 0.5, so encoder pressure is 0.01.
+  That is r3_capacity's setting: high enough that the classifier reached chance,
+  low enough that the latent did not empty as it did at 0.1 in wave R2.
+
+  Read purity from the end-of-run log line, not the UMAP. Read val_dab against
+  the label entropy printed alongside it, not ln(n_studies) -- studies are not
+  equally frequent and ln(9) is roughly 0.6 nats too generous.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r4_ectopic/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, carried from the best of wave R3 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # !! The weaker of the pair, and worth knowing before reading it. Ectopic
+  # means ovary or peritoneum, and by the split coverage table only fonseca_2023,
+  # tan_2022 and ferrero_2024 contribute those tissues. So this arm trains on
+  # about three studies rather than nine, on far fewer cells, and its chance
+  # line moves accordingly -- do not compare its val_dab or its purity against
+  # r4_eutopic's without accounting for that.
+  #
+  # It is still worth running: it is the only way to see whether ovary and
+  # peritoneum cells from different studies will sit together when nothing
+  # uterine is present to separate them from.
+  data.include_disease_statuses: [ectopic]
+
+  # ---- the tiny latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+  # ---- the smaller encoder ----
+  # Note: the group encoders are 2 layers deep, not 8. Halving the only thing
+  # that can be halved takes them to 1, so the width is cut as well to make the
+  # reduction meaningful: d_token 32 -> 16 and d_agg 64 -> 32. n_heads stays 4,
+  # which divides both.
+  model.group_encoder.n_layers: 1
+  model.aggregation_encoder.n_layers: 1
+  model.d_token: 16
+  model.d_agg: 32

@@ -197,7 +197,7 @@ def composition_by_study(
         categories = order or sorted(
             present, key=lambda k: -sum(per.get(k, 0) for per in counts.values())
         )
-        colors = PALETTE.categorical_cycle(max(len(categories), 1))
+        colors = PALETTE.distinct(max(len(categories), 1))
 
     fig, left = plt.subplots(figsize=(max(7, 0.6 * len(studies) + 3), 4.6))
 
@@ -205,18 +205,26 @@ def composition_by_study(
     for category, color in zip(categories, colors):
         totals = np.array([max(sum(counts[s].values()), 1) for s in studies], float)
         share = np.array([counts[s].get(category, 0) for s in studies], float) / totals
-        left.bar(studies, share, bottom=bottom, label=str(category), color=color)
+        left.bar(studies, share, bottom=bottom, color=color,
+                 label=_short_site(str(category)))
         bottom += share
     left.set_ylabel("fraction of cells")
-    left.set_title(title, pad=26)
     left.set_ylim(0, 1)
     left.tick_params(axis="x", rotation=60)
     for tick in left.get_xticklabels():
         tick.set_ha("right")
-    # Under the title, horizontal: bars are full-height so there is no room
-    # inside, and a column of labels on the right would widen the figure again.
-    left.legend(frameon=False, fontsize=8, ncol=len(categories),
-                loc="lower center", bbox_to_anchor=(0.5, 1.01))
+    # Where the legend goes depends on how many entries it has, because the
+    # same function draws disease status (4 categories) and anatomical site
+    # (9, several of them long). Four fit on one line under the title; nine
+    # ran off both ends of the axes, so those go in a column on the right.
+    if len(categories) <= 4:
+        left.set_title(title, pad=26)
+        left.legend(frameon=False, fontsize=8, ncol=len(categories),
+                    loc="lower center", bbox_to_anchor=(0.5, 1.01))
+    else:
+        left.set_title(title)
+        left.legend(frameon=False, fontsize=8, ncol=1, loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0))
     return fig
 
 

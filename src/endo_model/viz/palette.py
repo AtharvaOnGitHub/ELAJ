@@ -101,9 +101,29 @@ class Palette:
     bad: str = "#A24E5E"          # negative / excluded
 
     def categorical_cycle(self, n: int) -> list[str]:
-        """Return n categorical colours, cycling if n exceeds the base set."""
+        """Return n categorical colours, cycling if n exceeds the base set.
+
+        ⚠ Cycling repeats a colour. Use `distinct` for anything where two
+        categories sharing a colour would be read as one.
+        """
         base = self.categorical
         return [base[i % len(base)] for i in range(n)]
+
+    def distinct(self, n: int) -> list[str]:
+        """n colours that do not repeat, for as long as the palette can manage.
+
+        The categorical scale holds eight and the corpus has nine anatomical
+        sites, so `categorical_cycle(9)` gave endometrium and rectum the same
+        colour and a stacked bar showed one band where there were two. This
+        falls through to the study scale for the overflow, and only repeats
+        once both are exhausted — at which point the figure has too many
+        categories to read by colour anyway.
+        """
+        pool: list[str] = []
+        for colour in (*self.categorical, *self.study_scale):
+            if colour not in pool:
+                pool.append(colour)
+        return [pool[i % len(pool)] for i in range(n)]
 
     def study_colours(self, studies) -> dict[str, str]:
         """study name -> colour, in the order given.

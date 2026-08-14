@@ -120,6 +120,18 @@ def apply_theme(palette: Palette = PALETTE) -> None:
     logger.debug("ELAJ visualisation theme applied")
 
 
+def sequential_cmap(palette: Palette = PALETTE) -> LinearSegmentedColormap:
+    """The palette's cream→berry ramp as a matplotlib colormap.
+
+    Heatmaps used matplotlib's "Blues", which is the one thing in the project
+    that ignored the palette entirely. Built here so every heatmap reads from
+    the same source as every bar chart.
+    """
+    return LinearSegmentedColormap.from_list(
+        "elaj_sequential", list(palette.sequential)
+    )
+
+
 def sequential_line_colors(
     n: int, palette: Palette = PALETTE, dark_bias: float = 0.30
 ) -> list:

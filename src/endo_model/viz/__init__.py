@@ -11,6 +11,7 @@ from endo_model.viz.theme import (
     apply_theme,
     build_rcparams,
     save_figure,
+    sequential_cmap,
     sequential_line_colors,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "apply_theme",
     "build_rcparams",
     "save_figure",
+    "sequential_cmap",
     "sequential_line_colors",
 ]

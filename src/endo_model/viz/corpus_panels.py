@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 from endo_model.viz.palette import PALETTE
+from endo_model.viz.theme import sequential_cmap
 
 
 # One colour per disease status, fixed, used by every panel that draws them.
@@ -46,8 +47,15 @@ DISEASE_COLOURS = {
 }
 
 # Clinical order, not frequency order, so the legend reads the same way every
-# time and eutopic/ectopic sit next to each other where they are compared.
-DISEASE_ORDER = ("eutopic", "ectopic", "control", "adenomyosis", "other")
+# time. Control leads because it is the reference the other three are read
+# against; eutopic and ectopic stay adjacent because they are the pair actually
+# being compared.
+DISEASE_ORDER = ("control", "eutopic", "ectopic", "adenomyosis", "other")
+
+
+def _short_site(site: str) -> str:
+    """Site name trimmed of the parenthetical that only widens an axis."""
+    return site.replace(" (cul-de-sac)", "")
 
 
 # study -> colour for the whole run, so a study is the same colour in every
@@ -170,11 +178,15 @@ def cells_and_patients(
 def composition_by_study(
     counts: dict[str, dict], title: str, order: list[str] | None = None
 ) -> plt.Figure:
-    """Stacked proportions per study, with absolute totals on the right.
+    """Stacked proportions per study.
 
     Proportions because studies differ in size by two orders of magnitude and a
-    stacked count plot would show only the two largest. The totals panel keeps
-    the absolute scale visible, which proportions alone would hide.
+    stacked count plot would show only the two largest.
+
+    There used to be a second panel of absolute totals beside this one. It was
+    the same numbers as `cells_and_patients`, drawn smaller and separated from
+    its own study labels by a legend — half the figure's width spent restating
+    a chart that already exists.
     """
     studies = sorted(counts, key=lambda s: -sum(counts[s].values()))
     present = {k for per in counts.values() for k in per}
@@ -187,10 +199,7 @@ def composition_by_study(
         )
         colors = PALETTE.categorical_cycle(max(len(categories), 1))
 
-    fig, (left, right) = plt.subplots(
-        1, 2, figsize=(max(9, 0.8 * len(studies) + 5), 5),
-        gridspec_kw={"width_ratios": [3, 1]},
-    )
+    fig, left = plt.subplots(figsize=(max(7, 0.6 * len(studies) + 3), 4.6))
 
     bottom = np.zeros(len(studies))
     for category, color in zip(categories, colors):
@@ -199,22 +208,15 @@ def composition_by_study(
         left.bar(studies, share, bottom=bottom, label=str(category), color=color)
         bottom += share
     left.set_ylabel("fraction of cells")
-    left.set_title(title)
+    left.set_title(title, pad=26)
     left.set_ylim(0, 1)
     left.tick_params(axis="x", rotation=60)
     for tick in left.get_xticklabels():
         tick.set_ha("right")
-    left.legend(frameon=False, fontsize=8, ncol=1, loc="upper left",
-                bbox_to_anchor=(1.02, 1.0))
-
-    # Labelled. Sharing the left panel's order is not enough — the two axes are
-    # separated by a legend, and a reader cannot count twelve bars across a gap
-    # to work out which total belongs to which study.
-    right.barh(studies[::-1], [sum(counts[s].values()) for s in studies][::-1],
-               color=PALETTE.muted)
-    right.set_xlabel("cells")
-    right.set_title("total")
-    right.tick_params(axis="y", labelsize=8)
+    # Under the title, horizontal: bars are full-height so there is no room
+    # inside, and a column of labels on the right would widen the figure again.
+    left.legend(frameon=False, fontsize=8, ncol=len(categories),
+                loc="lower center", bbox_to_anchor=(0.5, 1.01))
     return fig
 
 
@@ -238,13 +240,10 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
             union = len(a | b)
             matrix[i, j] = matrix[j, i] = len(a & b) / union if union else 0.0
 
-    # Mask the diagonal. Every study shares 100% of its genes with itself, so
-    # those cells carry no information and, worse, pin the colour scale to 1.0 —
-    # which compresses the range the off-diagonal values actually occupy.
-    shown = matrix.copy()
-    np.fill_diagonal(shown, np.nan)
-    off_diagonal = shown[~np.isnan(shown)]
-    high = float(off_diagonal.max()) if off_diagonal.size else 1.0
+    # The diagonal is drawn. It is trivially 100%, but leaving it blank made
+    # the matrix read as though those pairs were missing rather than certain.
+    off_diagonal = matrix[~np.eye(n, dtype=bool)]
+    high = 1.0
     # Anchor the low end at the smallest real overlap, not at zero. Every pair
     # in this corpus shares 0.64-0.96 of its genes, so a scale running from 0
     # renders the whole matrix one shade of dark blue and the differences that
@@ -252,19 +251,19 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
     low = float(off_diagonal.min()) if off_diagonal.size else 0.0
 
     fig, ax = plt.subplots(figsize=(0.55 * n + 4, 0.55 * n + 3))
-    im = ax.imshow(shown, vmin=low, vmax=high, cmap="Blues")
+    im = ax.imshow(matrix, vmin=low, vmax=high, cmap=sequential_cmap())
     ax.set_xticks(range(n), studies, rotation=60, ha="right")
     ax.set_yticks(range(n), studies)
     ax.set_title("Shared genes between studies (Jaccard)")
+    ax.grid(False)          # the theme's y-grid draws lines across every cell
     for i in range(n):
         for j in range(n):
-            if i == j:
-                continue
-            ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center",
-                    fontsize=7,
+            ax.text(j, i, f"{matrix[i, j] * 100:.0f}%", ha="center",
+                    va="center", fontsize=7,
                     color="white" if matrix[i, j] > low + (high - low) * 0.55
                     else PALETTE.ink)
-    fig.colorbar(im, ax=ax, shrink=0.7, label="fraction of genes shared")
+    cb = fig.colorbar(im, ax=ax, shrink=0.7, label="genes shared")
+    cb.ax.set_yticklabels([f"{v * 100:.0f}%" for v in cb.get_ticks()])
     return fig
 
 
@@ -284,10 +283,11 @@ def disease_by_site(counts: dict[tuple[str, str], int]) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=(1.6 * len(statuses) + 4, 0.5 * len(sites) + 3))
     shown = np.where(matrix > 0, matrix, np.nan)
-    im = ax.imshow(np.log10(shown), cmap="Blues")
+    im = ax.imshow(np.log10(shown), cmap=sequential_cmap())
     ax.set_xticks(range(len(statuses)), statuses, rotation=20, ha="right")
-    ax.set_yticks(range(len(sites)), sites)
+    ax.set_yticks(range(len(sites)), [_short_site(s) for s in sites])
     ax.set_title("Cells by anatomical site and disease status")
+    ax.grid(False)          # the theme's y-grid draws lines across every cell
     for i in range(len(sites)):
         for j in range(len(statuses)):
             value = matrix[i, j]
@@ -468,22 +468,29 @@ def vocabulary_coverage(measured: dict[str, int], vocab_size: int) -> plt.Figure
     covered = np.array([measured[s] for s in studies], float)
     missing = vocab_size - covered
 
-    fig, ax = plt.subplots(figsize=(max(8, 0.75 * len(studies) + 3), 5))
-    ax.bar(studies, covered, color=study_colours(studies),
+    # One colour, not one per study. The comparison here is measured against
+    # not-measured within each bar; colouring the bars by study adds a second
+    # encoding that competes with the one the figure is about.
+    fig, ax = plt.subplots(figsize=(max(7, 0.55 * len(studies) + 2.5), 4.4))
+    ax.bar(studies, covered, color=PALETTE.primary,
            label="in vocabulary (measured)")
     ax.bar(studies, missing, bottom=covered, color=PALETTE.cream,
            label="in vocabulary, not measured (DNS)")
     ax.axhline(vocab_size, ls="--", lw=1.2, color=PALETTE.muted)
     ax.set_ylabel("genes")
-    ax.set_title(f"Vocabulary coverage per study (vocabulary = {vocab_size:,} genes)")
+    ax.set_title(f"Vocabulary coverage per study "
+                 f"(vocabulary = {vocab_size:,} genes)", pad=26)
     ax.tick_params(axis="x", rotation=60)
     for tick in ax.get_xticklabels():
         tick.set_ha("right")
     for i, study in enumerate(studies):
         ax.text(i, covered[i] / 2, f"{covered[i] / vocab_size:.0%}",
                 ha="center", va="center", fontsize=8, color="white")
-    ax.legend(frameon=False, fontsize=8, loc="upper left",
-              bbox_to_anchor=(1.01, 1.0))
+    # Under the title. The bars run the full height of the axes, so there is
+    # no room inside; putting it to the right widened the figure by a third for
+    # two entries.
+    ax.legend(frameon=False, fontsize=8, ncol=2, loc="lower center",
+              bbox_to_anchor=(0.5, 1.01))
     return fig
 
 
@@ -576,10 +583,13 @@ def donors_by_status(counts: dict[str, dict]) -> plt.Figure:
     ax.tick_params(axis="x", rotation=60)
     for tick in ax.get_xticklabels():
         tick.set_ha("right")
-    # Outside the axes: the tallest bar is on the left and its count label sits
-    # where an upper-right legend lands.
-    ax.legend(frameon=False, fontsize=8, loc="upper left",
-              bbox_to_anchor=(1.01, 1.0))
+    # Inside, upper right. Studies are sorted largest first, so the bars fall
+    # away to the right and that corner is empty — putting the legend outside
+    # was costing a fifth of the figure's width to avoid a collision that the
+    # sort order already prevents.
+    ax.set_ylim(0, bottom.max() * 1.18)
+    ax.legend(frameon=False, fontsize=8, ncol=2, loc="upper right",
+              columnspacing=1.0, handlelength=1.2)
     return fig
 
 
@@ -628,10 +638,12 @@ def study_site_matrix(counts: dict[str, dict]) -> plt.Figure:
         figsize=(0.9 * len(sites) + 5, 0.45 * len(studies) + 3)
     )
     shown = np.where(matrix > 0, matrix, np.nan)
-    im = ax.imshow(np.log10(shown), cmap="Blues", aspect="auto")
-    ax.set_xticks(range(len(sites)), sites, rotation=35, ha="right")
+    im = ax.imshow(np.log10(shown), cmap=sequential_cmap(), aspect="auto")
+    ax.set_xticks(range(len(sites)), [_short_site(s) for s in sites],
+                  rotation=35, ha="right")
     ax.set_yticks(range(len(studies)), studies)
     ax.set_title("Cells by study and anatomical site")
+    ax.grid(False)          # the theme's y-grid draws lines across every cell
     for i in range(len(studies)):
         for j in range(len(sites)):
             value = matrix[i, j]

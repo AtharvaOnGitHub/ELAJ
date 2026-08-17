@@ -235,7 +235,11 @@ class Trainer:
             try:
                 with self.precision.autocast(self.device):
                     output1 = self.model(batch)
-                    output2 = self.model(batch) if self.cce_enabled else None
+                    # encode, not forward: CCE reads mu_gauss and mu_angle
+                    # and nothing downstream of the latent.
+                    output2 = (
+                        self.model.encode(batch) if self.cce_enabled else None
+                    )
                     losses = self.composite_loss(
                         output1, batch,
                         current_step=self.global_step,

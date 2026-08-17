@@ -109,7 +109,7 @@ def _scatter_by_label(ax, coords, labels, names, title, note=None) -> None:
         name = names.get(int(value), str(value)) if names else str(value)
         ax.scatter(
             coords[mask, 0], coords[mask, 1], s=2, alpha=0.5, linewidths=0,
-            color=PALETTE.categorical_cycle(max(len(np.unique(codes)), 1))[i],
+            color=PALETTE.distinct(max(len(np.unique(codes)), 1))[i],
             label=f"{name} ({int(mask.sum())})",
         )
     ax.set_title(title)

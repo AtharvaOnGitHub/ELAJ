@@ -6,7 +6,7 @@ Import the theme and apply it once at the top of any plotting script:
     apply_theme()
 """
 
-from endo_model.viz.palette import PALETTE, Palette
+from endo_model.viz.palette import BERRY, PALETTE, Palette
 from endo_model.viz.theme import (
     apply_theme,
     build_rcparams,
@@ -16,6 +16,7 @@ from endo_model.viz.theme import (
 )
 
 __all__ = [
+    "BERRY",
     "PALETTE",
     "Palette",
     "apply_theme",

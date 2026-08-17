@@ -26,7 +26,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-from endo_model.viz.palette import PALETTE
+# These figures are built for the thesis deck, so they read the berry
+# palette rather than the project default. Every PALETTE.* below is berry.
+from endo_model.viz.palette import BERRY as PALETTE
 from endo_model.viz.theme import sequential_cmap
 
 
@@ -259,7 +261,7 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
     low = float(off_diagonal.min()) if off_diagonal.size else 0.0
 
     fig, ax = plt.subplots(figsize=(0.55 * n + 4, 0.55 * n + 3))
-    im = ax.imshow(matrix, vmin=low, vmax=high, cmap=sequential_cmap())
+    im = ax.imshow(matrix, vmin=low, vmax=high, cmap=sequential_cmap(PALETTE))
     ax.set_xticks(range(n), studies, rotation=60, ha="right")
     ax.set_yticks(range(n), studies)
     ax.set_title("Shared genes between studies (Jaccard)")
@@ -291,7 +293,7 @@ def disease_by_site(counts: dict[tuple[str, str], int]) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=(1.6 * len(statuses) + 4, 0.5 * len(sites) + 3))
     shown = np.where(matrix > 0, matrix, np.nan)
-    im = ax.imshow(np.log10(shown), cmap=sequential_cmap())
+    im = ax.imshow(np.log10(shown), cmap=sequential_cmap(PALETTE))
     ax.set_xticks(range(len(statuses)), statuses, rotation=20, ha="right")
     ax.set_yticks(range(len(sites)), [_short_site(s) for s in sites])
     ax.set_title("Cells by anatomical site and disease status")
@@ -646,7 +648,7 @@ def study_site_matrix(counts: dict[str, dict]) -> plt.Figure:
         figsize=(0.9 * len(sites) + 5, 0.45 * len(studies) + 3)
     )
     shown = np.where(matrix > 0, matrix, np.nan)
-    im = ax.imshow(np.log10(shown), cmap=sequential_cmap(), aspect="auto")
+    im = ax.imshow(np.log10(shown), cmap=sequential_cmap(PALETTE), aspect="auto")
     ax.set_xticks(range(len(sites)), [_short_site(s) for s in sites],
                   rotation=35, ha="right")
     ax.set_yticks(range(len(studies)), studies)

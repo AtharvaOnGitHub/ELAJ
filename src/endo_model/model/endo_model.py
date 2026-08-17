@@ -123,14 +123,12 @@ class EndoFoundationModel(nn.Module):
             list(vocabulary.group_names), self._group_global_idxs
         )
 
-    def forward(self, batch: dict) -> dict[str, Tensor]:
-        """Full forward pass.
+    def encode(self, batch: dict) -> dict[str, Tensor]:
+        """Everything up to and including the latent. No decoder.
 
-        Args:
-            batch: dict conforming to endo_model.data.schema.Batch.
-
-        Returns:
-            dict — see module docstring for keys.
+        Split out for CCE's second view, which needs only `mu_gauss` and
+        `mu_angle` and was calling the full `forward` to get them — building
+        and holding a decoder graph over ~15,000 genes that nothing read.
         """
         # ── Tokenise ─────────────────────────────────────────────────────────
         group_tokens = self.token_constructor(batch)          # {name: (B,G_k,D)}
@@ -148,8 +146,18 @@ class EndoFoundationModel(nn.Module):
         cell_cls = self.aggregation_encoder(group_cls_dict, meta_tokens)
         # cell_cls: (B, d_agg) — the only per-cell tensor leaving the encoder
 
-        # ── Latent space ──────────────────────────────────────────────────────
-        latent = self.latent_space(cell_cls)   # dict with z_proj etc.
+        return self.latent_space(cell_cls)     # dict with z_proj etc.
+
+    def forward(self, batch: dict) -> dict[str, Tensor]:
+        """Full forward pass.
+
+        Args:
+            batch: dict conforming to endo_model.data.schema.Batch.
+
+        Returns:
+            dict — see module docstring for keys.
+        """
+        latent = self.encode(batch)
 
         # ── Gene queries for measured genes ───────────────────────────────────
         gene_queries, measured_global_idxs = self._build_gene_queries(batch)

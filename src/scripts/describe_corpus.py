@@ -147,7 +147,7 @@ def main() -> int:
 
     from endo_model.configs import load_experiment
     from endo_model.data.tissue_hierarchy import ONTOLOGY_COLUMN, TissueHierarchy
-    from endo_model.viz import apply_theme, save_figure
+    from endo_model.viz import BERRY, apply_theme, save_figure
     from endo_model.viz.corpus_panels import (
         cells_and_patients,
         cells_per_donor,
@@ -348,7 +348,8 @@ def main() -> int:
             len(ages),
         )
 
-    apply_theme()
+    # Berry, not the project default: these figures go on slides.
+    apply_theme(BERRY)
 
     # Fix the study->colour mapping for the whole run, largest study first, so
     # a study is the same colour in every panel and the deepest berry tones go

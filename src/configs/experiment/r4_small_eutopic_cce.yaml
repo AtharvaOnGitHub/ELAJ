@@ -34,7 +34,22 @@ seed: 24
 
 overrides:
   training.max_epochs: 30
-  training.batch_size: 256
+  # !! batch 128, not 256. Wave R4's two CCE arms both died with
+  # torch.OutOfMemoryError on the first backward, trying to allocate 6.52 GiB
+  # with 4.63 GiB free of 79.25. CCE runs a second pass over the encoder and
+  # holds both graphs, and the memory is dominated by the group encoders'
+  # attention: 45 groups, each (B, heads, G_k, G_k) with G_k up to 493, which
+  # at B=256 is about a gigabyte per group.
+  #
+  # Two changes together. The second pass now calls model.encode rather than
+  # model.forward, so it no longer builds a decoder graph over ~15,000 genes
+  # that CCE never reads. And the batch halves, which halves the attention
+  # matrices — the term that actually filled the card. Both were needed;
+  # encode() alone was too close to the limit to trust.
+  #
+  # InfoNCE loses half its negatives at B=128. That weakens the contrastive
+  # signal and is the price of running the arm at all.
+  training.batch_size: 128
   training.diagnostics.log_every: 50
   training.diagnostics.latent_every: 5
   training.early_stop_patience: 7

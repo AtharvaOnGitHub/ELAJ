@@ -52,6 +52,7 @@ class PurityResult:
     n_studies: int
     purity: float
     floor: float
+    n_components: int | None = None
 
     @property
     def excess(self) -> float:
@@ -70,6 +71,7 @@ class PurityResult:
             "scope": self.scope,
             "n_cells": self.n_cells,
             "n_studies": self.n_studies,
+            "kNN_dims": self.n_components if self.n_components else "native",
             "purity": round(self.purity, 4),
             "mixed_floor": round(self.floor, 4),
             "excess_over_mixed": round(self.excess, 4),
@@ -111,14 +113,21 @@ def measure(
     tissue_type: np.ndarray | None = None,
     tissue_names: dict[int, str] | None = None,
     k: int = 30,
+    n_components: int | None = 8,
 ) -> list[PurityResult]:
-    """Whole-corpus purity, then one measurement per tissue with enough cells."""
+    """Whole-corpus purity, then one measurement per tissue with enough cells.
+
+    `n_components` projects every latent to a common width first. It defaults
+    to 8 — the narrowest Gaussian branch this project has trained — because
+    without it the measurement rewards a wide latent for being wide. See
+    study_mixing.project.
+    """
     names = tissue_names or {}
     results = [PurityResult(
         run=run, scope="all cells", n_cells=len(latent),
         n_studies=len(np.unique(study_id)),
-        purity=knn_purity(latent, study_id, k),
-        floor=expected_purity(study_id),
+        purity=knn_purity(latent, study_id, k, n_components=n_components),
+        floor=expected_purity(study_id), n_components=n_components,
     )]
 
     if tissue_type is None:
@@ -133,8 +142,9 @@ def measure(
         results.append(PurityResult(
             run=run, scope=names.get(int(code), f"tissue {int(code)}"),
             n_cells=len(rows), n_studies=len(np.unique(study_id[rows])),
-            purity=knn_purity(latent[rows], study_id[rows], k),
-            floor=expected_purity(study_id[rows]),
+            purity=knn_purity(latent[rows], study_id[rows], k,
+                              n_components=n_components),
+            floor=expected_purity(study_id[rows]), n_components=n_components,
         ))
     return results
 

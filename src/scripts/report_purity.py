@@ -38,6 +38,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--root", default=None)
     p.add_argument("--config-dir", default="configs/experiment")
     p.add_argument("--k", type=int, default=30, help="Neighbours per cell.")
+    p.add_argument("--dims", type=int, default=8,
+                   help="Project every latent to this many PCs before the "
+                        "neighbour search, so runs of different latent width "
+                        "are comparable. 0 uses each latent as-is.")
     p.add_argument("--out", default="outputs/purity",
                    help="Where the combined table is written.")
     return p.parse_args()
@@ -177,6 +181,7 @@ def main() -> None:
             tissue_type=latents["tissue"][:, 2],
             tissue_names=names,
             k=args.k,
+            n_components=args.dims or None,
         )
         write_csv(found, run_dir / "purity.csv")
         results.extend(found)

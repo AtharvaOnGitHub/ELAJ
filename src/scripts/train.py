@@ -361,7 +361,7 @@ def main() -> None:
 
     FinalReporter(
         reporter=reporter, loader=val_loader, device=device, out_dir=out_dir,
-    ).render(model, trainer.ckpt_manager.best_path() if trainer.ckpt_manager else None)
+    ).render(model, trainer.ckpt_manager)
 
     logger.info("Training complete. Outputs written to %s", out_dir)
 

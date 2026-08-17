@@ -42,15 +42,19 @@ class FinalReporter:
         self.device = device
         self.fig_dir = Path(out_dir) / "figures" / "best"
 
-    def render(self, model, checkpoint_path: Path | str | None) -> None:
-        """Load the checkpoint, collect val latents, write the figures.
+    def render(self, model, manager) -> None:
+        """Load the best checkpoint, collect val latents, write the figures.
 
-        Never raises. This runs after `trainer.fit()` has returned and the
-        metrics have been written, so a failure here must not turn a completed
-        run into a failed one.
+        Takes the CheckpointManager rather than a path. The caller used to
+        resolve `manager.best_path` itself and pass the result, and because
+        that happened while evaluating render's arguments it sat OUTSIDE this
+        try — so when it was written as `best_path()` against a property, every
+        one of wave R4's six completed arms exited non-zero after training had
+        finished, with no final figures and no purity number. Resolving it in
+        here puts it under the guard it was always supposed to be under.
         """
         try:
-            self._render(model, checkpoint_path)
+            self._render(model, None if manager is None else manager.best_path)
         except Exception as exc:  # noqa: BLE001 — diagnostics are not load-bearing
             logger.warning(
                 "Final figures skipped (%s: %s). Training itself is unaffected "

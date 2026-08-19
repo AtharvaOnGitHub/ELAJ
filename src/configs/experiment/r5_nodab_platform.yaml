@@ -1,0 +1,72 @@
+name: r5_nodab_platform
+description: >
+  The covariates live, the adversary demoted to a probe. Does DAB still earn
+  its place?
+
+  Wave R5. Does telling the decoder which machine made a cell stop the latent
+  from encoding it?
+
+  Four waves of evidence say the adversary is not helping. r3_nodab had the
+  best UMAP in its wave. In R4, the arm with the strongest encoder pressure
+  (r4_tiny_dab_hi, lambda 0.1) reached 97.0% purity -- the WORST mixing of the
+  six completed arms, and worse than doing nothing. Pushing harder has made it
+  worse every single time it has been tried.
+
+  The platform covariates change the question rather than answer it. DAB and
+  the covariates are aimed at the same target from opposite directions: DAB
+  punishes the encoder for keeping technical signal, the covariates give the
+  decoder that signal for free so the encoder has no reason to keep it. One is
+  a penalty, the other removes the incentive. If the second works, the first is
+  redundant, and it is not free -- it is a gradient fighting the reconstruction
+  on every step.
+
+  lambda_dab 0 removes the encoder pressure and nothing else. w_dab stays 0.5,
+  so the classifier is still trained and still reported: it becomes a read-only
+  probe measuring how separable the studies are, without itself pushing them
+  around. That is the number to read, against the label entropy printed beside
+  it (1.744 train, 1.588 val) rather than ln(9), which is about 0.6 nats too
+  generous because the studies are not equally frequent.
+
+  Read against the running r4_thin_groups, which is this arm with lambda 0.02.
+  If purity is no worse here, the adversary is costing reconstruction for
+  nothing and wave R6 should drop it.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r5_nodab_platform/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+
+  # w_dab is deliberately NOT zero. It weights the classifier's own parameters,
+  # which lambda does not touch, so keeping it at 0.5 leaves the probe trained
+  # and comparable with every other arm's val_dab. Zeroing it would stop the
+  # classifier learning and make the number meaningless rather than clean.
+  model.loss.w_dab: 0.5
+
+  # The one line that makes this arm what it is. Encoder pressure is
+  # lambda * w_dab, so 0 here means the reversed gradient reaching the encoder
+  # is exactly zero while everything else runs unchanged.
+  model.dab.lambda_dab: 0.0
+
+  # ---- the tiny latent, as in r4_tiny_latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+
+  # ---- thin group encoders, as in the running r4_thin_groups ----
+  model.group_encoder.n_layers: 1
+  model.aggregation_encoder.n_layers: 2

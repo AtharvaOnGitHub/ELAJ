@@ -1,0 +1,71 @@
+name: r5_eutopic_platform
+description: >
+  Eutopic cells only, with the technical covariates live. The clean test.
+
+  Wave R5. Does telling the decoder which machine made a cell stop the latent
+  from encoding it?
+
+  r4_eutopic is the one arm in this project whose result cannot be argued with.
+  ectopic is exactly non-uterine in this corpus -- ovary and peritoneum, no
+  exceptions -- so in every full-corpus run, disease, tissue and study are
+  confounded, and a defender of the model can always say the studies look
+  separated because they sampled different organs. Restricting to eutopic makes
+  every cell uterine endometrium. Whatever separation survives is not biology,
+  because there is no biology left for it to be.
+
+  r4_eutopic still scored 83.6% purity. That number is technical variation, by
+  construction, and it is the number the platform covariates exist to remove.
+
+  So this is where the idea is falsifiable. On the full corpus a purity drop
+  could be the covariate absorbing technical signal OR the model reorganising
+  around tissue; here there is only one explanation available. If purity does
+  not move in this arm, the lookup table does not describe the variation the
+  latent is actually holding, and the next move is to find out what does rather
+  than to widen d_platform.
+
+  Note this is NOT a rerun of r4_eutopic. That arm also shrank the encoder
+  (d_token 16, d_agg 32, both encoders 1 layer); this one keeps the wave R5
+  architecture so it can be read against the other two arms. Against r4_eutopic
+  it is a two-variable comparison and should be treated as such.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r5_eutopic_platform/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # ---- the tiny latent, as in r4_tiny_latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+
+  # ---- thin group encoders, as in the running r4_thin_groups ----
+  model.group_encoder.n_layers: 1
+  model.aggregation_encoder.n_layers: 2
+
+  # Every cell uterine, so any study separation that remains cannot be tissue.
+  # Eutopic spans roughly eight studies, so the adversary still has a real job
+  # and the purity floor is still near 0.125.
+  #
+  # Roughly 520 K cells rather than 786 K, so this is also the cheapest arm in
+  # the wave -- about two thirds of an epoch each time.
+  data.include_disease_statuses: [eutopic]
+
+  # The covariate is live here. d_platform 16 comes from ELAJ_small.yaml and is
+  # left alone deliberately: r5_platform_off is the arm that turns it off.

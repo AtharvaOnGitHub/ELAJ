@@ -18,6 +18,7 @@ def test_batch_required_keys():
         "group_indices",
         "group_dns_mask",
         "tissue_levels",
+        "platform_codes",
         "age",
         "disease_status",
     }
@@ -46,6 +47,7 @@ def test_batch_can_be_constructed_as_plain_dict():
         group_indices={"g0": torch.zeros(2, 3, dtype=torch.long)},
         group_dns_mask={"g0": torch.zeros(2, 3, dtype=torch.bool)},
         tissue_levels=torch.zeros(2, 4, dtype=torch.long),
+        platform_codes=torch.zeros(2, 4, dtype=torch.long),
         age=torch.zeros(2),
         disease_status=torch.zeros(2, dtype=torch.long),
     )

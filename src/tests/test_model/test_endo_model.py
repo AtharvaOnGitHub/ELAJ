@@ -8,6 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from endo_model.configs.model_config import ModelConfig
+from endo_model.data.constants import N_PLATFORM_CODES, PLATFORM_CODE_SIZES
 from endo_model.data.vocabulary import GeneVocabulary, generate_synthetic_vocabulary
 from endo_model.model.endo_model import EndoFoundationModel
 
@@ -72,6 +73,7 @@ def make_batch(vocab: GeneVocabulary):
         "group_indices": group_indices,
         "group_dns_mask": group_dns_mask,
         "tissue_levels": torch.zeros(B, 4, dtype=torch.long),
+        "platform_codes": torch.zeros(B, N_PLATFORM_CODES, dtype=torch.long),
         "age": torch.tensor([30.0, 45.0, float("nan")]),
         "disease_status": torch.zeros(B, dtype=torch.long),
     }
@@ -205,3 +207,69 @@ class TestEndoFoundationModel:
         with torch.no_grad():
             out = self.model(batch)
         assert torch.allclose(out["z_gauss"], out["mu_gauss"])
+
+
+class TestPlatformCovariates:
+    """The technical covariates (assay, chemistry, sequencer, material) are
+    supposed to reach the DECODER and nothing else.  Every other test in this
+    file runs with d_platform=0, so without these the whole path is untested.
+    """
+
+    D_PLATFORM = 8
+
+    def setup_method(self):
+        self.vocab = make_vocab()
+        self.config = make_config(self.vocab)
+        self.config.d_platform = self.D_PLATFORM
+        self.model = EndoFoundationModel(self.vocab, self.config)
+        self.model.eval()
+
+    @staticmethod
+    def _batch_with_codes(vocab, codes: list[int]):
+        batch = make_batch(vocab)
+        batch["platform_codes"] = torch.tensor(
+            [codes] * B, dtype=torch.long
+        )
+        return batch
+
+    def test_encoder_is_built_when_width_is_set(self):
+        assert self.model.decoder_platform is not None
+
+    def test_forward_runs_with_platform_conditioning(self):
+        batch = self._batch_with_codes(self.vocab, [1, 2, 1, 1])
+        with torch.no_grad():
+            out = self.model(batch)
+        G_meas = out["measured_global_idxs"].shape[0]
+        assert out["mu_hat"].shape == (B, G_meas)
+
+    def test_highest_valid_code_in_every_column_does_not_index_out_of_bounds(self):
+        """An index at or above its embedding bound is an IndexError on CPU but
+        reads unallocated memory on CUDA, surfacing far downstream as a NaN.
+        The last valid row must be reachable."""
+        top = [size - 1 for size in PLATFORM_CODE_SIZES]
+        batch = self._batch_with_codes(self.vocab, top)
+        with torch.no_grad():
+            out = self.model(batch)
+        assert torch.isfinite(out["mu_hat"]).all()
+
+    def test_platform_changes_the_reconstruction(self):
+        """If the covariate were dropped on the floor, these would be equal."""
+        with torch.no_grad():
+            a = self.model(self._batch_with_codes(self.vocab, [0, 0, 0, 0]))
+            b = self.model(self._batch_with_codes(self.vocab, [1, 2, 1, 1]))
+        assert not torch.allclose(a["mu_hat"], b["mu_hat"])
+
+    def test_platform_does_not_change_the_latent(self):
+        """The point of putting this on the decoder is that the encoder never
+        sees it.  Same cell, different machine -> same embedding."""
+        with torch.no_grad():
+            a = self.model(self._batch_with_codes(self.vocab, [0, 0, 0, 0]))
+            b = self.model(self._batch_with_codes(self.vocab, [1, 2, 1, 1]))
+        assert torch.allclose(a["z"], b["z"])
+
+    def test_missing_platform_codes_raises_rather_than_silently_dropping(self):
+        """A configured width with no codes in the batch must fail loudly."""
+        batch = make_batch(self.vocab)
+        del batch["platform_codes"]
+        with pytest.raises((KeyError, ValueError)):
+            self.model(batch)

@@ -8,7 +8,7 @@ import pytest
 torch = pytest.importorskip("torch", reason="torch not installed; skipping collate tests")
 
 from endo_model.data.collate import collate_fn, make_collate_fn
-from endo_model.data.constants import DNS_SENTINEL
+from endo_model.data.constants import DNS_SENTINEL, N_PLATFORM_CODES
 from endo_model.data.vocabulary import GeneVocabulary, generate_synthetic_vocabulary
 
 
@@ -36,6 +36,7 @@ def make_cell(vocab: GeneVocabulary, study_id: int = 0, dns_fraction: float = 0.
         "counts": counts,
         "study_id": study_id,
         "tissue_levels": np.array([0, 1, 2, 3], dtype=np.int64),
+        "platform_codes": np.array([1, 2, 1, 1], dtype=np.int64),
         "age": 34.5,
         "disease_status": 0,
         "patient_id": f"P{seed:04d}",
@@ -73,6 +74,10 @@ def test_tissue_levels_shape(batch_of_4):
     assert batch_of_4["tissue_levels"].shape == (4, 4)
 
 
+def test_platform_codes_shape(batch_of_4):
+    assert batch_of_4["platform_codes"].shape == (4, N_PLATFORM_CODES)
+
+
 def test_age_shape(batch_of_4):
     assert batch_of_4["age"].shape == (4,)
 
@@ -106,6 +111,19 @@ def test_tissue_levels_dtype(batch_of_4):
     assert batch_of_4["tissue_levels"].dtype == torch.long
 
 
+def test_platform_codes_dtype(batch_of_4):
+    """Must be long — these index embedding tables, and a float index raises."""
+    assert batch_of_4["platform_codes"].dtype == torch.long
+
+
+def test_platform_codes_values_survive_collation(vocab):
+    """The per-cell codes must arrive at the decoder unchanged and in order."""
+    cell = make_cell(vocab, seed=0)
+    cell["platform_codes"] = np.array([3, 5, 2, 1], dtype=np.int64)
+    batch = collate_fn([cell], vocab)
+    assert batch["platform_codes"][0].tolist() == [3, 5, 2, 1]
+
+
 def test_age_dtype(batch_of_4):
     assert batch_of_4["age"].dtype == torch.float32
 
@@ -135,6 +153,7 @@ def test_library_size_excludes_dns(vocab):
         "counts": counts,
         "study_id": 0,
         "tissue_levels": np.zeros(4, dtype=np.int64),
+        "platform_codes": np.zeros(N_PLATFORM_CODES, dtype=np.int64),
         "age": 30.0,
         "disease_status": 0,
         "patient_id": "P0",
@@ -151,6 +170,7 @@ def test_library_size_all_dns(vocab):
         "counts": counts,
         "study_id": 0,
         "tissue_levels": np.zeros(4, dtype=np.int64),
+        "platform_codes": np.zeros(N_PLATFORM_CODES, dtype=np.int64),
         "age": float("nan"),
         "disease_status": 0,
         "patient_id": "P0",

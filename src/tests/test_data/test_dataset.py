@@ -143,7 +143,15 @@ def test_getitem_keys(two_study_setup):
     vocab, study_configs = two_study_setup
     ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
     item = ds[0]
-    assert set(item.keys()) == {"counts", "study_id", "tissue_levels", "age", "disease_status", "patient_id"}
+    assert set(item.keys()) == {
+        "counts",
+        "study_id",
+        "tissue_levels",
+        "platform_codes",
+        "age",
+        "disease_status",
+        "patient_id",
+    }
 
 
 def test_getitem_counts_shape(two_study_setup):

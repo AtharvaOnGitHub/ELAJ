@@ -68,5 +68,15 @@ def test_marecko_material_is_marked_mixed():
 
 
 def test_fonseca_version_is_an_explicit_unknown_not_a_guess():
-    record = StudyPlatform(CSV).record_for("fonseca_2023")
-    assert "unstated" in record.chemistry
+    """The methods say "v2 or v3" and GEO carries identical protocol text on all
+    51 samples, so no source resolves it.  The row must keep both candidates in
+    the readable string and must NOT be tidied into either resolved chemistry
+    code -- doing so would tell the decoder fonseca is the same chemistry as
+    lin (v2) or tan/wang (v3) when nothing establishes that."""
+    p = StudyPlatform(CSV)
+    record = p.record_for("fonseca_2023")
+    assert "v2" in record.chemistry and "v3" in record.chemistry
+
+    chemistry = 1  # index of chemistry_code within codes
+    assert record.codes[chemistry] != p.record_for("lin_2023").codes[chemistry]
+    assert record.codes[chemistry] != p.record_for("tan_2022").codes[chemistry]

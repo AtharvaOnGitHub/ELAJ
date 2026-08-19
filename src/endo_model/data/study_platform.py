@@ -20,17 +20,32 @@ same way and one of them is wrong. `data_collation/scripts/fetch_platform_metada
 collects the raw evidence; this file is the adjudicated result. Re-deriving it
 at training time would mean re-litigating those judgements on every run.
 
-Three of those judgements are worth knowing:
+Two tables, sample first
+------------------------
+`study_platform.csv` carries one row per study. `sample_platform.csv` overrides
+it for the studies that are not uniform, keyed on `source_sample_id` — the same
+id the collation pipeline writes into obs, so the join is exact rather than
+inferred. Only lin_2023 needs it today. Most studies are uniform and listing
+every sample would be noise.
 
+Judgements worth knowing:
+
+* **lin_2023** — ten samples on a NovaSeq 6000, three on a HiSeq 2000 in a
+  later submission batch. Split per sample; the study row is only a fallback.
+* **fonseca_2023** — checked per sample: all 51 GSMs are NovaSeq 6000, so the
+  sequencer needs no split. Chemistry cannot be split at all — the Nature
+  Genetics methods say "3' Reagent Kits User Guide (v2 or v3)" and every GEO
+  sample carries identical protocol text, so no source resolves it.
 * **marecko_2024** — the SDRF says `10x 3' v1` for all 103 assays; the paper
   says `Chromium Single Cell 3' Kit v.3.0 and v.3.1`. The paper wins. The same
   submission splits 35 scRNA-seq against 68 snRNA-seq, so its material is
-  genuinely mixed and a per-study code cannot separate the two.
+  genuinely mixed; splitting it needs its assay ids checked against
+  source_sample_id, which has not been done.
 * **li_2025** — BD Rhapsody, a microwell assay, not a droplet one. It is the
   only non-10x study in the corpus.
-* **fonseca_2023** — GEO records `3'` with no version across all 51 samples,
-  and the Nature Genetics methods are not in the paper folder. Encoded as an
-  explicit "version unstated" category rather than guessed at.
+* **garcia_alonso_2021_b** — read from its own h5ad: obs.assay is 10x 3' v3 for
+  9,654 cells and v2 for 1,075, so it is genuinely mixed. Per-cell resolution
+  sits in obs and would beat this table if collation carried it through.
 
 Codes, not names, reach the model. They are written out in the CSV rather than
 derived from sorted unique values, because a derived code would silently
@@ -81,10 +96,17 @@ class StudyPlatform:
         path: The CSV. Its `study` column must match the names in studies.csv.
     """
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, sample_path: Path | str | None = None) -> None:
         self.path = Path(path)
+        self.sample_path = Path(sample_path) if sample_path else None
         self._by_study: dict[str, PlatformRecord] = {}
+        # (study, source_sample_id) -> codes, for the studies that are not
+        # uniform. Only populated where a split is evidenced; a study absent
+        # from this file resolves through _by_study, which is the common case.
+        self._by_sample: dict[tuple[str, str], tuple[int, ...]] = {}
         self._load()
+        if self.sample_path:
+            self._load_samples()
 
     def _load(self) -> None:
         with self.path.open(newline="") as handle:
@@ -109,6 +131,31 @@ class StudyPlatform:
             len(self._by_study) - known,
         )
 
+    def _load_samples(self) -> None:
+        with self.sample_path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                key = (row["study"].strip(), row["source_sample_id"].strip())
+                self._by_sample[key] = tuple(int(row[c]) for c in CODE_COLUMNS)
+        studies = {s for s, _ in self._by_sample}
+        logger.info(
+            "Sample platform: %d samples across %d studies from %s",
+            len(self._by_sample), len(studies), self.sample_path.name,
+        )
+
+    def codes_for_sample(self, study: str, sample_id: str) -> tuple[int, ...]:
+        """One sample's codes, falling back to its study's.
+
+        Sample first because a study is not always uniform: lin_2023 ran ten
+        samples on a NovaSeq 6000 and three on a HiSeq 2000, and collapsing
+        that to one "mixed" code throws away a distinction the archive states
+        per sample. Study second because most studies are uniform and listing
+        every sample would be noise.
+        """
+        codes = self._by_sample.get(
+            (str(study).strip(), str(sample_id).strip())
+        )
+        return codes if codes is not None else self.codes_for(study)
+
     def codes_for(self, study: str) -> tuple[int, ...]:
         """One study's covariate codes. An unlisted study reads as all-unknown.
 
@@ -131,9 +178,16 @@ class StudyPlatform:
 
     def sizes(self) -> tuple[int, ...]:
         """Embedding table width per code column: one more than the largest
-        code seen, so index `max` is valid and 0 stays reserved for unknown."""
+        code seen, so index `max` is valid and 0 stays reserved for unknown.
+
+        Spans both tables. A sample-level code outside the study-level range
+        would index past the end of an embedding built from the study table
+        alone, which is an IndexError on CPU and a silent read of unallocated
+        memory on CUDA.
+        """
+        both = [r.codes for r in self._by_study.values()] + list(self._by_sample.values())
         return tuple(
-            max((r.codes[i] for r in self._by_study.values()), default=0) + 1
+            max((c[i] for c in both), default=0) + 1
             for i in range(len(CODE_COLUMNS))
         )
 

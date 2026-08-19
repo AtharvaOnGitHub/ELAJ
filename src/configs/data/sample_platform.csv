@@ -1,0 +1,14 @@
+study,source_sample_id,sequencer,chemistry,assay_family,material,assay_code,chemistry_code,sequencer_code,material_code,note
+lin_2023,GSM6605431,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,EMS1
+lin_2023,GSM6605432,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,EMS2
+lin_2023,GSM6605433,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,EMS3
+lin_2023,GSM6605434,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,EMS4
+lin_2023,GSM6605435,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,EMS5
+lin_2023,GSM6605436,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,EMS6
+lin_2023,GSM6605437,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,N1
+lin_2023,GSM6605438,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,N2
+lin_2023,GSM6605439,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,N3
+lin_2023,GSM6605440,Illumina NovaSeq 6000,10x 3' v2,droplet_3p,cell,1,1,1,1,N4
+lin_2023,GSM7277296,Illumina HiSeq 2000,10x 3' v2,droplet_3p,cell,1,1,3,1,N5 — later submission batch on a different machine
+lin_2023,GSM7277297,Illumina HiSeq 2000,10x 3' v2,droplet_3p,cell,1,1,3,1,N6 — later submission batch on a different machine
+lin_2023,GSM7277298,Illumina HiSeq 2000,10x 3' v2,droplet_3p,cell,1,1,3,1,N7 — later submission batch on a different machine

@@ -13,6 +13,19 @@ DNS positions are excluded from reconstruction loss but included in encoding."""
 N_TISSUE_LEVELS: int = 4
 """Four-level tissue hierarchy: compartment → organ → tissue_type → microsite."""
 
+N_PLATFORM_CODES: int = 4
+"""Technical covariate columns: assay family, chemistry, sequencer, material."""
+
+PLATFORM_CODE_SIZES: tuple[int, ...] = (8, 16, 8, 8)
+"""Category count allowed in each platform code column, in column order.
+
+Deliberately larger than the lookup currently needs (4, 7, 5, 4). These size the
+embedding tables in PlatformEncoder, so they are model shape: growing them later
+invalidates every checkpoint, whereas headroom costs a few unused rows.
+`StudyPlatform.sizes()` reports what the CSVs actually use, and a test asserts it
+stays inside these bounds — an index at or above its bound is an IndexError on
+CPU but reads unallocated memory on CUDA, surfacing far downstream as a NaN."""
+
 TISSUE_LEVEL_SIZES: tuple[int, ...] = (8, 16, 32, 16)
 """Category count allowed at each tissue level, in level order.
 

@@ -47,6 +47,7 @@ class Batch(TypedDict):
         Derived from counts at collate time.
 
     tissue_levels: (B, 4) int64
+    platform_codes: (B, 4) int64 — assay, chemistry, sequencer, material
         Four-level tissue hierarchy encoded as integer indices:
         [compartment, organ, tissue_type, microanatomical_site].
         Indices are dataset-specific; see endo_model/data/README.md.
@@ -66,5 +67,6 @@ class Batch(TypedDict):
     group_indices: dict[str, torch.Tensor]
     group_dns_mask: dict[str, torch.Tensor]
     tissue_levels: torch.Tensor
+    platform_codes: torch.Tensor
     age: torch.Tensor
     disease_status: torch.Tensor

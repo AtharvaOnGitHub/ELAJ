@@ -128,6 +128,9 @@ class ModelConfig:
     d_gauss: int = 32          # Gaussian latent dimensions
     n_vMF: int = 8             # number of circular latent dimensions
     d_dec: int = 64            # decoder internal dimension
+    # Width of the technical-covariate embedding handed to the decoder.
+    # 0 disables it, which is what every run before wave R5 did.
+    d_platform: int = 0
     # Tissue hierarchy embedding concatenated onto z_proj at the decoder, so
     # the latent is not obliged to encode anatomy.  Small on purpose: it
     # carries four categorical levels, and widening it would let the decoder
@@ -180,6 +183,7 @@ class ModelConfig:
             d_gauss=d.get("d_gauss", 32),
             n_vMF=d.get("n_vMF", 8),
             d_dec=d.get("d_dec", 64),
+            d_platform=int(d.get("d_platform", 0)),
             d_tissue=int(d.get("d_tissue", 16)),
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),

@@ -13,6 +13,10 @@ d_dec: 64
 # it carries four categorical levels, and a wide one would let the decoder
 # lean on tissue for structure the latent should be learning.
 d_tissue: 16
+# Technical covariates for the decoder. 0 disables them; the encoder never sees
+# them either way. Same width as d_tissue -- both are small categorical
+# conditions and neither should rival d_agg.
+d_platform: 16
 n_groups: null      # populated from vocabulary.json at runtime
 n_studies: null     # populated from data config at runtime
 

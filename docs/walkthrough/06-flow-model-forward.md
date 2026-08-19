@@ -494,3 +494,62 @@ the same per-gene scale as `nb` — see [07](07-flow-losses.md).
 
 The eval/train difference in the latent branches is the reason `infer.py` output
 is reproducible: at eval both branches are deterministic functions of `cell_cls`.
+
+
+## Technical covariates reach the decoder, never the encoder
+
+`batch['platform_codes']` is `(B, 4)` — assay family, chemistry, sequencer,
+material — embedded by `PlatformEncoder` and concatenated onto the decoder's
+context beside the tissue embedding.
+
+The placement is the point. Study identity already reaches the *encoder*
+through DSBN, which means the latent has to carry the technical signal itself
+for reconstruction to use it. Waves R2 to R4 then spent four rounds trying to
+remove that signal adversarially, and measured kNN study purity never fell
+below 72% of the way to complete separation. A decoder told the cell came from
+10x 3' v3 on a NovaSeq can rebuild it from a latent that never encoded the
+chemistry, which removes the reason to store it. This is the scVI pattern.
+
+Values come from two static tables, resolved sample-first:
+
+| file | rows | why |
+|---|---|---|
+| `configs/data/study_platform.csv` | one per study | most studies are uniform |
+| `configs/data/sample_platform.csv` | one per sample | only where a study is not |
+
+The join key is `source_sample_id`, which collation already writes into obs.
+Only `lin_2023` needs the sample file today: ten samples on a NovaSeq 6000,
+three on a HiSeq 2000 in a later submission batch.
+
+`d_platform: 0` disables the whole path and every code reads 0, which is what
+every run before wave R5 did.
+
+### What the covariate cannot express yet
+
+⚠ **`marecko_2024` mixes 35 scRNA-seq with 68 snRNA-seq assays** under one
+study id. Cells and nuclei differ substantially in what they capture. Its
+material code says `mixed` rather than claiming one. Splitting it needs its
+SDRF assay names (`FRZFRESH_GX25_ES345`) checked against `source_sample_id` in
+its h5ad, which has not been done — the file is not in the working checkout.
+
+⚠ **`fonseca_2023`'s chemistry cannot be resolved by anything.** The Nature
+Genetics methods say `3' Reagent Kits User Guide (v2 or v3)` and every one of
+its 51 GEO samples carries identical protocol text. Code 6 means "a 3' assay
+whose version is unresolvable", covering 387k cells — 23% of the corpus. Two
+of its samples are `library_strategy: OTHER` and three carry no protocol text.
+
+⚠ **`garcia_alonso_2021_a` and `_c` are unknown**, code 0 throughout. Their
+h5ads carry `obs.assay` as `_b` does — `_b` reads 10x 3' v3 for 9,654 cells and
+v2 for 1,075 — but those two files are not in the checkout. They contribute
+zero cells after the disease filter, so it costs nothing today and would break
+the moment controls are included.
+
+⚠ **`li_2025` is the sole member of its assay family.** BD Rhapsody microwell,
+not a droplet assay. Its embedding row trains on one study's 45,803 cells and
+generalises to nothing outside it.
+
+⚠ **Four apostrophe characters** appear across the eleven sources — ASCII,
+U+2019, U+2032 and U+02B9. That, plus one archive contradicting its own paper
+(`marecko_2024`'s SDRF says `10x 3' v1`), is why these are adjudicated static
+tables and not a regex run at load time.
+

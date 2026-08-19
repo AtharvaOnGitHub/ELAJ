@@ -87,6 +87,14 @@ def build_loader(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs):
             str(Path(root) / data_cfg.tissue_level_names_csv)
             if data_cfg.tissue_level_names_csv else None
         ),
+        study_platform_path=(
+            str(Path(root) / data_cfg.study_platform_csv)
+            if data_cfg.study_platform_csv else None
+        ),
+        sample_platform_path=(
+            str(Path(root) / data_cfg.sample_platform_csv)
+            if data_cfg.sample_platform_csv else None
+        ),
     )
     return DataLoader(
         val,

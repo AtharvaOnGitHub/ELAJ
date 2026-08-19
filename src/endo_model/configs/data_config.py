@@ -175,6 +175,11 @@ class DataConfig:
     # Integer level code -> readable name, for figure legends only. Nothing the
     # model reads comes from here; None just leaves the legends numeric.
     tissue_level_names_csv: Optional[str] = None
+    # Study -> assay, chemistry, sequencer, material. None leaves every
+    # platform code at 0 (unknown), the pre-R5 behaviour.
+    study_platform_csv: Optional[str] = None
+    # Per-sample overrides for studies that are not uniform.
+    sample_platform_csv: Optional[str] = None
 
     def resolve_studies(self, root: str = ".") -> List[StudyConfig]:
         """Return the study list, loading from CSV if studies_csv is configured.
@@ -216,4 +221,6 @@ class DataConfig:
             ],
             tissue_hierarchy_csv=d.get("tissue_hierarchy_csv"),
             tissue_level_names_csv=d.get("tissue_level_names_csv"),
+            study_platform_csv=d.get("study_platform_csv"),
+            sample_platform_csv=d.get("sample_platform_csv"),
         )

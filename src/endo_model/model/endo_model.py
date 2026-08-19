@@ -31,6 +31,7 @@ from endo_model.model.decoder.dispersion import PerGeneDispersion
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
+from endo_model.model.embeddings.platform_encoder import PlatformEncoder
 from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
 from endo_model.model.embeddings.value_encoder import ValueEncoder
 from endo_model.model.encoders.aggregation import AggregationEncoder
@@ -103,8 +104,14 @@ class EndoFoundationModel(nn.Module):
         # average", which is a different question from anything on the encoder
         # side, and sharing weights would tie the two together for no reason.
         self.decoder_tissue = TissueHierarchyEncoder(config.d_tissue)
+        # Technical covariates go to the decoder only. See
+        # embeddings/platform_encoder.py for why that side.
+        self.decoder_platform = (
+            PlatformEncoder(config.d_platform) if config.d_platform else None
+        )
         self.decoder = BilinearDecoder(
-            config.d_agg, config.d_dec, d_tissue=config.d_tissue
+            config.d_agg, config.d_dec, d_tissue=config.d_tissue,
+            d_platform=config.d_platform
         )
         self.dispersion = PerGeneDispersion(vocabulary.vocab_size)
 
@@ -165,8 +172,12 @@ class EndoFoundationModel(nn.Module):
 
         # ── Decode ────────────────────────────────────────────────────────────
         tissue = self.decoder_tissue(batch["tissue_levels"])   # (B, d_tissue)
+        platform = (
+            self.decoder_platform(batch["platform_codes"])      # (B, d_platform)
+            if self.decoder_platform is not None else None
+        )
         log_mu = self.decoder(
-            gene_queries, latent["z_proj"], tissue
+            gene_queries, latent["z_proj"], tissue, platform
         )                                                       # (B, G_meas)
         mu_hat = (
             F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)

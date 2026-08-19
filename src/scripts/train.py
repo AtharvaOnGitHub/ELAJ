@@ -105,6 +105,14 @@ def main() -> None:
             str(Path(root) / data_cfg.tissue_level_names_csv)
             if data_cfg.tissue_level_names_csv else None
         ),
+        study_platform_path=(
+            str(Path(root) / data_cfg.study_platform_csv)
+            if data_cfg.study_platform_csv else None
+        ),
+        sample_platform_path=(
+            str(Path(root) / data_cfg.sample_platform_csv)
+            if data_cfg.sample_platform_csv else None
+        ),
     )
     train_dataset = EndometriosisDataset(split="train", **split_kwargs)
     val_dataset = EndometriosisDataset(split="val", **split_kwargs)

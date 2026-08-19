@@ -55,6 +55,9 @@ def collate_fn(cells: list[dict], vocab: GeneVocabulary) -> Batch:
     # --------------------------------------------------------------- metadata
     study_id = torch.tensor([c["study_id"] for c in cells], dtype=torch.long)
 
+    platform_codes = torch.from_numpy(
+        np.stack([c["platform_codes"] for c in cells])  # (B, 4)
+    ).long()
     tissue_levels = torch.from_numpy(
         np.stack([c["tissue_levels"] for c in cells])  # (B, 4)
     ).long()
@@ -90,6 +93,7 @@ def collate_fn(cells: list[dict], vocab: GeneVocabulary) -> Batch:
         group_indices=group_indices,
         group_dns_mask=group_dns_mask,
         tissue_levels=tissue_levels,
+        platform_codes=platform_codes,
         age=age,
         disease_status=disease_status,
     )

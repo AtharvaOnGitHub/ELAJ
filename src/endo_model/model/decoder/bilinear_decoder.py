@@ -42,12 +42,18 @@ class BilinearDecoder(nn.Module):
                   match the d_dec that GroupedGeneQuery projects into.
         d_tissue: Width of the tissue embedding concatenated onto z_proj.
                   0 disables conditioning and restores the latent-only decoder.
+        d_platform: Width of the technical-covariate embedding — assay,
+                  chemistry, sequencer, material — concatenated the same way.
+                  0 disables it. Given to the decoder and never the encoder, so
+                  the latent has no reason to store the technical signal.
     """
 
-    def __init__(self, d_agg: int, d_dec: int = 64, d_tissue: int = 0) -> None:
+    def __init__(self, d_agg: int, d_dec: int = 64, d_tissue: int = 0,
+                 d_platform: int = 0) -> None:
         super().__init__()
         self.d_tissue = d_tissue
-        d_context = d_agg + d_tissue
+        self.d_platform = d_platform
+        d_context = d_agg + d_tissue + d_platform
         self.W_k = nn.Linear(d_context, d_dec, bias=False)   # context key
         self.W_v = nn.Linear(d_context, d_dec, bias=False)   # context value
         self.W_out = nn.Linear(d_dec, 1, bias=True)
@@ -58,6 +64,7 @@ class BilinearDecoder(nn.Module):
         gene_queries: Tensor,
         z_proj: Tensor,
         tissue: Tensor | None = None,
+        platform: Tensor | None = None,
     ) -> Tensor:
         """Compute log-unnormalised predicted expression for measured genes.
 
@@ -69,6 +76,8 @@ class BilinearDecoder(nn.Module):
             z_proj:       (B, d_agg) — latent code projection.
             tissue:       (B, d_tissue) — tissue hierarchy embedding, or None
                           when the decoder was built with d_tissue=0.
+            platform:     (B, d_platform) — technical covariate embedding, or
+                          None when the decoder was built with d_platform=0.
 
         Returns:
             log_mu: (B, G_meas) — log un-normalised expression.
@@ -78,7 +87,7 @@ class BilinearDecoder(nn.Module):
                 falling back to latent-only would train a different model from
                 the configured one and produce no error to notice.
         """
-        context = self._context(z_proj, tissue)
+        context = self._context(z_proj, tissue, platform)
         k = self.W_k(context)                            # (B, d_dec)
         v = self.W_v(context)                            # (B, d_dec)
 
@@ -93,13 +102,23 @@ class BilinearDecoder(nn.Module):
         gain = v @ self.W_out.weight.squeeze(0)          # (B,)
         return scores * gain.unsqueeze(1) + self.W_out.bias
 
-    def _context(self, z_proj: Tensor, tissue: Tensor | None) -> Tensor:
-        """The per-cell vector the decoder reads: latent, plus tissue if used."""
-        if self.d_tissue == 0:
-            return z_proj
-        if tissue is None:
-            raise ValueError(
-                f"BilinearDecoder was built with d_tissue={self.d_tissue} but "
-                "forward() received tissue=None."
-            )
-        return torch.cat([z_proj, tissue], dim=-1)       # (B, d_agg + d_tissue)
+    def _context(self, z_proj: Tensor, tissue: Tensor | None,
+                 platform: Tensor | None = None) -> Tensor:
+        """The per-cell vector the decoder reads: latent, then whatever it was
+        built to condition on, in the order the widths were summed."""
+        parts = [z_proj]
+        for name, width, value in (
+            ("tissue", self.d_tissue, tissue),
+            ("platform", self.d_platform, platform),
+        ):
+            if width == 0:
+                continue
+            if value is None:
+                raise ValueError(
+                    f"BilinearDecoder was built with d_{name}={width} but "
+                    f"forward() received {name}=None. Falling back to a "
+                    "narrower context would train a different model from the "
+                    "configured one and raise nothing to notice."
+                )
+            parts.append(value)
+        return parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)

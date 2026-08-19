@@ -40,10 +40,12 @@ import scipy.sparse
 from endo_model.data.tissue_hierarchy import ONTOLOGY_COLUMN, TissueHierarchy
 from endo_model.data.constants import (
     DISEASE_STATUS_TO_INT,
+    N_PLATFORM_CODES,
     N_TISSUE_LEVELS,
 )
 from endo_model.data.panel import StudyPanel
 from endo_model.data.splits import StudyPatients, assign_splits, log_coverage
+from endo_model.data.study_platform import StudyPlatform
 from endo_model.data.vocabulary import GeneVocabulary
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,43 @@ def _load_tissue_names(path: Optional[str]) -> dict[int, str]:
             "will show integer codes.", type(exc).__name__, exc,
         )
         return {}
+
+
+def _platform_code_matrix(obs, study_name: str, platform=None) -> np.ndarray:
+    """(n_cells, 4) int64 of technical covariate codes for one study.
+
+    Resolved per sample where `source_sample_id` is present, because a study is
+    not always uniform -- lin_2023 ran ten samples on a NovaSeq 6000 and three
+    on a HiSeq 2000, and the study-level row is only a fallback. Studies whose
+    obs lacks the column, or whose sample ids are not in the lookup, resolve
+    through the study row, which is the common case.
+
+    All zeros when no lookup is configured: unknown, which is what every run
+    before this one effectively used.
+    """
+    n = len(obs)
+    out = np.zeros((n, N_PLATFORM_CODES), dtype=np.int64)
+    if platform is None:
+        return out
+
+    if "source_sample_id" not in obs.columns:
+        out[:] = platform.codes_for(study_name)
+        logger.info(
+            "Study %r: no source_sample_id column, so all cells take the "
+            "study-level platform codes %s.", study_name, tuple(out[0]),
+        )
+        return out
+
+    samples = obs["source_sample_id"].astype(str).to_numpy()
+    for sample in np.unique(samples):
+        out[samples == sample] = platform.codes_for_sample(study_name, sample)
+
+    distinct = {tuple(row) for row in np.unique(out, axis=0)}
+    logger.info(
+        "Study %r: platform codes over %d sample(s), %d distinct combination(s).",
+        study_name, len(np.unique(samples)), len(distinct),
+    )
+    return out
 
 
 def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
@@ -278,12 +317,14 @@ class _CellRecord:
     and the row it occupies there; the dense (vocab_size,) vector is rebuilt in
     __getitem__.  See panel.py for why.
 
-    tissue_levels is a (4,) int64 view into the study's tissue matrix.
+    tissue_levels is a (4,) int64 view into the study's tissue matrix, and
+    platform_codes the same for its technical covariates.
     """
     panel: StudyPanel
     panel_row: int
     study_id: int
     tissue_levels: np.ndarray
+    platform_codes: np.ndarray
     age: float
     disease_status: int
     patient_id: str
@@ -327,6 +368,8 @@ class EndometriosisDataset:
         include_disease_statuses: Optional[list[str]] = None,
         tissue_hierarchy_path: Optional[str] = None,
         tissue_level_names_path: Optional[str] = None,
+        study_platform_path: Optional[str] = None,
+        sample_platform_path: Optional[str] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -341,6 +384,12 @@ class EndometriosisDataset:
         # Names for the split coverage log only. A stratum reported as
         # "tissue 6" tells the reader nothing about which site went unvalidated.
         self._tissue_names = _load_tissue_names(tissue_level_names_path)
+        # How each cell was made, for the decoder. None leaves every code at 0,
+        # which is what every run before this did.
+        self._platform = (
+            StudyPlatform(study_platform_path, sample_platform_path)
+            if study_platform_path else None
+        )
 
         self._vocab = vocab
         self._split = split
@@ -381,8 +430,10 @@ class EndometriosisDataset:
             tissue_matrix = _tissue_level_matrix(
                 adata.obs, name, self._tissue_hierarchy
             )
+            platform_matrix = _platform_code_matrix(adata.obs, name, self._platform)
             raw_study_data.append(
-                (study_id, name, adata, study_patients, tissue_matrix)
+                (study_id, name, adata, study_patients, tissue_matrix,
+                 platform_matrix)
             )
 
         # Build patient → split assignment, stratified by study AND by tissue.
@@ -397,7 +448,8 @@ class EndometriosisDataset:
                     patients=patients,
                     tissue_codes=tissue[:, _TISSUE_STRATIFY_LEVEL],
                 )
-                for study_id, name, _adata, patients, tissue in raw_study_data
+                for study_id, name, _adata, patients, tissue, _plat
+                in raw_study_data
             ],
             val_fraction,
             test_fraction,
@@ -416,7 +468,8 @@ class EndometriosisDataset:
         # Build records for the requested split
         rng_subsample = np.random.default_rng(seed + 1)
 
-        for study_id, name, adata, study_patients, tissue_matrix in raw_study_data:
+        for (study_id, name, adata, study_patients, tissue_matrix,
+             platform_matrix) in raw_study_data:
             # Map study genes → global vocabulary indices
             study_gene_names = list(adata.var_names)
             global_idxs: list[int] = []      # global idx for each study gene
@@ -498,6 +551,7 @@ class EndometriosisDataset:
                         study_id=study_id,
                         # (4,) slice of the per-study coerced tissue matrix
                         tissue_levels=tissue_matrix[local_cell_idx],
+                        platform_codes=platform_matrix[local_cell_idx],
                         age=float(age_arr[local_cell_idx]),
                         disease_status=int(disease_arr[local_cell_idx]),
                         patient_id=str(study_patients[local_cell_idx]),
@@ -517,6 +571,7 @@ class EndometriosisDataset:
             "counts": rec.panel.counts(rec.panel_row),
             "study_id": rec.study_id,
             "tissue_levels": rec.tissue_levels,
+            "platform_codes": rec.platform_codes,
             "age": rec.age,
             "disease_status": rec.disease_status,
             "patient_id": rec.patient_id,

@@ -24,6 +24,14 @@ tissue_hierarchy_csv: configs/data/tissue_hierarchy.csv
 # the tissue UMAP panels legended "1 (16,074)" without it, which names nothing.
 tissue_level_names_csv: configs/data/tissue_level_names.csv
 
+# How each cell was made: assay family, chemistry, sequencer, material. Goes to
+# the DECODER, so the latent has no reason to store the technical signal. The
+# sample file overrides the study file where a study is not uniform -- lin_2023
+# ran ten samples on a NovaSeq 6000 and three on a HiSeq 2000. Set both to null
+# to restore the pre-R5 behaviour, where every code read 0.
+study_platform_csv: configs/data/study_platform.csv
+sample_platform_csv: configs/data/sample_platform.csv
+
 dns_sentinel: -1
 max_cells_per_study: null      # null = use all; integer = cap for debugging
 

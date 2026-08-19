@@ -35,11 +35,12 @@ logger = logging.getLogger("platform")
 # Phrases that name a 10x chemistry, for a first look only. Kept beside the raw
 # text, never instead of it — a regex that misses is invisible once the prose
 # is gone.
-# Three apostrophe characters appear across these ten studies alone: ASCII ',
-# right single quote ’, and PRIME ′ (U+2032, in ferrero_2024). A pattern that
-# knows only the first silently reports "no chemistry recorded" for a study
-# that states it plainly.
-_PRIME = "['\u2019\u2032\u00b4`]"
+# Four apostrophe characters appear across these eleven sources: ASCII ',
+# right single quote ’ (U+2019), PRIME ′ (U+2032, ferrero_2024's GEO record)
+# and MODIFIER LETTER PRIME ʹ (U+02B9, the Fonseca methods). A pattern that
+# knows only some of them silently reports "no chemistry recorded" for a study
+# that states it plainly, which is how fonseca_2023 spent a wave miscoded.
+_PRIME = "['\u2019\u2032\u02b9\u00b4`]"
 CHEMISTRY_HINTS = (
     rf"([35]\s*{_PRIME}).{{0,40}}?\b(v\d(?:\.\d)?)",     # 3' ... v3.1
     rf"\b(v\d(?:\.\d)?)\b.{{0,40}}?([35]\s*{_PRIME})",   # v3 ... 3'

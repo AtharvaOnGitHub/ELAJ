@@ -1,0 +1,67 @@
+name: r5_latent_4_2
+description: >
+  Below the tiny latent. 4 Gaussian and 2 circular dimensions.
+
+  Wave R5. Does telling the decoder which machine made a cell stop the latent
+  from encoding it?
+
+  Shrinking the latent is the only structural change that has ever helped this
+  model on both axes at once. The ladder so far, at fixed adversary:
+
+    48 Gaussian + 12 circular (r3_capacity)   98.2% purity
+     8 Gaussian +  4 circular (r4_tiny_latent) 80.0% purity, best reconstruction
+
+  The reasoning behind R4's tiny latent was that a 60-dimensional space has
+  room to park nine studies in nine separate regions and still reconstruct
+  well, whereas a 12-dimensional one does not -- take the room away and the
+  model has to put cells somewhere shared or lose reconstruction. It worked,
+  and it did not cost reconstruction; r4_tiny_latent was the best arm in R4 on
+  BOTH numbers.
+
+  Nobody has gone below it. 8+4 is where R4 stopped, not a floor anybody
+  measured. This arm halves it again to 4 Gaussian and 2 circular, d_z = 8.
+
+  That is genuinely small for ~786,000 cells across nine studies and roughly
+  fifteen thousand genes, and the honest expectation is that reconstruction
+  finally breaks here. That is the point: the useful result is the location of
+  the cliff, and a wave that only tests changes expected to work does not find
+  it. If purity keeps falling and reconstruction holds, the bottleneck story is
+  right and R6 should push further. If reconstruction collapses while purity
+  improves, 8+4 was the operating point and the trade has been found.
+
+  Read against r5_tiny_platform, which is this arm at 8+4.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r5_latent_4_2/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # The two lines that make this arm what it is. d_z = d_gauss + 2*n_vMF, so
+  # 8 here against 16 in the reference arm and 60 in wave R3's largest.
+  #
+  # free_bits is left at 0.25 deliberately. It is a floor PER latent dimension,
+  # so halving the dimension count halves the total KL floor along with it and
+  # the per-dimension pressure is unchanged -- which is what keeps this arm a
+  # test of capacity rather than a test of capacity and regularisation at once.
+  model.d_gauss: 4
+  model.n_vMF: 2
+
+  model.d_platform: 16

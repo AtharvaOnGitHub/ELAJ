@@ -1,0 +1,82 @@
+name: r5_cce
+description: >
+  The contrastive term, at last actually run.
+
+  Wave R5. Does telling the decoder which machine made a cell stop the latent
+  from encoding it?
+
+  CCE is the only loss term in this model that has never produced a number.
+  Both R4 arms carrying it died on the first backward with
+  torch.OutOfMemoryError -- r4_small_encoder at 13 minutes, r4_small_eutopic_cce
+  at 10 -- so the wave reported on five arms and said nothing about the term it
+  was partly built to test.
+
+  What it does: two views of the same cell should land in the same place in the
+  latent, and views of different cells should not. That is a direct pull toward
+  the thing four waves of DAB have failed to achieve, and it works by attraction
+  rather than by punishment. It is worth a number.
+
+  WHY IT RAN OUT OF MEMORY, AND WHAT CHANGED. CCE needs a second pass through
+  the encoder and holds both graphs for the backward. The memory is dominated by
+  the group encoders' attention: 45 groups, each (B, heads, G_k, G_k) with G_k
+  up to 493, about a gigabyte per group at B=256, and autograd keeps all of them
+  alive. Two fixes, both needed. The second pass now calls model.encode rather
+  than model.forward, so it no longer builds a decoder graph across ~15,000
+  genes that CCE never reads. And the batch halves to 128.
+
+  THIS IS THE RISKY ARM AND THE RISK IS WORTH NAMING. Neither fix has run on
+  this architecture. The arms that died had ONE-layer group encoders; this one
+  has two, which doubles the number of attention matrices held for the backward
+  -- so B=128 at two layers costs roughly what B=256 at one layer cost, which is
+  what OOM'd. The encode() change is what has to make up the difference, and it
+  is unverified. Check the log at ~15 minutes. If it died, resubmit with
+  training.batch_size 64 and nothing else changed.
+
+  Two caveats on reading it. InfoNCE loses half its negatives at B=128, so the
+  contrastive signal is weaker here than the term deserves. And the batch size
+  differs from every other arm in the wave, so this one is NOT single-variable
+  against the reference -- batch size moves optimisation on its own. Read it as
+  "does CCE do anything at all", not as a clean measurement of how much.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r5_cce/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+
+  # !! 128, not the wave's 256. See the memory note above. This is the line to
+  # drop to 64 if the run dies in the first quarter hour.
+  training.batch_size: 128
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # The lines that make this arm what it is. 0.1 rather than 0.5 -- at 0.5 the
+  # contrastive term overwhelmed the reconstruction in wave R1.
+  #
+  # Watch kl_vmf in the log. s1_cce drove it to 3.75e-10, which is the circular
+  # branch dying: kappa runs away, the von Mises posterior collapses onto a
+  # point, and the circular half of the latent stops carrying anything. If that
+  # number falls through about 1e-6, the arm is no longer testing what it says.
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.1
+
+  # ---- the tiny latent, exactly r4_tiny_latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+
+  model.d_platform: 16

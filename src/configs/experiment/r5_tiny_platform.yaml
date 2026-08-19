@@ -1,0 +1,71 @@
+name: r5_tiny_platform
+description: >
+  r4_tiny_latent with the technical covariates live. The reference arm of R5.
+
+  Wave R5. Does telling the decoder which machine made a cell stop the latent
+  from encoding it?
+
+  Four codes per cell -- assay family, chemistry, sequencer, material -- come
+  from a static lookup built by hand from the source papers and the GEO /
+  ArrayExpress records, with per-sample overrides where a study is not uniform
+  (lin_2023 ran ten samples on a NovaSeq 6000 and three on a HiSeq 2000). They
+  are summed into a 16-dimensional vector and handed to the DECODER, beside
+  tissue. The encoder never sees them.
+
+  That asymmetry is the whole idea, and it is the scVI pattern rather than
+  anything new. A latent dimension spent recording "this cell came off a
+  NextSeq" is a dimension not spent on biology -- but the model only spends it
+  because the decoder needs that fact to predict counts well. Give the decoder
+  the fact directly and the encoder has no reason to carry it. This is the
+  opposite lever from DAB, which leaves the incentive in place and punishes the
+  encoder for responding to it.
+
+  The architecture is r4_tiny_latent exactly: the arm that gave both the best
+  reconstruction (+7.79% over the HVG baseline, +9.23% on HVGs) and the best
+  study mixing (80.0% kNN purity) of the six that completed in R4.
+
+  NOTE ON READING THIS ARM. It is compared against r4_tiny_latent's published
+  numbers, and no control was run alongside it, so that comparison assumes
+  nothing between R4 and R5 moved training numerics. Changed in between: the
+  covariate wiring, a split-out encode() for CCE, the FinalReporter fix, and a
+  PCA projection inside the purity metric. None of them should touch a training
+  step. That is a reasoned assumption, not a measurement, and if this arm lands
+  far from 80.0% / +7.79% in an unexpected direction, the assumption is the
+  first thing to suspect -- not the covariates.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r5_tiny_platform/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # Encoder pressure is lambda * w_dab, so 0.01 here. Non-zero in every arm of
+  # this wave by decision: the adversary stays in the model even where the
+  # evidence is against it, so R5 measures the covariates rather than measuring
+  # the removal of DAB.
+  model.dab.lambda_dab: 0.02
+
+  # ---- the tiny latent, exactly r4_tiny_latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+
+  # Stated rather than inherited from ELAJ_small. The whole wave turns on this
+  # number, and a reader comparing two arms should not have to open a second
+  # file to find out whether the covariates were on.
+  model.d_platform: 16

@@ -1,0 +1,68 @@
+name: r5_lambda_low
+description: >
+  Adversarial pressure down to a quarter. Where is the floor?
+
+  Wave R5. Does telling the decoder which machine made a cell stop the latent
+  from encoding it?
+
+  This is the clearest monotone signal R4 produced, and it points the opposite
+  way from the intuition DAB was added on. Two arms differed in lambda alone:
+
+    r4_tiny_latent   lambda 0.02   80.0% purity   +7.79% reconstruction
+    r4_tiny_dab_hi   lambda 0.10   97.0% purity   +4.47% reconstruction
+
+  Five times the pressure made the mixing worse by 17 points AND cost 3.3
+  points of reconstruction. Not a trade -- worse on both axes at once. Wave R2
+  had already shown the extreme case, where lambda 0.1 emptied the latent
+  outright. Every reduction tried so far has helped both numbers.
+
+  So this arm asks the obvious next question: is 0.02 near the bottom, or does
+  the trend keep going? lambda 0.005 quarters the encoder pressure to 0.0025
+  and changes nothing else.
+
+  It stops short of zero deliberately. lambda 0 would answer "is DAB worth
+  having at all", which is a different question and is being held back for a
+  later wave -- with lambda non-zero the adversary is still shaping the latent,
+  so this measures the pressure rather than removing the mechanism.
+
+  Read against r5_tiny_platform, which is this arm with lambda 0.02. If purity
+  improves again, the adversary has been overtuned since wave R1 and R6 should
+  start from a much smaller number. If it flattens, 0.02 is the floor and
+  lambda is no longer the lever worth moving.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r5_lambda_low/
+seed: 24
+
+overrides:
+  training.max_epochs: 30
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+
+  # w_dab is untouched at 0.5. It weights the classifier's OWN parameters,
+  # which lambda does not reach, so the probe trains exactly as it does in
+  # every other arm and val_dab stays comparable across the wave. Only the
+  # reversed gradient arriving at the encoder is reduced.
+  model.loss.w_dab: 0.5
+
+  # The one line that makes this arm what it is. Encoder pressure is
+  # lambda * w_dab: 0.01 in the reference arm, 0.0025 here.
+  model.dab.lambda_dab: 0.005
+
+  # ---- the tiny latent, exactly r4_tiny_latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+
+  model.d_platform: 16

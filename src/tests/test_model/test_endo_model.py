@@ -223,22 +223,28 @@ class TestPlatformCovariates:
         self.config.d_platform = self.D_PLATFORM
         self.model = EndoFoundationModel(self.vocab, self.config)
         self.model.eval()
+        # ONE batch, reused.  make_batch draws fresh random counts on every
+        # call, so building a second one gives a different cell — and then the
+        # comparisons below would be measuring the counts, not the covariate.
+        self.batch = make_batch(self.vocab)
 
-    @staticmethod
-    def _batch_with_codes(vocab, codes: list[int]):
-        batch = make_batch(vocab)
-        batch["platform_codes"] = torch.tensor(
-            [codes] * B, dtype=torch.long
-        )
-        return batch
+    def _with_codes(self, codes: list[int]):
+        """The shared cell, conditioned on a different machine.
+
+        Everything but platform_codes is the same object, so any difference in
+        the output is attributable to the covariate and nothing else.
+        """
+        return {
+            **self.batch,
+            "platform_codes": torch.tensor([codes] * B, dtype=torch.long),
+        }
 
     def test_encoder_is_built_when_width_is_set(self):
         assert self.model.decoder_platform is not None
 
     def test_forward_runs_with_platform_conditioning(self):
-        batch = self._batch_with_codes(self.vocab, [1, 2, 1, 1])
         with torch.no_grad():
-            out = self.model(batch)
+            out = self.model(self._with_codes([1, 2, 1, 1]))
         G_meas = out["measured_global_idxs"].shape[0]
         assert out["mu_hat"].shape == (B, G_meas)
 
@@ -247,29 +253,38 @@ class TestPlatformCovariates:
         reads unallocated memory on CUDA, surfacing far downstream as a NaN.
         The last valid row must be reachable."""
         top = [size - 1 for size in PLATFORM_CODE_SIZES]
-        batch = self._batch_with_codes(self.vocab, top)
         with torch.no_grad():
-            out = self.model(batch)
+            out = self.model(self._with_codes(top))
         assert torch.isfinite(out["mu_hat"]).all()
 
     def test_platform_changes_the_reconstruction(self):
         """If the covariate were dropped on the floor, these would be equal."""
         with torch.no_grad():
-            a = self.model(self._batch_with_codes(self.vocab, [0, 0, 0, 0]))
-            b = self.model(self._batch_with_codes(self.vocab, [1, 2, 1, 1]))
+            a = self.model(self._with_codes([0, 0, 0, 0]))
+            b = self.model(self._with_codes([1, 2, 1, 1]))
         assert not torch.allclose(a["mu_hat"], b["mu_hat"])
 
     def test_platform_does_not_change_the_latent(self):
         """The point of putting this on the decoder is that the encoder never
         sees it.  Same cell, different machine -> same embedding."""
         with torch.no_grad():
-            a = self.model(self._batch_with_codes(self.vocab, [0, 0, 0, 0]))
-            b = self.model(self._batch_with_codes(self.vocab, [1, 2, 1, 1]))
+            a = self.model(self._with_codes([0, 0, 0, 0]))
+            b = self.model(self._with_codes([1, 2, 1, 1]))
         assert torch.allclose(a["z"], b["z"])
+
+    def test_the_two_comparisons_above_differ_only_in_the_covariate(self):
+        """Guards the pair above.  make_batch randomises its counts, so an
+        earlier version of this class built a fresh batch per call and was
+        silently comparing two different cells: the latent test failed, and the
+        reconstruction test passed for the wrong reason."""
+        a = self._with_codes([0, 0, 0, 0])
+        b = self._with_codes([1, 2, 1, 1])
+        assert torch.equal(a["counts"], b["counts"])
+        assert not torch.equal(a["platform_codes"], b["platform_codes"])
 
     def test_missing_platform_codes_raises_rather_than_silently_dropping(self):
         """A configured width with no codes in the batch must fail loudly."""
-        batch = make_batch(self.vocab)
+        batch = dict(self.batch)
         del batch["platform_codes"]
         with pytest.raises((KeyError, ValueError)):
             self.model(batch)

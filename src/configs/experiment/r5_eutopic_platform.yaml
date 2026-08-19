@@ -67,5 +67,7 @@ overrides:
   # the wave -- about two thirds of an epoch each time.
   data.include_disease_statuses: [eutopic]
 
-  # The covariate is live here. d_platform 16 comes from ELAJ_small.yaml and is
-  # left alone deliberately: r5_platform_off is the arm that turns it off.
+  # The covariates are live here. Stated rather than inherited from ELAJ_small
+  # so this arm and r5_platform_on differ in exactly one visible line.
+  # r5_platform_off is the arm that turns them off.
+  model.d_platform: 16

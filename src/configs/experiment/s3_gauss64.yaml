@@ -40,3 +40,9 @@ overrides:
   # Cheap: only the two latent heads and z_proj change width, not the encoder,
   # so runtime is within noise of the base.
   model.d_gauss: 64
+
+  # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
+  # gained d_platform 16 in wave R5; without this line every pre-R5 config
+  # would silently start training a platform-conditioned decoder and stop
+  # being a record of what was actually run.
+  model.d_platform: 0

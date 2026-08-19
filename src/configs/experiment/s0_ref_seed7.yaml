@@ -33,3 +33,9 @@ overrides:
   # decisions have been made on single-seed gaps of 1-3% without knowing this
   # number, and twice a gap that size turned out to be an artefact.
   model.dab.lambda_dab: 0.0
+
+  # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
+  # gained d_platform 16 in wave R5; without this line every pre-R5 config
+  # would silently start training a platform-conditioned decoder and stop
+  # being a record of what was actually run.
+  model.d_platform: 0

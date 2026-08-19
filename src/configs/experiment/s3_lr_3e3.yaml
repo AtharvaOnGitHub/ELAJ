@@ -37,3 +37,9 @@ overrides:
   # been monotone so far, so the optimum is at or above the top of the grid
   # and nobody has seen it turn over yet. This is where it should.
   # (lr is set above; nothing else differs from the base.)
+
+  # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
+  # gained d_platform 16 in wave R5; without this line every pre-R5 config
+  # would silently start training a platform-conditioned decoder and stop
+  # being a record of what was actually run.
+  model.d_platform: 0

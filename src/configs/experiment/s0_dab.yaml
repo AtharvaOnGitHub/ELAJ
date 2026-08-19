@@ -36,3 +36,9 @@ overrides:
   # Read val_dab against ln(8) = 2.079, not ln(12): four studies contribute no
   # cells after the disease filter and the classifier is never asked about them.
   model.dab.lambda_dab: 0.2
+
+  # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
+  # gained d_platform 16 in wave R5; without this line every pre-R5 config
+  # would silently start training a platform-conditioned decoder and stop
+  # being a record of what was actually run.
+  model.d_platform: 0

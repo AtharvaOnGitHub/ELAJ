@@ -67,6 +67,10 @@ overrides:
   model.d_gauss: 8
   model.n_vMF: 4
 
-  # ---- thin group encoders, as in the running r4_thin_groups ----
+  # ---- thin group encoders, as in r5_platform_on ----
   model.group_encoder.n_layers: 1
   model.aggregation_encoder.n_layers: 2
+
+  # The covariates are live here. Stated rather than inherited from ELAJ_small
+  # so this arm and r5_platform_on differ in exactly one visible line.
+  model.d_platform: 16

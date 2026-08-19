@@ -82,3 +82,9 @@ overrides:
   model.loss.w_kl_vmf: 0.1
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.1
+
+  # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
+  # gained d_platform 16 in wave R5; without this line every pre-R5 config
+  # would silently start training a platform-conditioned decoder and stop
+  # being a record of what was actually run.
+  model.d_platform: 0

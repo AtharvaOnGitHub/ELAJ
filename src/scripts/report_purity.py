@@ -44,7 +44,26 @@ def parse_args() -> argparse.Namespace:
                         "are comparable. 0 uses each latent as-is.")
     p.add_argument("--out", default="outputs/purity",
                    help="Where the combined table is written.")
+    p.add_argument("--runs-dir", default=None,
+                   help="Look for each run's directory under here instead of "
+                        "beside the path in its config. The run keeps its own "
+                        "folder name, so a wave archived into outputs/r5/ is "
+                        "reached with --runs-dir outputs/r5.")
     return p.parse_args()
+
+
+def resolve_run_dir(root: str, output_dir: str, runs_dir: str | None) -> Path:
+    """Where this run's outputs actually live.
+
+    A config records where a run WROTE its outputs, which stops being true the
+    moment a finished wave is filed into a subdirectory. `runs_dir` replaces
+    the parent and keeps the leaf, so outputs/r5_cce/ under
+    --runs-dir outputs/r5 becomes outputs/r5/r5_cce.
+    """
+    recorded = Path(root) / output_dir
+    if runs_dir is None:
+        return recorded
+    return Path(root) / runs_dir / recorded.name
 
 
 def corpus_key(data_cfg) -> tuple:
@@ -135,7 +154,15 @@ def main() -> None:
             continue
 
         exp_cfg, model_cfg, train_cfg, data_cfg = load_experiment(str(config), root=root)
-        run_dir = Path(root) / exp_cfg.output_dir
+        run_dir = resolve_run_dir(root, exp_cfg.output_dir, args.runs_dir)
+        # Two different failures, and conflating them sent a search for a
+        # crashed run when the outputs had simply been filed elsewhere.
+        if not run_dir.is_dir():
+            logger.error(
+                "  no directory at %s — the run may have been moved; "
+                "point --runs-dir at its parent; skipped", run_dir,
+            )
+            continue
         if not (run_dir / "metrics.csv").exists():
             logger.error("  %s has no metrics.csv — run did not finish; skipped", run_dir)
             continue

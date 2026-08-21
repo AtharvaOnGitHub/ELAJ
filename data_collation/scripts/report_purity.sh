@@ -15,6 +15,11 @@
 #   sbatch data_collation/scripts/report_purity.sh                  # all of wave R4
 #   sbatch data_collation/scripts/report_purity.sh r3_nodab r3_loose
 #   sbatch data_collation/scripts/report_purity.sh --dims 4 r5_cce r5_lambda_low
+#   sbatch data_collation/scripts/report_purity.sh --runs-dir outputs/r5 r5_cce
+#
+# --runs-dir is for a wave that has been filed into a subdirectory after it
+# finished: the config still records outputs/<arm>/, which stops being where
+# the outputs are.
 #
 # Arms are EXPERIMENT NAMES, not output paths: each resolves to
 # configs/experiment/<name>.yaml. The --run flag is added below, so do not pass
@@ -43,7 +48,7 @@ ARMS=()
 EXTRA=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dims|--k|--out|--root|--config-dir)
+        --dims|--k|--out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --run)
             echo "Pass arm names without --run; this script adds it." >&2; exit 2 ;;

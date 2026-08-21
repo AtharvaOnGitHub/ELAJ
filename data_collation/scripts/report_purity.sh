@@ -14,6 +14,12 @@
 #
 #   sbatch data_collation/scripts/report_purity.sh                  # all of wave R4
 #   sbatch data_collation/scripts/report_purity.sh r3_nodab r3_loose
+#   sbatch data_collation/scripts/report_purity.sh --dims 4 r5_cce r5_lambda_low
+#
+# Arms are EXPERIMENT NAMES, not output paths: each resolves to
+# configs/experiment/<name>.yaml. The --run flag is added below, so do not pass
+# it yourself. Anything beginning with "-" is forwarded to report_purity.py
+# verbatim, which is how --dims, --k and --out get through.
 #
 # No training. Each run is embedded once through its best checkpoint and
 # measured; the expensive part is rebuilding the validation Dataset, which runs
@@ -25,7 +31,29 @@
 
 set -euo pipefail
 
-ARMS=("$@")
+# Split the command line into arm names and passthrough flags. Without this,
+# a flag lands in ARMS, gets an unwanted --run in front of it, and argparse
+# fails with "--run: expected one argument" -- which reads like the arm list is
+# wrong when the real problem is that flags had nowhere to go.
+#
+# A flag's VALUE is a bare word, so it cannot be told from an arm name by shape
+# alone. The flags that take one are listed explicitly; anything else beginning
+# with "-" is assumed to be a bare switch.
+ARMS=()
+EXTRA=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dims|--k|--out|--root|--config-dir)
+            EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
+        --run)
+            echo "Pass arm names without --run; this script adds it." >&2; exit 2 ;;
+        -*)
+            EXTRA+=("$1"); shift ;;
+        *)
+            ARMS+=("$1"); shift ;;
+    esac
+done
+
 if [ ${#ARMS[@]} -eq 0 ]; then
     ARMS=(r4_tiny_latent r4_thin_groups r4_deep_cell r4_tiny_dab_hi
           r4_eutopic r4_ectopic)
@@ -54,5 +82,11 @@ RUN_ARGS=()
 for arm in "${ARMS[@]}"; do RUN_ARGS+=(--run "${arm}"); done
 
 echo "Measuring: ${ARMS[*]}"
+echo "Options:   ${EXTRA[*]-(none)}"
 export PYTHONUNBUFFERED=1
-python -u -m scripts.report_purity --root . "${RUN_ARGS[@]}"
+
+# ${EXTRA[@]+...} guards the expansion: under `set -u`, bash 3.2 treats an
+# empty "${EXTRA[@]}" as an unbound variable and aborts. A --no-tests flag in
+# launch_r2.sh once submitted zero jobs and reported success for exactly this.
+python -u -m scripts.report_purity --root . \
+    "${RUN_ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}

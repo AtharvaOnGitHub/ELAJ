@@ -216,9 +216,25 @@ class TestCompositeLoss:
         # beta_kl is the KL annealing weight, reported so metrics.csv records
         # which objective each epoch was actually optimising — the weights ramp,
         # so two epochs' totals are not otherwise comparable.
+        #
+        # mu_gauss_norm is reported, not optimised. Trainer._record copies every
+        # key here into metrics.csv, which is the only reason a diagnostic can
+        # ride along in this dict at all.
         expected = {"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl",
-                    "dab", "cce", "total"}
+                    "dab", "cce", "mu_gauss_norm", "total"}
         assert expected == set(out.keys())
+
+    def test_mu_gauss_norm_is_reported_but_carries_no_gradient(self):
+        """It rides in the loss dict to reach metrics.csv. If it kept a graph,
+        that graph would be held for the whole epoch by the metric logger."""
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0)
+        out = comp(
+            _make_model_output(torch.arange(G_MEAS)),
+            _make_fake_batch(),
+            current_step=0, total_steps=100,
+        )
+        assert not out["mu_gauss_norm"].requires_grad
+        assert out["mu_gauss_norm"].item() > 0
 
     def test_elbo_is_the_total_without_the_classifier(self):
         """`elbo` and `dab` partition `total` exactly.

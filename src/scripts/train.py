@@ -183,6 +183,8 @@ def main() -> None:
         w_cce=model_cfg.cce.lambda_cce if model_cfg.cce.enabled else 0.0,
         lambda_dab_max=model_cfg.dab.lambda_dab,
         cce_temperature=model_cfg.cce.temperature,
+        cce_block_normalise=model_cfg.cce.block_normalise,
+        cce_circular_weight=model_cfg.cce.circular_weight,
         dab_hidden_dim=model_cfg.dab.hidden_dim,
         w_nb=model_cfg.loss.w_nb,
         w_kl_gauss=model_cfg.loss.w_kl_gauss,
@@ -201,6 +203,15 @@ def main() -> None:
         model_cfg.loss.free_bits, train_cfg.kl_annealing.beta_max,
         train_cfg.kl_annealing.warmup_fraction, model_cfg.dab.lambda_dab,
     )
+    if model_cfg.cce.enabled:
+        # Stated in the log because the embedding layout decides whether the
+        # circular branch survives CCE, and the two arms of wave R6 differ in
+        # nothing else visible at this point.
+        logger.info(
+            "CCE: temperature=%.3g block_normalise=%s circular_weight=%.3g",
+            model_cfg.cce.temperature, model_cfg.cce.block_normalise,
+            model_cfg.cce.circular_weight,
+        )
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
     all_params = list(model.parameters()) + list(composite_loss.parameters())

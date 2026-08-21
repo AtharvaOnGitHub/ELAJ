@@ -16,9 +16,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from endo_model.model.latent.circular import angles_to_cartesian
-
 from .adversarial import DABClassifier
+from .cce_embedding import cce_embedding
 from .contrastive import InfoNCELoss
 from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
 from .reconstruction import NegativeBinomialLoss
@@ -52,6 +51,8 @@ class CompositeLoss(nn.Module):
         w_cce: float = 0.0,
         lambda_dab_max: float = 1.0,
         cce_temperature: float = 0.1,
+        cce_block_normalise: bool = False,
+        cce_circular_weight: float = 1.0,
         dab_hidden_dim: int = 64,
         dab_dropout: float = 0.1,
         beta_max: float = 1.0,
@@ -86,17 +87,22 @@ class CompositeLoss(nn.Module):
             dropout=dab_dropout,
         )
         self.cce = InfoNCELoss(temperature=cce_temperature) if w_cce > 0.0 else None
+        self.cce_block_normalise = cce_block_normalise
+        self.cce_circular_weight = cce_circular_weight
 
-    @staticmethod
-    def _embedding(model_output: dict[str, Tensor]) -> Tensor:
+    def _embedding(self, model_output: dict[str, Tensor]) -> Tensor:
         """One cell's deterministic latent, laid out for a distance-based loss.
 
-        The Gaussian mean as-is, then each circular mean angle as a (cos, sin)
-        pair. Width is d_gauss + 2*n_vMF.
+        See cce_embedding.py for why the layout is not merely a concatenation:
+        the circular block's norm is fixed at sqrt(n_vMF), so without
+        block normalisation the encoder can crowd it out of the cosine
+        similarity by growing the Gaussian block instead.
         """
-        return torch.cat(
-            [model_output["mu_gauss"], angles_to_cartesian(model_output["mu_angle"])],
-            dim=-1,
+        return cce_embedding(
+            model_output["mu_gauss"],
+            model_output["mu_angle"],
+            block_normalise=self.cce_block_normalise,
+            circular_weight=self.cce_circular_weight,
         )
 
     def forward(
@@ -218,5 +224,12 @@ class CompositeLoss(nn.Module):
             "beta_kl": torch.tensor(beta_kl),
             "dab": dab_loss,
             "cce": cce_loss,
+            # Reported, not optimised. The explanation for r5_cce's circular
+            # collapse is that CCE grows this to crowd the fixed-norm circular
+            # block out of the cosine similarity, so it should climb under CCE
+            # and sit flat without it. Nothing in the R5 logs could tell us.
+            # Detached: _record copies every key here into metrics.csv, and a
+            # live graph on a reported scalar would be kept alive for the epoch.
+            "mu_gauss_norm": model_output["mu_gauss"].detach().norm(dim=-1).mean(),
             "total": total,
         }

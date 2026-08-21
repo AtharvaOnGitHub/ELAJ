@@ -60,6 +60,14 @@ class CCEConfig:
     enabled: bool = False
     temperature: float = 0.07
     lambda_cce: float = 0.1
+    # Scale the Gaussian and circular halves of the embedding to unit norm
+    # before concatenating them. Defaults to False so every pre-R6 config keeps
+    # reproducing the run it names; see cce_embedding.py for why the default is
+    # the wrong choice for any new run.
+    block_normalise: bool = False
+    # The circular half's length once normalised, against the Gaussian half's
+    # 1.0. Read only when block_normalise is set.
+    circular_weight: float = 1.0
 
     @classmethod
     def from_dict(cls, d: dict) -> "CCEConfig":
@@ -67,6 +75,8 @@ class CCEConfig:
             enabled=bool(d.get("enabled", False)),
             temperature=float(d.get("temperature", 0.07)),
             lambda_cce=float(d.get("lambda_cce", 0.1)),
+            block_normalise=bool(d.get("block_normalise", False)),
+            circular_weight=float(d.get("circular_weight", 1.0)),
         )
 
 

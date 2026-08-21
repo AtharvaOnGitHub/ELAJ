@@ -1,0 +1,84 @@
+name: r6_cce_05
+description: >
+  Half the contrastive weight. Does reconstruction come back?
+
+  Wave R6. CCE earned its place in R5; now find the setting that keeps the
+  mixing without paying for it in reconstruction.
+
+  r5_cce was the best-mixing run this project has produced, and by a wide
+  margin. Measured at a common 4 dimensions:
+
+                        all cells   endometrium
+    r5_cce                  0.273         0.384
+    r5_tiny_platform        0.511         0.670
+
+  The endometrium column is the one that matters, because it holds tissue
+  constant -- so that mixing cannot be tissue structure collapsing, which was
+  the obvious objection and is now ruled out.
+
+  It cost reconstruction: +5.1% over the study-mean baseline against +8.3% for
+  r5_tiny_platform, with the best epoch at 5 of 13 and seven epochs of decline
+  after it. The reading is that the contrastive term pulls cells together
+  harder than the data supports, and the latent gives up information to satisfy
+  it.
+
+  So this arm halves lambda_cce to 0.05 and changes nothing else. Note there is
+  no lambda/weight split here as there is for DAB: DAB's gradient reversal lets
+  lambda scale what reaches the encoder independently of the classifier's own
+  weight, whereas lambda_cce scales the whole term. Reducing CCE's effect on
+  the encoder and reducing CCE are the same action.
+
+  Read against r5_cce, which is this arm at 0.1. If reconstruction recovers
+  toward +8% while the endometrium purity stays near 0.4, this is the operating
+  point. If purity climbs back toward 0.67 in step with it, mixing and
+  reconstruction are directly traded and the wave has found the exchange rate
+  rather than a free lunch.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r6_cce_05/
+seed: 24
+
+overrides:
+  # 18, not 30. CCE costs 1.9x per epoch -- 4263 s against 2263 s for the
+  # batch-256 arms, from the doubled step count at batch 128 plus the second
+  # encoder pass. train.sh asks for 24 h, which at 71 min/epoch is 20 epochs
+  # before SLURM kills the job and takes the final report and purity number
+  # with it. 18 epochs is 21.3 h plus about 25 minutes of reporting.
+  #
+  # r5_cce peaked at epoch 5, so 18 should be ample. A weaker contrastive term
+  # may well train longer: if this arm's best epoch is at or near 18, it was
+  # still improving and the cap is the finding, not the number.
+  training.max_epochs: 18
+
+  # 128, matching r5_cce. Both for memory -- CCE holds two encoder graphs and
+  # the group encoders' attention dominates -- and so the sweep is comparable.
+  training.batch_size: 128
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # ---- the tiny latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+  model.d_platform: 16
+
+  # The one line that makes this arm what it is.
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.05
+
+  # Left at the r5_cce layout deliberately: r6_cce_blocks is the arm that
+  # changes it, and changing both here would confound the two questions.
+  model.cce.block_normalise: false

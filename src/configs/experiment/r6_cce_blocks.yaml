@@ -1,0 +1,88 @@
+name: r6_cce_blocks
+description: >
+  Full contrastive weight, fixed embedding layout. Does the circular branch
+  survive?
+
+  Wave R6. CCE earned its place in R5; now find the setting that keeps the
+  mixing without paying for it in reconstruction.
+
+  In r5_cce the circular half of the latent stopped carrying information.
+  val_kl_vmf climbed to 1.5e-4 by epoch 5 and then decayed to 7.6e-5, while
+  every arm without CCE rose monotonically -- r5_lambda_low to 9.5e-4, thirteen
+  times higher. A KL falling toward zero means the posterior is drifting back
+  to the uniform prior: the angle is no longer telling the decoder anything.
+
+  THE MECHANISM. CCE compares cells by cosine similarity, which normalises the
+  whole embedding to unit length, so the layout decides how much say each half
+  gets. A (cos, sin) pair has norm 1 whatever angle it holds, so the circular
+  block's norm is exactly sqrt(n_vMF) = 2.0, fixed, no matter what the model
+  learns. The Gaussian block has no such limit. The circular block's share is
+
+      2 / sqrt(||mu_gauss||^2 + 4)
+
+  so the encoder can drive it to nearly nothing by growing ||mu_gauss|| -- and
+  that growth is free, because the decoder's linear layer rescales it away and
+  reconstruction never objects. Once the circular block no longer moves the
+  contrastive loss, and its KL is already downweighted tenfold by
+  w_kl_vmf 0.1, nothing holds the concentration up.
+
+  THE FIX. block_normalise scales each half to unit norm before concatenating,
+  so the split is set by circular_weight and cannot be moved by the Gaussian
+  half growing. At circular_weight 1.0 each half takes 1/sqrt(2) of the
+  embedding.
+
+  WHY THIS ARM IS WORTH A GPU-DAY. lambda_cce stays at 0.1 -- the same
+  contrastive strength as r5_cce -- so the layout is the only difference
+  between the two runs. That makes it a test of the explanation above rather
+  than a search for a better number. If val_kl_vmf rises monotonically here as
+  it does in every non-CCE arm, the mechanism is right and the fix belongs in
+  everything downstream. If it decays anyway, the collapse is CCE pressure in
+  general, this explanation is wrong, and the fix should not be carried into
+  R7 on the strength of it.
+
+  A second reading, free with this arm: mu_gauss_norm is now recorded in
+  metrics.csv. The explanation predicts it climbs in r6_cce_05, which keeps the
+  old layout, and stays flat here. Nothing in the R5 logs could tell us either
+  way.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r6_cce_blocks/
+seed: 24
+
+overrides:
+  # 18 epochs at 71 min each is 21.3 h, inside train.sh's 24 h with margin for
+  # the final report. See r6_cce_05 for the arithmetic.
+  training.max_epochs: 18
+  training.batch_size: 128
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.02
+
+  # ---- the tiny latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+  model.d_platform: 16
+
+  # 0.1, exactly as r5_cce. Held so the layout is the only thing that differs.
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.1
+
+  # The one line that makes this arm what it is.
+  model.cce.block_normalise: true
+  # Equal footing: each half unit-length, so each takes 1/sqrt(2) of the
+  # embedding. Weighting the circular half up is a lever for a later wave, once
+  # this arm has established whether the layout was the problem at all.
+  model.cce.circular_weight: 1.0

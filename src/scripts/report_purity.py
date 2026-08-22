@@ -17,6 +17,7 @@ Writes purity.csv per run and one combined table to the output directory.
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
 import sys
 from pathlib import Path
@@ -224,6 +225,15 @@ def main() -> None:
             logger.info("  %-20s purity %.3f  (mixed %.3f, excess %.1f%%)",
                         r.scope, r.purity, r.floor, 100 * r.excess)
 
+        # The same per-study table FinalReporter writes at the end of training.
+        # Repeated here so a run that never reached its final report -- killed
+        # at the walltime, most likely -- can still produce it from the best
+        # checkpoint, with no retraining.
+        _report_per_study(
+            latents, run_dir, {s["id"]: s["name"] for s in study_configs},
+            k=args.k, n_components=args.dims or None,
+        )
+
         del model
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -236,6 +246,39 @@ def main() -> None:
     write_csv(results, out)
     logger.info("\n%s", format_table(results))
     logger.info("Written to %s and to each run's purity.csv", out)
+
+
+def _report_per_study(latents, run_dir, study_names, k, n_components):
+    """Per-study purity for one run: logged, and written beside its purity.csv.
+
+    Wrapped, like the copy in FinalReporter: a diagnostic table must not be the
+    reason a recovery job over several runs fails partway through.
+    """
+    from endo_model.evaluation.study_mixing import (
+        format_per_study, per_study_purity,
+    )
+
+    try:
+        rows = per_study_purity(
+            latents["mu_gauss"], latents["study_id"], k=k,
+            n_components=n_components,
+        )
+        if not rows:
+            return
+        logger.info("  per study:\n%s", format_per_study(rows, study_names))
+        path = run_dir / "purity_per_study.csv"
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["study_id", "study", "n_cells",
+                               "purity", "floor", "excess"],
+            )
+            writer.writeheader()
+            for r in sorted(rows, key=lambda r: r["excess"], reverse=True):
+                writer.writerow({**r, "study": study_names.get(r["study_id"], "")})
+        logger.info("  per-study purity written to %s", path)
+    except Exception as exc:  # noqa: BLE001 — diagnostic must not be fatal
+        logger.warning("  per-study purity skipped (%s: %s)",
+                       type(exc).__name__, exc)
 
 
 if __name__ == "__main__":

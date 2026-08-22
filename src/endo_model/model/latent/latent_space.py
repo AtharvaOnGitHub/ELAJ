@@ -22,12 +22,16 @@ class BifurcatedLatentSpace(nn.Module):
         d_agg:   Input/output aggregation dimension.
         d_gauss: Gaussian branch latent dimension.
         n_vMF:   Number of von Mises-Fisher circular dimensions.
+        kappa_floor: Smallest concentration a circular dimension may take.
+                     See VonMisesBranch for why zero is an absorbing state.
     """
 
-    def __init__(self, d_agg: int, d_gauss: int, n_vMF: int) -> None:
+    def __init__(
+        self, d_agg: int, d_gauss: int, n_vMF: int, kappa_floor: float = 1e-4
+    ) -> None:
         super().__init__()
         self.gaussian = GaussianBranch(d_agg, d_gauss)
-        self.vonmises = VonMisesBranch(d_agg, n_vMF)
+        self.vonmises = VonMisesBranch(d_agg, n_vMF, kappa_floor=kappa_floor)
 
         d_z = d_gauss + 2 * n_vMF
         self.z_proj = nn.Linear(d_z, d_agg, bias=False)

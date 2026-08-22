@@ -1,0 +1,116 @@
+"""The two wave R7 changes: gradient checkpointing, and the concentration floor.
+
+Both are the kind of change that alters training silently if it is wrong —
+checkpointing by not reproducing the un-checkpointed computation, the floor by
+not actually binding — so both are pinned here rather than trusted.
+"""
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from endo_model.model.encoders.batched.encoder import BatchedGroupEncoder
+from endo_model.model.latent.vonmises_vae import VonMisesBranch
+
+GROUPS = ["g0", "g1", "g2"]
+SIZES = {"g0": 6, "g1": 9, "g2": 9}      # uneven, so the padding mask is live
+D_TOKEN, B = 8, 4
+
+
+def tokens():
+    torch.manual_seed(24)
+    return {n: torch.randn(B, SIZES[n], D_TOKEN) for n in GROUPS}
+
+
+def encoder(grad_checkpointing: bool, dropout: float = 0.0):
+    torch.manual_seed(7)                  # same init for both variants
+    return BatchedGroupEncoder(
+        GROUPS, SIZES, D_TOKEN, n_heads=2, n_layers=2,
+        dropout=dropout, grad_checkpointing=grad_checkpointing,
+    )
+
+
+# ── gradient checkpointing ───────────────────────────────────────────────────
+
+def test_checkpointing_gives_the_same_forward_output():
+    """It must be a memory/time trade and nothing else. A different output
+    means the recomputation is not reproducing the original pass."""
+    x = tokens()
+    plain, ckpt = encoder(False), encoder(True)
+    plain.train(), ckpt.train()
+    a, b = plain(x), ckpt(x)
+    for name in GROUPS:
+        assert torch.allclose(a[name], b[name], atol=1e-6), name
+
+
+def test_checkpointing_gives_the_same_gradients():
+    """The forward matching is not enough — checkpointing rebuilds the graph,
+    and it is the backward that training actually consumes."""
+    grads = {}
+    for flag in (False, True):
+        enc = encoder(flag)
+        enc.train()
+        x = {n: t.clone().requires_grad_(True) for n, t in tokens().items()}
+        sum(enc(x)[n].square().sum() for n in GROUPS).backward()
+        grads[flag] = {n: x[n].grad.clone() for n in GROUPS}
+    for name in GROUPS:
+        assert torch.allclose(grads[False][name], grads[True][name], atol=1e-6), name
+
+
+def test_checkpointing_is_off_in_eval_so_inference_pays_nothing():
+    """Nothing is recomputed when there is no backward to recompute for."""
+    enc = encoder(True)
+    enc.eval()
+    with torch.no_grad():
+        out = enc(tokens())
+    assert set(out) == set(GROUPS)
+
+
+def test_checkpointing_defaults_off():
+    """Every pre-R7 config relies on this to keep reproducing its own run."""
+    assert encoder(False).grad_checkpointing is False
+    assert BatchedGroupEncoder(GROUPS, SIZES, D_TOKEN).grad_checkpointing is False
+
+
+# ── the concentration floor ──────────────────────────────────────────────────
+
+def test_kappa_never_falls_below_the_floor():
+    """The point of the floor: kappa cannot reach the flat region where
+    dKL/dkappa ~ kappa/2 vanishes and a dimension can no longer climb back."""
+    branch = VonMisesBranch(d_agg=16, n_vMF=4, kappa_floor=0.5)
+    torch.manual_seed(0)
+    # Drive the head hard negative — softplus underflows to ~0, so whatever
+    # survives is the floor and nothing else.
+    with torch.no_grad():
+        branch.kappa_head.weight.fill_(0.0)
+        branch.kappa_head.bias.fill_(-50.0)
+    _, kappa, _ = branch(torch.randn(32, 16))
+    assert (kappa >= 0.5).all()
+    assert kappa.max() == pytest.approx(0.5, abs=1e-5)
+
+
+def test_the_floor_is_a_floor_not_a_clamp_on_large_values():
+    """It must not cap concentration — a dimension carrying real signal needs
+    to be able to run to high kappa."""
+    branch = VonMisesBranch(d_agg=16, n_vMF=4, kappa_floor=0.5)
+    with torch.no_grad():
+        branch.kappa_head.weight.fill_(0.0)
+        branch.kappa_head.bias.fill_(10.0)
+    _, kappa, _ = branch(torch.randn(32, 16))
+    assert (kappa > 10.0).all()
+
+
+def test_default_floor_is_the_pre_r7_value():
+    """1e-4, so every earlier config still trains the model it names — the R7
+    configs set 0.5 explicitly."""
+    assert VonMisesBranch(d_agg=16, n_vMF=4).kappa_floor == pytest.approx(1e-4)
+
+
+def test_kappa_stays_differentiable_through_the_floor():
+    """Adding a constant must not detach the head; a floor that stopped the
+    gradient would freeze concentration rather than protect it."""
+    branch = VonMisesBranch(d_agg=16, n_vMF=4, kappa_floor=0.5)
+    _, kappa, _ = branch(torch.randn(8, 16))
+    kappa.sum().backward()
+    assert branch.kappa_head.weight.grad is not None
+    assert branch.kappa_head.weight.grad.abs().sum() > 0

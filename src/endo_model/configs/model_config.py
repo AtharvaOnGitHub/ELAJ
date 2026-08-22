@@ -13,6 +13,12 @@ class GroupEncoderConfig:
     # 253-gene group is not padded to the 493-gene group's length.  1 restores
     # the single-block behaviour.  See encoders/batched/bucketing.py.
     n_buckets: int = 4
+    # Recompute each layer's activations in the backward pass instead of
+    # storing them. The attention probabilities are what fill the card --
+    # B x heads x sum(G_k^2), about 13 GB per layer in bf16 at batch 256 --
+    # so this is what makes batch 256 reachable at all with CCE running a
+    # second graph. Costs roughly 30% more time per epoch.
+    grad_checkpointing: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "GroupEncoderConfig":
@@ -21,6 +27,7 @@ class GroupEncoderConfig:
             n_heads=d.get("n_heads", 4),
             dropout=d.get("dropout", 0.1),
             n_buckets=int(d.get("n_buckets", 4)),
+            grad_checkpointing=bool(d.get("grad_checkpointing", False)),
         )
 
 
@@ -141,6 +148,12 @@ class ModelConfig:
     # Width of the technical-covariate embedding handed to the decoder.
     # 0 disables it, which is what every run before wave R5 did.
     d_platform: int = 0
+    # Smallest concentration a circular latent dimension may take. Zero is an
+    # absorbing state for this branch -- KL against the uniform prior depends
+    # only on kappa, and near zero its gradient vanishes quadratically -- so a
+    # dimension that drifts down cannot climb back. See VonMisesBranch.
+    # 1e-4 is the pre-R7 value and sits inside that flat region.
+    kappa_floor: float = 1e-4
     # Tissue hierarchy embedding concatenated onto z_proj at the decoder, so
     # the latent is not obliged to encode anatomy.  Small on purpose: it
     # carries four categorical levels, and widening it would let the decoder
@@ -194,6 +207,7 @@ class ModelConfig:
             n_vMF=d.get("n_vMF", 8),
             d_dec=d.get("d_dec", 64),
             d_platform=int(d.get("d_platform", 0)),
+            kappa_floor=float(d.get("kappa_floor", 1e-4)),
             d_tissue=int(d.get("d_tissue", 16)),
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),

@@ -380,6 +380,8 @@ def main() -> None:
 
     FinalReporter(
         reporter=reporter, loader=val_loader, device=device, out_dir=out_dir,
+        # So the per-study table names studies rather than numbering them.
+        study_names={s["id"]: s["name"] for s in study_configs},
     ).render(model, trainer.ckpt_manager)
 
     logger.info("Training complete. Outputs written to %s", out_dir)

@@ -31,11 +31,37 @@ class VonMisesBranch(nn.Module):
     Args:
         d_agg:  Input dimension (CELL_CLS from AggregationEncoder).
         n_vMF:  Number of circular latent dimensions.
+        kappa_floor: Smallest concentration any dimension may take.
+
+    WHY kappa_floor EXISTS, and why it is not a small number.
+
+    The Gaussian branch and this one are not symmetric. A Gaussian dimension
+    carries information two ways -- by moving its mean and by shrinking its
+    variance -- and the mean is unbounded, with dKL/dmu = mu, so there is always
+    gradient available to climb back with.
+
+    A Power Spherical dimension on the circle has one lever. KL against the
+    uniform prior is a function of kappa ALONE: the prior is rotation
+    invariant, so the mean direction is free and contributes nothing. And for
+    small kappa the KL is about kappa^2/4, so dKL/dkappa is about kappa/2 --
+    the gradient vanishes quadratically as kappa approaches zero. That makes
+    zero an absorbing state. The circle has no scale to translate along, so a
+    dimension that drifts down has almost nothing to climb back with.
+
+    The old floor of 1e-4 sat inside that flat region. In wave R6 the collapsed
+    dimensions measured kappa = 1.1e-3 to 2.2e-3, sitting on it. A floor of 0.5
+    puts every dimension where the KL gradient is still meaningful, so no
+    dimension can reach the flat ground at all. This is a structural guarantee
+    rather than a hope that the reconstruction term keeps the branch alive --
+    and it did not, in any arm that ran CCE.
+
+    Default 1e-4 preserves every pre-R7 run; the R7 configs set 0.5.
     """
 
-    def __init__(self, d_agg: int, n_vMF: int) -> None:
+    def __init__(self, d_agg: int, n_vMF: int, kappa_floor: float = 1e-4) -> None:
         super().__init__()
         self.n_vMF = n_vMF
+        self.kappa_floor = kappa_floor
         self.mu_head = nn.Linear(d_agg, n_vMF)         # raw angle predictions
         self.kappa_head = nn.Linear(d_agg, n_vMF)      # concentration
 
@@ -55,7 +81,7 @@ class VonMisesBranch(nn.Module):
         mu_angle = self.mu_head(cell_cls)              # (B, n_vMF)
         kappa = torch.nn.functional.softplus(
             self.kappa_head(cell_cls)
-        ) + 1e-4                                       # (B, n_vMF) > 0
+        ) + self.kappa_floor                           # (B, n_vMF) > 0
 
         # Mean direction as unit vectors on the circle: (B, n_vMF, 2).
         loc = torch.stack([torch.cos(mu_angle), torch.sin(mu_angle)], dim=-1)

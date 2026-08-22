@@ -1,0 +1,99 @@
+name: r7_cce_low
+description: >
+  A quarter of the contrastive weight, at batch 256 with the circular
+  branch held open.
+
+  Wave R7. Reconstruction back up, study identity preserved rather than erased,
+  circular dimensions alive, both adversary and contrastive term switched on.
+
+  THREE CHANGES FROM r5_cce, ALL OF THEM ENABLERS.
+
+  1. Gradient checkpointing on the group encoders. Every CCE run so far has been
+  stuck at batch 128 for memory, and that is a confound rather than a choice:
+  every non-CCE arm ran at 256, so the +5.1% reconstruction of r5_cce against
+  r5_tiny_platform's +8.3% could be the contrastive term or could be the batch
+  size, and halving lambda_cce in wave R6 moved it only to +5.6%. The card fills
+  with attention probabilities -- B x heads x sum(G_k^2), 13 GB per layer in
+  bf16 at batch 256, doubled by the second layer and again by CCE's second
+  graph, which is 52 GB before anything else. Checkpointing recomputes those in
+  the backward pass instead of storing them, at roughly 30% more time.
+
+  2. kappa_floor 0.5. Every CCE arm collapsed the circular branch -- 3 of 4
+  dimensions at lambda_cce 0.1 and again at 0.05, 4 of 4 with the embedding
+  layout change that was supposed to prevent it. The collapsed dimensions
+  measured kappa 1.1e-3 to 2.2e-3, sitting on the old 1e-4 floor. That floor is
+  inside the flat region: KL against the uniform prior goes as kappa^2/4 there,
+  so the gradient goes as kappa/2 and vanishes as kappa approaches zero. It is
+  an absorbing state, and the Gaussian branch has no equivalent because its
+  mean is unbounded. A floor of 0.5 makes it unreachable.
+
+  3. Batch 256, which is what change 1 buys.
+
+  lambda_cce is 0.025 here rather than r7_cce_full's 0.1 -- a quarter, and the
+  lowest non-zero contrastive weight tried. Wave R6 halved it to 0.05 and
+  bought 0.5pp of reconstruction, which was the evidence that the contrastive
+  weight was not what the reconstruction gap was made of. If that reading is
+  right, this arm should land close to r7_cce_full on reconstruction while
+  mixing less well, and the pair brackets the exchange rate at a batch size
+  where neither is confounded.
+
+  It is also the safer of the two on the circular branch: less contrastive
+  pressure, plus the floor.
+
+  WHAT TO READ. Reconstruction against r7_cce_full, not against r5_cce: the
+  two R7 arms differ only in lambda_cce, so the difference between them is the
+  contrastive weight's price at batch 256. The circular panel
+  should now report 0 of 4 collapsed by construction -- if it does not, the
+  floor is not doing what the arithmetic says and that is a finding in itself.
+  And the new per-study purity table, which says which studies keep an identity
+  rather than only how much mixing there is in total: purity at the floor would
+  mean the latent has thrown away real differences in patients, tissue mix and
+  disease, which is not the goal.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r7_cce_low/
+seed: 24
+
+overrides:
+  # Back to the wave-R5 cap. At batch 256 with checkpointing the epoch should
+  # land near 2900 s -- 2263 s for a non-CCE batch-256 epoch, plus CCE's second
+  # pass, plus ~30% for recomputation -- so 25 epochs is about 20 h, inside
+  # train.sh's 24 h. If epochs run slower than that, cut this to 20.
+  training.max_epochs: 25
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # Both lambdas non-zero, as required. DAB pressure is lambda * w_dab = 0.01.
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+
+  # The wave R6 embedding layout change is OFF. It was built on an explanation
+  # the mu_gauss_norm diagnostic refuted -- the Gaussian block never grew, so it
+  # was never crowding the circular block out -- and the arm that tested it
+  # collapsed 4 of 4 circular dimensions instead of 3.
+  model.cce.block_normalise: false
+
+  # ---- the tiny latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+  model.d_platform: 16
+
+  # The two lines that make batch 256 reachable and the circular branch
+  # survivable. See the description.
+  model.group_encoder.grad_checkpointing: true
+  model.kappa_floor: 0.5

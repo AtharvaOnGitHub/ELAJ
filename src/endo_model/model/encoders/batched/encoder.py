@@ -25,6 +25,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.utils.checkpoint import checkpoint
 
 from endo_model.model.encoders.batched.primitives import (
     BatchedLayerNorm,
@@ -166,10 +167,12 @@ class BatchedGroupEncoder(nn.Module):
         n_heads: int = 4,
         n_layers: int = 2,
         dropout: float = 0.1,
+        grad_checkpointing: bool = False,
     ) -> None:
         super().__init__()
         self.group_names = list(group_names)
         self.d_token = d_token
+        self.grad_checkpointing = grad_checkpointing
         n_groups = len(self.group_names)
         self._sizes = [group_sizes[name] for name in self.group_names]
         # +1 for the CLS token prepended at position 0.
@@ -219,7 +222,21 @@ class BatchedGroupEncoder(nn.Module):
             x[k, :, 1 : size + 1, :] = group_tokens[name]
 
         for layer in self.layers:
-            x = layer(x, self.key_valid)
+            if self.grad_checkpointing and self.training and x.requires_grad:
+                # Recompute this layer in the backward pass instead of keeping
+                # its activations. The attention probabilities are what fill the
+                # card -- B x heads x sum(G_k^2), which at batch 256 across the
+                # 45 groups is 13 GB per layer in bf16, doubled by a second
+                # layer and doubled again by CCE's second graph. That is the
+                # 80 GB card, and the reason CCE has only ever run at batch 128.
+                #
+                # use_reentrant=False is required, not stylistic: the reentrant
+                # implementation does not handle inputs that do not require
+                # grad, and does not play well with the dropout RNG state that
+                # has to be replayed for the recomputation to match.
+                x = checkpoint(layer, x, self.key_valid, use_reentrant=False)
+            else:
+                x = layer(x, self.key_valid)
 
         cls_out = x[:, :, 0, :]                      # (K, B, d_token)
         return {name: cls_out[k] for k, name in enumerate(self.group_names)}

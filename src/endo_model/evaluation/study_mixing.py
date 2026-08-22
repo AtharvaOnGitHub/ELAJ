@@ -95,18 +95,108 @@ def knn_purity(
                       comparison across runs with different latent sizes; see
                       `project`. None compares runs of equal width only.
     """
+    share = own_study_share(latent, study_id, k, seed, n_components)
+    return float("nan") if share is None else float(share.mean())
+
+
+def own_study_share(
+    latent: np.ndarray,
+    study_id: np.ndarray,
+    k: int = 30,
+    seed: int = 24,
+    n_components: int | None = None,
+) -> np.ndarray | None:
+    """Per CELL, the share of its k nearest neighbours from its own study.
+
+    Split out from `knn_purity` because the whole-corpus number and the
+    per-study breakdown are the same neighbour search, and that search is the
+    expensive part. Returns None when there are too few cells to have any
+    neighbours at all.
+    """
     from sklearn.neighbors import NearestNeighbors
 
     latent = project(latent, n_components, seed)
     n = len(latent)
     k = min(k, n - 1)
     if k < 1:
-        return float("nan")
+        return None
 
     nn = NearestNeighbors(n_neighbors=k + 1).fit(latent)
     _, idx = nn.kneighbors(latent)
     neighbours = idx[:, 1:]                       # drop self
-    return float((study_id[neighbours] == study_id[:, None]).mean())
+    return (study_id[neighbours] == study_id[:, None]).mean(axis=1)
+
+
+def per_study_purity(
+    latent: np.ndarray,
+    study_id: np.ndarray,
+    k: int = 30,
+    seed: int = 24,
+    n_components: int | None = None,
+) -> list[dict]:
+    """One row per study: how much of its own neighbourhood it keeps.
+
+    The whole-corpus number hides which studies are responsible for it. A
+    corpus at 0.4 could be eight studies each half-mixed, or seven fully mixed
+    and one sitting in its own island -- and those call for different work.
+    Wave R5 had exactly the second shape, with marecko_2024 alone outside.
+
+    Each study's floor is its own share of the corpus: if a study is 13% of the
+    cells and the space is perfectly mixed, 13% of any neighbourhood is drawn
+    from it. So the floors differ per study and a raw purity of 0.30 means
+    something different for a large study than a small one -- read `excess`,
+    which is scaled to the study's own headroom.
+
+    A study whose excess sits near 0 has no identity left in the latent at all.
+    That is not the target: studies really do differ in patients, tissue mix and
+    disease, so some structure is signal rather than batch effect.
+
+    READ THE ROWS TOGETHER, NOT ONE AT A TIME. Each floor is the share a study
+    would hold if every OTHER study were reachable, so one study sitting in its
+    own island inflates every other study's excess. Three equal studies where
+    one is isolated and two are perfectly intermixed score 100%, 28% and 22%,
+    not 100%, 0% and 0% -- the 28% and 22% are almost entirely the missing
+    third study, because those cells can only draw neighbours from the two.
+    A row is high either because that study is separated or because something
+    else is; only the whole table distinguishes them.
+    """
+    share = own_study_share(latent, study_id, k, seed, n_components)
+    if share is None:
+        return []
+
+    n_total = len(study_id)
+    rows = []
+    for s in np.unique(study_id):
+        rows_s = np.flatnonzero(study_id == s)
+        floor = len(rows_s) / n_total
+        purity = float(share[rows_s].mean())
+        headroom = 1.0 - floor
+        rows.append({
+            "study_id": int(s),
+            "n_cells": int(len(rows_s)),
+            "purity": purity,
+            "floor": float(floor),
+            "excess": float((purity - floor) / headroom) if headroom > 0 else float("nan"),
+        })
+    return rows
+
+
+def format_per_study(rows: list[dict], names: dict[int, str] | None = None) -> str:
+    """The per-study table as one block of text, worst-mixed study first."""
+    if not rows:
+        return "per-study purity: not enough cells to measure"
+    names = names or {}
+    width = max(len(names.get(r["study_id"], str(r["study_id"]))) for r in rows)
+    head = (f"{'study':<{width}}  {'cells':>7}  {'purity':>7}  "
+            f"{'mixed':>7}  {'excess':>7}")
+    lines = [head, "-" * len(head)]
+    for r in sorted(rows, key=lambda r: r["excess"], reverse=True):
+        label = names.get(r["study_id"], str(r["study_id"]))
+        lines.append(
+            f"{label:<{width}}  {r['n_cells']:>7d}  {r['purity']:>7.3f}  "
+            f"{r['floor']:>7.3f}  {r['excess']:>6.1%}"
+        )
+    return "\n".join(lines)
 
 
 def describe(latent: np.ndarray, study_id: np.ndarray, k: int = 30) -> str:

@@ -36,11 +36,16 @@ class FinalReporter:
         out_dir:    Run output directory; figures land in `out_dir/figures/best`.
     """
 
-    def __init__(self, reporter, loader, device, out_dir: Path | str) -> None:
+    def __init__(
+        self, reporter, loader, device, out_dir: Path | str,
+        study_names: dict[int, str] | None = None,
+    ) -> None:
         self.reporter = reporter
         self.loader = loader
         self.device = device
-        self.fig_dir = Path(out_dir) / "figures" / "best"
+        self.out_dir = Path(out_dir)
+        self.fig_dir = self.out_dir / "figures" / "best"
+        self.study_names = study_names or {}
 
     def render(self, model, manager) -> None:
         """Load the best checkpoint, collect val latents, write the figures.
@@ -66,7 +71,9 @@ class FinalReporter:
         import torch
 
         from endo_model.evaluation.latent_collection import collect_latents
-        from endo_model.evaluation.study_mixing import describe
+        from endo_model.evaluation.study_mixing import (
+            describe, format_per_study, per_study_purity,
+        )
         from endo_model.training.checkpointing import CheckpointManager
 
         if checkpoint_path is None:
@@ -89,6 +96,7 @@ class FinalReporter:
             return
 
         logger.info("Best epoch, %s", describe(latents["mu_gauss"], latents["study_id"]))
+        self._report_per_study(latents)
 
         self.fig_dir.mkdir(parents=True, exist_ok=True)
         original, self.reporter.fig_dir = self.reporter.fig_dir, self.fig_dir
@@ -101,3 +109,50 @@ class FinalReporter:
         finally:
             self.reporter.fig_dir = original
         logger.info("Final figures written to %s", self.fig_dir)
+
+    def _report_per_study(self, latents: dict) -> None:
+        """Log the per-study breakdown and write it beside the run's metrics.
+
+        Done here rather than in scripts/report_purity.py because the
+        validation set is already built and already embedded at this point.
+        Measuring it separately costs a second GPU job and twenty minutes of
+        rebuilding the split to arrive at the same numbers.
+
+        Wrapped: a failure to write a diagnostic table must not lose the
+        figures that follow it, nor a finished training run.
+        """
+        from endo_model.evaluation.study_mixing import (
+            format_per_study, per_study_purity,
+        )
+
+        try:
+            rows = per_study_purity(latents["mu_gauss"], latents["study_id"])
+            if not rows:
+                return
+            logger.info(
+                "Best epoch, kNN purity per study (k=30):\n%s",
+                format_per_study(rows, self.study_names),
+            )
+            self._write_per_study_csv(rows)
+        except Exception as exc:  # noqa: BLE001 — diagnostic must not be fatal
+            logger.warning(
+                "Per-study purity skipped (%s: %s).", type(exc).__name__, exc
+            )
+
+    def _write_per_study_csv(self, rows: list[dict]) -> None:
+        """One row per study, next to metrics.csv so both travel together."""
+        import csv
+
+        path = self.out_dir / "purity_per_study.csv"
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["study_id", "study", "n_cells",
+                               "purity", "floor", "excess"],
+            )
+            writer.writeheader()
+            for r in sorted(rows, key=lambda r: r["excess"], reverse=True):
+                writer.writerow({
+                    **r, "study": self.study_names.get(r["study_id"], ""),
+                })
+        logger.info("Per-study purity written to %s", path)

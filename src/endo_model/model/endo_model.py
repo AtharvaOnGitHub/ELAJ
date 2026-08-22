@@ -76,6 +76,7 @@ class EndoFoundationModel(nn.Module):
             n_layers=config.group_encoder.n_layers,
             dropout=config.group_encoder.dropout,
             n_buckets=config.group_encoder.n_buckets,
+            grad_checkpointing=config.group_encoder.grad_checkpointing,
         )
         self.aggregation_encoder = AggregationEncoder(
             vocabulary.group_names, config.d_token, config.d_agg,
@@ -86,7 +87,8 @@ class EndoFoundationModel(nn.Module):
 
         # ── Latent space ─────────────────────────────────────────────────────
         self.latent_space = BifurcatedLatentSpace(
-            config.d_agg, config.d_gauss, config.n_vMF
+            config.d_agg, config.d_gauss, config.n_vMF,
+            kappa_floor=config.kappa_floor,
         )
 
         # ── Decoder ──────────────────────────────────────────────────────────

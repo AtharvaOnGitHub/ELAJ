@@ -141,6 +141,7 @@ class BucketedGroupEncoder(nn.Module):
         n_layers: int = 2,
         dropout: float = 0.1,
         n_buckets: int = 4,
+        grad_checkpointing: bool = False,
     ) -> None:
         super().__init__()
         self.group_names = list(group_names)
@@ -152,9 +153,11 @@ class BucketedGroupEncoder(nn.Module):
             BatchedGroupEncoder(
                 list(bucket.names), group_sizes, d_token,
                 n_heads=n_heads, n_layers=n_layers, dropout=dropout,
+                grad_checkpointing=grad_checkpointing,
             )
             for bucket in self.buckets
         ])
+        self.grad_checkpointing = grad_checkpointing
         self._log_plan(group_sizes)
 
     def _log_plan(self, group_sizes: dict[str, int]) -> None:
@@ -172,6 +175,13 @@ class BucketedGroupEncoder(nn.Module):
             bucketed / 1e6, unbucketed / 1e6, ideal / 1e6,
             100.0 * (unbucketed - bucketed) / max(unbucketed - ideal, 1),
         )
+        if self.grad_checkpointing:
+            logger.info(
+                "Group encoder: gradient checkpointing ON — attention "
+                "activations are recomputed in the backward pass rather than "
+                "stored. Expect roughly 30%% more time per epoch and enough "
+                "memory headroom for batch 256 with CCE."
+            )
 
     def forward(self, group_tokens: dict[str, Tensor]) -> dict[str, Tensor]:
         """Args: group_tokens {name: (B, G_k, d_token)}.

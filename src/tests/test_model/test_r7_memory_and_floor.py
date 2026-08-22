@@ -86,7 +86,10 @@ def test_kappa_never_falls_below_the_floor():
         branch.kappa_head.bias.fill_(-50.0)
     _, kappa, _ = branch(torch.randn(32, 16))
     assert (kappa >= 0.5).all()
-    assert kappa.max() == pytest.approx(0.5, abs=1e-5)
+    # .item(), not the bare tensor: kappa carries grad here (see the
+    # differentiability test below), and pytest.approx converts via numpy,
+    # which refuses a tensor that requires grad.
+    assert kappa.max().item() == pytest.approx(0.5, abs=1e-5)
 
 
 def test_the_floor_is_a_floor_not_a_clamp_on_large_values():

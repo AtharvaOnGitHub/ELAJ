@@ -89,7 +89,14 @@ def best_checkpoint(run_dir: Path) -> Path:
     if not available:
         raise FileNotFoundError(f"no checkpoints in {run_dir / 'checkpoints'}")
 
-    rows = list(csv.DictReader((run_dir / "metrics.csv").open()))
+    metrics = run_dir / "metrics.csv"
+    if not metrics.exists():
+        # A run killed at the walltime never wrote it — wave R7 lost both arms
+        # this way. The checkpoints carry their own val_nb, so the history file
+        # is a convenience, not the only record.
+        return _best_from_checkpoint_payloads(available)
+
+    rows = list(csv.DictReader(metrics.open()))
     best = min(rows, key=lambda r: float(r["val_nb"]))
     prefix = f"epoch_{int(best['epoch']):04d}_"
 
@@ -104,6 +111,44 @@ def best_checkpoint(run_dir: Path) -> Path:
         best["epoch"], ", ".join(p.name for p in available), available[-1].name,
     )
     return available[-1]
+
+
+def _best_from_checkpoint_payloads(available: list[Path]) -> Path:
+    """Lowest val_nb among the retained checkpoints, read from the files.
+
+    CheckpointManager stores the metric it ranked by -- val_nb, not the
+    composite total -- in each payload's `val_loss`. So the best of the
+    retained set is recoverable with no metrics.csv at all, which is what a
+    run killed at the walltime leaves behind.
+
+    Note this is the best of what was KEPT, not of every epoch that ran. The
+    manager keeps the best three by the same metric, so the two agree unless
+    the retention policy changes.
+    """
+    import torch
+
+    scored = []
+    for path in available:
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+            scored.append((float(payload["val_loss"]), path))
+        except (KeyError, RuntimeError, EOFError) as exc:
+            logger.warning("  unreadable checkpoint %s (%s); ignored",
+                           path.name, type(exc).__name__)
+
+    if not scored:
+        logger.warning(
+            "  no metrics.csv and no readable val_loss in any checkpoint; "
+            "falling back to the last epoch, %s", available[-1].name,
+        )
+        return available[-1]
+
+    val_nb, path = min(scored)
+    logger.info(
+        "  no metrics.csv (run did not finish); best retained checkpoint by "
+        "val_nb %.5f -> %s", val_nb, path.name,
+    )
+    return path
 
 
 def measure(

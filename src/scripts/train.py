@@ -342,6 +342,11 @@ def main() -> None:
         extra_val_metrics=hvg_metric,
         precision=precision,
         baseline_gate=baseline_gate,
+        # Rewrite metrics.csv every epoch, so a walltime kill leaves the
+        # history behind rather than only the checkpoints.
+        on_epoch_metrics=lambda history: _write_metrics_csv(
+            out_dir / "metrics.csv", history
+        ),
     )
     trainer.current_epoch = start_epoch
 

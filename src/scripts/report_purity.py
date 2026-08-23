@@ -165,8 +165,14 @@ def main() -> None:
             )
             continue
         if not (run_dir / "metrics.csv").exists():
-            logger.error("  %s has no metrics.csv — run did not finish; skipped", run_dir)
-            continue
+            # Not fatal any more. best_checkpoint falls back to the val_nb
+            # stored in each checkpoint, which is exactly the case a run killed
+            # at the walltime leaves behind — and that is when this script is
+            # most needed.
+            logger.warning(
+                "  %s has no metrics.csv — the run did not finish; reading the "
+                "best epoch from the checkpoints instead", run_dir,
+            )
 
         vocab = GeneVocabulary(str(Path(root) / data_cfg.vocabulary_path))
         study_configs = [

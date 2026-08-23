@@ -65,6 +65,7 @@ class Trainer:
         extra_val_metrics=None,
         precision: PrecisionPolicy | None = None,
         baseline_gate=None,
+        on_epoch_metrics=None,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -75,6 +76,12 @@ class Trainer:
         self.config = config
         self.cce_enabled = cce_enabled
         self.device = device or torch.device("cpu")
+        # Called with the history dict after every epoch. train.py uses it to
+        # rewrite metrics.csv, so the per-epoch record survives a run that is
+        # killed rather than finishing: wave R7 lost both arms to the walltime
+        # and with them every epoch of history, because the file was only
+        # written after the loop returned.
+        self.on_epoch_metrics = on_epoch_metrics
 
         self.ckpt_manager = (
             CheckpointManager(checkpoint_dir) if checkpoint_dir else None
@@ -193,6 +200,18 @@ class Trainer:
                         extra={"train_metrics": train_metrics,
                                "val_metrics": val_metrics},
                     )
+
+                if self.on_epoch_metrics is not None:
+                    # After the checkpoint, before the figures: the figures are
+                    # the slowest part of an epoch and the likeliest place for
+                    # a walltime kill to land.
+                    try:
+                        self.on_epoch_metrics(history)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "Could not persist metrics this epoch (%s: %s)",
+                            type(exc).__name__, exc,
+                        )
 
                 if self.reporter is not None:
                     latents = (

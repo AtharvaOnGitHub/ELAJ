@@ -5,6 +5,8 @@ checkpointing by not reproducing the un-checkpointed computation, the floor by
 not actually binding — so both are pinned here rather than trusted.
 """
 
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -117,3 +119,94 @@ def test_kappa_stays_differentiable_through_the_floor():
     kappa.sum().backward()
     assert branch.kappa_head.weight.grad is not None
     assert branch.kappa_head.weight.grad.abs().sum() > 0
+
+
+# ── the R8 circular parameterisation ─────────────────────────────────────────
+
+class TestCircularParameterisation:
+    """Predicting the mean DIRECTION rather than the mean ANGLE.
+
+    Up to R7 the head emitted one unbounded number per dimension and cos/sin
+    turned it into a point. cos and sin repeat every 2*pi, so the head could
+    drift to any magnitude and alias — and nothing opposed the drift, because
+    the circular KL is a function of kappa alone and the angle is absent from
+    it. Predicting two numbers and dividing by their length discards the
+    magnitude instead of wrapping it.
+    """
+
+    D_AGG, N_VMF, B = 16, 4, 32
+
+    def branch(self, parameterisation: str):
+        torch.manual_seed(24)
+        return VonMisesBranch(
+            d_agg=self.D_AGG, n_vMF=self.N_VMF, kappa_floor=1.0,
+            parameterisation=parameterisation,
+        )
+
+    def test_head_width_doubles_for_direction(self):
+        assert self.branch("angle").mu_head.out_features == self.N_VMF
+        assert self.branch("direction").mu_head.out_features == 2 * self.N_VMF
+
+    def test_latent_shapes_are_unchanged_either_way(self):
+        """The latent is still two numbers per circular dimension, so nothing
+        downstream — DAB, CCE, the decoder — sees a different shape."""
+        for p in ("angle", "direction"):
+            mu_angle, kappa, z = self.branch(p)(torch.randn(self.B, self.D_AGG))
+            assert mu_angle.shape == (self.B, self.N_VMF)
+            assert kappa.shape == (self.B, self.N_VMF)
+            assert z.shape == (self.B, 2 * self.N_VMF)
+
+    def test_direction_angles_are_bounded_to_one_turn(self):
+        """atan2 returns [-pi, pi], so wrapping is impossible by construction.
+        This is the property the whole wave is for."""
+        branch = self.branch("direction")
+        # A hostile input: huge activations, which is exactly what drift
+        # produces and what breaks the angle head.
+        mu_angle, _, _ = branch(torch.randn(self.B, self.D_AGG) * 1000.0)
+        assert mu_angle.abs().max().item() <= math.pi + 1e-5
+
+    def test_angle_parameterisation_does_wrap_on_the_same_input(self):
+        """The failure being fixed, demonstrated rather than asserted."""
+        branch = self.branch("angle")
+        with torch.no_grad():
+            branch.mu_head.weight.mul_(10.0)
+        mu_angle, _, _ = branch(torch.randn(self.B, self.D_AGG) * 100.0)
+        assert mu_angle.abs().max().item() > 2 * math.pi, (
+            "the angle head should run past one turn on a large input — if it "
+            "cannot, this test no longer demonstrates the problem"
+        )
+
+    def test_scaling_the_head_output_does_not_move_the_direction(self):
+        """The property that makes drift harmless: only the ratio matters, so
+        a head whose outputs grow by 100x predicts the same points."""
+        branch = self.branch("direction")
+        x = torch.randn(self.B, self.D_AGG)
+        small, _, _ = branch(x)
+        with torch.no_grad():                 # scale the whole affine map
+            branch.mu_head.weight.mul_(100.0)
+            branch.mu_head.bias.mul_(100.0)
+        large, _, _ = branch(x)
+        assert torch.allclose(small, large, atol=1e-4)
+
+    def test_direction_head_is_differentiable_including_near_the_origin(self):
+        """clamp_min guards the (0,0) pair, where atan2's gradient is otherwise
+        undefined — a NaN this project has met before in the sampler."""
+        branch = self.branch("direction")
+        with torch.no_grad():
+            branch.mu_head.weight.zero_()
+            branch.mu_head.bias.zero_()       # every pair exactly (0, 0)
+        mu_angle, _, _ = branch(torch.randn(self.B, self.D_AGG))
+        assert torch.isfinite(mu_angle).all()
+        mu_angle.sum().backward()
+        assert torch.isfinite(branch.mu_head.weight.grad).all()
+
+    def test_unknown_parameterisation_is_rejected_at_construction(self):
+        """A typo in a config must fail loudly, not silently train the old
+        model under a new name."""
+        with pytest.raises(ValueError, match="angle.*direction|direction.*angle"):
+            VonMisesBranch(d_agg=self.D_AGG, n_vMF=self.N_VMF,
+                           parameterisation="directional")
+
+    def test_default_is_the_pre_r8_head(self):
+        assert VonMisesBranch(d_agg=self.D_AGG, n_vMF=self.N_VMF).parameterisation \
+            == "angle"

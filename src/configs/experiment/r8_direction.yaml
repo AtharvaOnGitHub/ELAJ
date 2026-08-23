@@ -1,0 +1,94 @@
+name: r8_direction
+description: >
+  The circular mean predicted as a direction rather than an angle, at the wave
+  R7 operating point.
+
+  Wave R8. Make the circular branch usable, having made it survivable in R7.
+
+  WHAT R7 SETTLED AND WHAT IT DID NOT. The kappa floor stopped the collapse:
+  0 of 4 dimensions collapsed in both arms, against 3 of 4 in every earlier CCE
+  run. But it did not produce usage. Median kappa came out at 0.51-0.57 against
+  a floor of 0.50, with the mass piled against the wall, and val_kl_vmf was
+  6.7e-5 -- below r5_cce's 7.6e-5 and fourteen times below r5_lambda_low's
+  9.6e-4. The floor removed the absorbing state without giving the branch a
+  job. Note also that "0 of 4 collapsed" is now unreachable by construction:
+  the collapse threshold is kappa 0.2 and the floor is 0.5, so that readout
+  says nothing until it is made relative to the floor.
+
+  THE CHANGE. Up to R7 the mean was one unbounded number per dimension, turned
+  into a point by (cos, sin). Two problems follow. cos and sin repeat every
+  2*pi, so theta and theta + 2*pi are the same point and the head has
+  infinitely many outputs meaning one thing. And nothing keeps that number
+  small: the Gaussian KL contains mu^2 and pulls its mean back, while the
+  circular KL is a function of kappa alone -- the angle appears nowhere in it,
+  so no force acts on it at all. Once it drifts, d(cos theta)/d theta =
+  -sin(theta) flips sign every pi, and two similar cells at 40.1 and 41.7
+  radians get gradients pointing opposite ways while belonging in the same
+  place.
+
+  Predicting the direction instead -- two numbers per dimension, divided by
+  their own length -- discards the magnitude rather than wrapping it. (2, 1)
+  and (200, 100) are the same point, so drift is inert. This is what the
+  reference hyperspherical-VAE implementation does; predicting a raw angle and
+  taking cos/sin was the unusual choice.
+
+  kappa_floor goes to 1.0, which is not a guess either: the same reference
+  implementation has used softplus(x) + 1 since 2018. R7's 0.5 was reasoned
+  from the gradient arithmetic and landed below the standard.
+
+  RUN THE DIAGNOSTIC FIRST. report_purity now prints the range of the circular
+  mean. If R7's angles already sit inside [-pi, pi] then nothing was wrapping,
+  the reasoning above is aimed at a problem that does not exist, and this arm
+  should not be spent.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r8_direction/
+seed: 24
+
+overrides:
+  # Back to the wave-R5 cap. At batch 256 with checkpointing the epoch should
+  # land near 2900 s -- 2263 s for a non-CCE batch-256 epoch, plus CCE's second
+  # pass, plus ~30% for recomputation -- so 25 epochs is about 20 h, inside
+  # train.sh's 24 h. If epochs run slower than that, cut this to 20.
+  training.max_epochs: 20
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # Both lambdas non-zero, as required. DAB pressure is lambda * w_dab = 0.01.
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+
+  # The wave R6 embedding layout change is OFF. It was built on an explanation
+  # the mu_gauss_norm diagnostic refuted -- the Gaussian block never grew, so it
+  # was never crowding the circular block out -- and the arm that tested it
+  # collapsed 4 of 4 circular dimensions instead of 3.
+  model.cce.block_normalise: false
+
+  # ---- the tiny latent ----
+  model.d_gauss: 8
+  model.n_vMF: 4
+  model.d_platform: 16
+
+  # The two lines that make batch 256 reachable and the circular branch
+  # survivable. See the description.
+  model.group_encoder.grad_checkpointing: true
+  # 1.0, matching the reference implementation's softplus(x) + 1.
+  model.kappa_floor: 1.0
+
+  # The change this arm exists for. See the description.
+  model.circular_parameterisation: direction

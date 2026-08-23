@@ -27,11 +27,15 @@ class BifurcatedLatentSpace(nn.Module):
     """
 
     def __init__(
-        self, d_agg: int, d_gauss: int, n_vMF: int, kappa_floor: float = 1e-4
+        self, d_agg: int, d_gauss: int, n_vMF: int, kappa_floor: float = 1e-4,
+        circular_parameterisation: str = "angle",
     ) -> None:
         super().__init__()
         self.gaussian = GaussianBranch(d_agg, d_gauss)
-        self.vonmises = VonMisesBranch(d_agg, n_vMF, kappa_floor=kappa_floor)
+        self.vonmises = VonMisesBranch(
+            d_agg, n_vMF, kappa_floor=kappa_floor,
+            parameterisation=circular_parameterisation,
+        )
 
         d_z = d_gauss + 2 * n_vMF
         self.z_proj = nn.Linear(d_z, d_agg, bias=False)

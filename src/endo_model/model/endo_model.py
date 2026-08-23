@@ -89,6 +89,7 @@ class EndoFoundationModel(nn.Module):
         self.latent_space = BifurcatedLatentSpace(
             config.d_agg, config.d_gauss, config.n_vMF,
             kappa_floor=config.kappa_floor,
+            circular_parameterisation=config.circular_parameterisation,
         )
 
         # ── Decoder ──────────────────────────────────────────────────────────

@@ -58,12 +58,70 @@ class VonMisesBranch(nn.Module):
     Default 1e-4 preserves every pre-R7 run; the R7 configs set 0.5.
     """
 
-    def __init__(self, d_agg: int, n_vMF: int, kappa_floor: float = 1e-4) -> None:
+    def __init__(
+        self,
+        d_agg: int,
+        n_vMF: int,
+        kappa_floor: float = 1e-4,
+        parameterisation: str = "angle",
+    ) -> None:
         super().__init__()
+        if parameterisation not in ("angle", "direction"):
+            raise ValueError(
+                f"parameterisation must be 'angle' or 'direction', "
+                f"got {parameterisation!r}"
+            )
         self.n_vMF = n_vMF
         self.kappa_floor = kappa_floor
-        self.mu_head = nn.Linear(d_agg, n_vMF)         # raw angle predictions
+        self.parameterisation = parameterisation
+        # "angle" predicts one number per circular dimension; "direction"
+        # predicts two and reads the angle off them. See _mean_angle.
+        self.mu_head = nn.Linear(
+            d_agg, n_vMF if parameterisation == "angle" else 2 * n_vMF
+        )
         self.kappa_head = nn.Linear(d_agg, n_vMF)      # concentration
+
+    def _mean_angle(self, cell_cls: Tensor) -> Tensor:
+        """The posterior mean angle, in radians.
+
+        WHY THERE ARE TWO WAYS TO DO THIS.
+
+        "angle" is what every run up to R7 did: one unbounded number per
+        dimension, turned into a point by (cos, sin). cos and sin repeat every
+        2*pi, so theta and theta + 2*pi are the same point and the head has
+        infinitely many outputs meaning the same thing. Nothing keeps the
+        number small either -- the Gaussian branch's KL contains mu^2 and pulls
+        its mean back toward zero, but the circular KL is a function of kappa
+        alone and the angle appears nowhere in it. So the head is free to drift,
+        and once it does, d(cos theta)/d theta = -sin(theta) flips sign every
+        pi: two similar cells landing at 40.1 and 41.7 radians get gradients
+        pointing opposite ways even though both belong at the same place.
+
+        "direction" predicts the point instead of the angle: two numbers per
+        dimension, scaled to unit length. Dividing by the length throws the
+        magnitude away, so (2, 1) and (200, 100) are the same point and drift
+        in the head's output is inert rather than destructive. The angle is
+        then read off with atan2, which returns [-pi, pi] by definition -- so
+        what this function hands back is bounded, and every consumer
+        downstream keeps working unchanged.
+
+        This is what the reference hyperspherical-VAE implementation does
+        (fc_mean followed by division by its own norm); predicting a raw angle
+        and taking cos/sin is the unusual choice, and it is the one that
+        carries the wrapping problem.
+        """
+        raw = self.mu_head(cell_cls)
+        if self.parameterisation == "angle":
+            return raw
+
+        pairs = raw.view(*raw.shape[:-1], self.n_vMF, 2)
+        # Normalise before atan2, not after. On unit-length inputs the atan2
+        # gradient has magnitude 1; on raw ones it goes as 1/||v|| and blows up
+        # as the pair approaches the origin. clamp_min is the guard for the
+        # exactly-zero case, which is otherwise a NaN this project has met
+        # before in the sampler.
+        pairs = pairs / pairs.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+        return torch.atan2(pairs[..., 1], pairs[..., 0])
 
     def forward(self, cell_cls: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Compute directional parameters and sample (cos θ, sin θ) pairs.
@@ -78,7 +136,7 @@ class VonMisesBranch(nn.Module):
                 z_vmf:    (B, 2*n_vMF) — sampled angles as (cos, sin) pairs.
                           Layout: [cos_0, cos_1, ..., cos_{n-1}, sin_0, ..., sin_{n-1}].
         """
-        mu_angle = self.mu_head(cell_cls)              # (B, n_vMF)
+        mu_angle = self._mean_angle(cell_cls)          # (B, n_vMF)
         kappa = torch.nn.functional.softplus(
             self.kappa_head(cell_cls)
         ) + self.kappa_floor                           # (B, n_vMF) > 0

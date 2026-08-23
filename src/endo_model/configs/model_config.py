@@ -154,6 +154,12 @@ class ModelConfig:
     # dimension that drifts down cannot climb back. See VonMisesBranch.
     # 1e-4 is the pre-R7 value and sits inside that flat region.
     kappa_floor: float = 1e-4
+    # How the circular posterior's mean is produced. "angle" predicts one
+    # unbounded number per dimension and takes (cos, sin) of it -- what every
+    # run up to R7 did, and what wraps. "direction" predicts two numbers and
+    # normalises them, so the head's magnitude is discarded instead of
+    # aliasing. See VonMisesBranch._mean_angle. Default preserves pre-R8 runs.
+    circular_parameterisation: str = "angle"
     # Tissue hierarchy embedding concatenated onto z_proj at the decoder, so
     # the latent is not obliged to encode anatomy.  Small on purpose: it
     # carries four categorical levels, and widening it would let the decoder
@@ -208,6 +214,9 @@ class ModelConfig:
             d_dec=d.get("d_dec", 64),
             d_platform=int(d.get("d_platform", 0)),
             kappa_floor=float(d.get("kappa_floor", 1e-4)),
+            circular_parameterisation=str(
+                d.get("circular_parameterisation", "angle")
+            ),
             d_tissue=int(d.get("d_tissue", 16)),
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),

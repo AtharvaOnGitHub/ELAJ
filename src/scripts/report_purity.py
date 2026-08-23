@@ -239,6 +239,7 @@ def main() -> None:
             latents, run_dir, {s["id"]: s["name"] for s in study_configs},
             k=args.k, n_components=args.dims or None,
         )
+        _report_angle_range(latents, model_cfg)
 
         del model
         if device.type == "cuda":
@@ -252,6 +253,41 @@ def main() -> None:
     write_csv(results, out)
     logger.info("\n%s", format_table(results))
     logger.info("Written to %s and to each run's purity.csv", out)
+
+
+def _report_angle_range(latents, model_cfg) -> None:
+    """Does the circular mean wrap? The question wave R8 turns on.
+
+    Under the "angle" parameterisation the head is one unbounded number per
+    dimension, fed to cos/sin, which repeat every 2*pi. If those numbers stay
+    inside [-pi, pi] there is no wrapping, the head is behaving, and swapping
+    the parameterisation would be aimed at a problem that does not exist. If
+    they run well past it, cells are aliasing onto shared angles and gradients
+    from similar cells are cancelling.
+
+    Costs nothing: mu_angle is already collected for the circular figures.
+    """
+    import math
+
+    import numpy as np
+
+    angle = latents.get("mu_angle")
+    if angle is None or angle.size == 0:
+        return
+
+    absmax = float(np.abs(angle).max())
+    outside = float((np.abs(angle) > math.pi).mean())
+    verdict = (
+        "wrapping — cells alias onto shared angles"
+        if outside > 0.01 else
+        "no wrapping — the head stays inside one turn"
+    )
+    logger.info(
+        "  circular mean (%s): |angle| max %.2f rad = %.2f turns, "
+        "%.1f%% of values outside [-pi, pi] -> %s",
+        getattr(model_cfg, "circular_parameterisation", "angle"),
+        absmax, absmax / (2 * math.pi), 100 * outside, verdict,
+    )
 
 
 def _report_per_study(latents, run_dir, study_names, k, n_components):

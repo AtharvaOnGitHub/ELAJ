@@ -24,6 +24,10 @@ from endo_model.model.latent.power_spherical import PowerSpherical
 # Circular latents live on S¹, embedded in a 2-D ambient space.
 _CIRCLE_DIM = 2
 
+# Guards the origin in the "direction" parameterisation, where the mean
+# direction is genuinely undefined. See VonMisesBranch._mean_angle.
+_EPS = 1e-6
+
 
 class VonMisesBranch(nn.Module):
     """Directional variational branch over n_vMF independent circular dimensions.
@@ -115,13 +119,27 @@ class VonMisesBranch(nn.Module):
             return raw
 
         pairs = raw.view(*raw.shape[:-1], self.n_vMF, 2)
-        # Normalise before atan2, not after. On unit-length inputs the atan2
-        # gradient has magnitude 1; on raw ones it goes as 1/||v|| and blows up
-        # as the pair approaches the origin. clamp_min is the guard for the
-        # exactly-zero case, which is otherwise a NaN this project has met
-        # before in the sampler.
-        pairs = pairs / pairs.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-        return torch.atan2(pairs[..., 1], pairs[..., 0])
+        x, y = pairs[..., 0], pairs[..., 1]
+
+        # Normalise before atan2, not after: on unit-length inputs the atan2
+        # gradient has magnitude 1, on raw ones it goes as 1/||v||^2 and blows
+        # up near the origin.
+        #
+        # THE ORIGIN HAS TO BE HANDLED TWICE, and the obvious guard handles
+        # neither. `v.norm().clamp_min(eps)` still produces NaN, because the
+        # norm's own backward is v/||v|| = 0/0 there and clamp_min only zeroes
+        # the gradient arriving at it -- 0 * NaN is NaN. And atan2(0, 0) has
+        # gradient -y/(x^2+y^2) = 0/0 as well. A test with the head's weights
+        # zeroed caught both.
+        #
+        # eps inside the square root fixes the first: d/dv sqrt(|v|^2 + eps^2)
+        # is v/sqrt(...), which is 0 at the origin rather than undefined.
+        denom = torch.sqrt(x * x + y * y + _EPS * _EPS)
+        # Shifting one component fixes the second: a pair that normalised to
+        # (0, 0) becomes (eps, 0), which atan2 differentiates happily. On any
+        # pair that is not degenerate the shift moves the angle by about eps
+        # radians, which is below float32's resolution on a unit circle.
+        return torch.atan2(y / denom, x / denom + _EPS)
 
     def forward(self, cell_cls: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Compute directional parameters and sample (cos θ, sin θ) pairs.

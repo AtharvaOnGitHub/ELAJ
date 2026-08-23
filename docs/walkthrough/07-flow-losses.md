@@ -300,9 +300,13 @@ so the line is `ln(9) = 2.197`. `train.py` computes it and passes it to
 Only active when `model_output2` is not `None`.
 
 ```python
-emb1 = cat([out1["mu_gauss"], angles_to_cartesian(out1["mu_angle"])], -1)
-emb2 = cat([out2["mu_gauss"], angles_to_cartesian(out2["mu_angle"])], -1)
+emb1 = cce_embedding(out1["mu_gauss"], out1["mu_angle"], block_normalise, w)
+emb2 = cce_embedding(out2["mu_gauss"], out2["mu_angle"], block_normalise, w)
 ```
+
+The layout lives in [`cce_embedding.py`](../../src/endo_model/model/objectives/cce_embedding.py)
+rather than inline, because it turned out to be a research question rather than
+plumbing — see the warning at the end of this section.
 
 Same `(cos θ, sin θ)` embedding as DAB, and for the same reason with more force:
 InfoNCE scores pairs by **cosine similarity**, which is purely a statement about
@@ -318,14 +322,53 @@ The two views come from the same batch under different dropout masks — the
 only stochasticity, since `TokenConstructor` and the encoders are otherwise
 deterministic given the batch.
 
-**Currently `enabled: false`.** With it off, `self.cce is None` and
+**Default `enabled: false`.** With it off, `self.cce is None` and
 `cce_loss = tensor(0.0)` — and `Trainer` skips the second forward entirely, so
 there is no wasted compute.
 
-> A concern worth being explicit about: `Trainer._val_epoch` never passes
-> `model_output2`, so `cce` is always 0 in validation even when enabled. The
-> train and val `total` are then not the same objective. Not a bug today (CCE is
-> off) but it is a comparability trap the moment it is switched on.
+> ⚠ `Trainer._val_epoch` never passes `model_output2`, so `cce` is always 0 in
+> validation even when enabled. The train and val `total` are then not the same
+> objective. **This is now live**, since waves R5–R8 run CCE. It does not affect
+> early stopping or checkpointing, both of which rank on `val_nb`, but
+> `val_loss` is not comparable to `train_loss` in any CCE arm.
+
+### What CCE actually did — waves R5 to R7
+
+**It is the only thing that has moved study mixing.** At a common 4 dimensions
+`r5_cce` reached 0.273 corpus purity against the no-CCE reference's 0.511, and
+— the test that matters — **0.384 within endometrium alone** against 0.670,
+so the mixing survives holding tissue constant and is not tissue structure
+collapsing.
+
+**It costs reconstruction, and the cost is non-linear in `lambda_cce`:**
+
+| λ_cce | reconstruction | note |
+|---|---|---|
+| 0.1 | +4.9% | |
+| 0.05 | +5.6% | the step that misled — looked like a 0.5pp effect |
+| 0.025 | **+6.6%** | still improving when the run hit the walltime |
+| — (off) | +8.3% | |
+
+**It is numerically hot at λ_cce 0.1.** 230 of 1596 steps had pre-clip
+gradient norms above 100, peaking at 2.3e+04, against **zero** such steps in
+every non-CCE arm. Halving λ_cce removed them entirely. Clipping contained it,
+so nothing diverged, but it is why `r5_cce` peaked at epoch 5 and declined for
+seven epochs after.
+
+**Memory.** CCE holds two encoder graphs, and the group encoders' attention is
+`B × heads × Σ G_k²` — about 13 GB per layer in bf16 at batch 256, doubled by
+the second layer and again by the second graph. That is 52 GB before anything
+else, which is why every CCE arm before R7 ran at batch 128. Gradient
+checkpointing (`group_encoder.grad_checkpointing`) is what made batch 256
+reachable; see [08](08-flow-training.md).
+
+> ⚠ **`cce.block_normalise` is a dead end, kept only so the config that used it
+> still reproduces.** It scales each half of the embedding to unit norm before
+> concatenation, to stop `mu_gauss` growing and crowding the fixed-norm circular
+> block out of the cosine similarity. The mechanism was measured and **did not
+> happen** — `mu_gauss_norm` went 2.26 → 1.99, flat, and the circular share was
+> already 0.67 against the fix's 0.71. The arm testing it collapsed 4 of 4
+> circular dimensions rather than 3. See [11](11-findings.md) §E2.
 
 ---
 
@@ -388,8 +431,16 @@ Also note the config default for `cce.temperature` is 0.07 while
 ## 7. Return value — [`composite.py:213`](../../src/endo_model/model/objectives/composite.py:213)
 
 ```python
-{"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce", "total"}
+{"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce",
+ "mu_gauss_norm", "total"}
 ```
+
+`mu_gauss_norm` is **reported, not optimised** — it is detached. It rides in
+this dict because `Trainer._record` copies every key here into `metrics.csv`,
+which is the only route a per-epoch diagnostic has. It was added to test the
+CCE embedding hypothesis (§5) and refuted it. Keep it: the mean's magnitude is
+otherwise invisible, and it is the quantity that distinguishes "the encoder is
+using scale" from "the encoder is using direction".
 
 All tensors. `Trainer` calls `.item()` on each for logging, and `.backward()` on
 `total` only. `beta_kl` is a plain `torch.tensor(beta_kl)` with no device or

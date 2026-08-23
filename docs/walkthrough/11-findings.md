@@ -86,6 +86,67 @@ afterwards. Run 7's clip fix is untested.
 - **The seed noise floor is ~4%** (§A9). Nothing smaller than that is a result.
 - The circular branch dies under a *correct* penalty: κ ≈ 0.025
 
+### Waves R2–R8: the batch-correction campaign
+
+Eight waves aimed at one number: **kNN study purity**, the share of a cell's 30
+nearest neighbours drawn from its own study. Perfect mixing is the floor
+(0.125 on the eight live validation studies); 1.0 is every study in its own
+island.
+
+⚠ **Purity is dimension-sensitive**, so the column has to say which width it
+was measured at. `describe()` in-training uses `mu_gauss` at its native width
+with no projection; `report_purity` projects to a common width. Numbers below
+are labelled. Waves are only comparable within a column.
+
+| Wave | Best arm | Reconstruction | Purity (native) | Purity (@4 dims) |
+|---|---|---|---|---|
+| R3 | `r3_nodab` | — | — | 0.756 excess |
+| R4 | `r4_tiny_latent` | +7.79% | 0.825 (80.0% excess) | — |
+| R5 | `r5_lambda_low` | **+8.8%** | 0.703 | 0.468 |
+| R5 | `r5_cce` | +5.1% | 0.462 | **0.273** |
+| R6 | `r6_cce_05` | +5.6% | 0.445 | — |
+| R7 | `r7_cce_low` | +6.6% | — | 0.300 |
+
+**What each wave settled:**
+
+- **R2** — λ_dab 0.1 emptied the latent. Cancelled mid-flight.
+- **R3** — bigger is worse. `r3_capacity`, the largest model with the strongest
+  adversary, scored 0.982 excess; `r3_nodab` 0.756.
+- **R4** — the tiny latent (8 Gaussian + 4 circular) won on **both** axes.
+  Halving the group encoders cost 1.58pp of reconstruction and 45% of the wall
+  time; doubling the cell-level encoder bought back 0.09pp. `r4_eutopic` is the
+  confound-free proof that the separation is technical: all cells uterine
+  endometrium, and still 83.6% excess.
+- **R5** — **platform covariates work.** 0.825 → 0.748 purity *and* +7.79% →
+  +8.3% reconstruction, the first change in the project to improve both. Lower
+  λ_dab improved both again. And CCE transformed mixing.
+- **R6** — CCE's reconstruction cost is not the contrastive weight in the range
+  tested: halving λ_cce moved +5.1% → +5.6%. Gradient spikes (230 steps above
+  |g| 100, peaking at 2.3e+04) vanished when λ_cce halved.
+- **R7** — batch 256 did **not** recover reconstruction (+4.9% at λ_cce 0.1
+  against +5.1% at batch 128), refuting the batch-size explanation. λ_cce 0.025
+  gave +6.6% and was still improving when the run hit the 24 h wall.
+
+**Established across the campaign:**
+
+1. **CCE is the only thing that has moved study mixing**, and the mixing is
+   real rather than a collapse of everything: at a common 4 dimensions
+   `r5_cce` scored 0.384 *within endometrium alone*, against the reference's
+   0.670. Tissue held constant, so it is not tissue structure disappearing.
+2. **DAB has never helped.** Every increase in λ_dab has been worse on both
+   axes; the best arms run λ_dab 0.005–0.02.
+3. **One study does not mix, and it is a data problem.** Per-study purity on
+   `r7_cce_low`: `marecko_2024` at 74.3% excess, the other seven between 4%
+   and 18%. `marecko_2024` is the study whose 35 scRNA-seq and 68 snRNA-seq
+   samples share one `mixed` material code because the split was never made.
+4. **CCE collapses the circular branch**, at every λ tried and under both
+   embedding layouts. See §E1.
+
+⚠ **Read the per-study table as a whole.** Each study's floor assumes every
+other study is reachable, so one isolated study inflates all the others. Three
+equal studies with one isolated and two perfectly intermixed score 100%, 28%
+and 22% — not 100%, 0%, 0%.
+
 ---
 
 ## A. Affects the run currently queued
@@ -634,6 +695,114 @@ drawn rather than broken. Now restricted to studies that contributed cells.
 The shared lesson: **an empty or degenerate input to a plotting path produces a
 figure, not an error.** Both of these were caught by reading numbers off an axis
 that should have been impossible, not by any test.
+
+---
+
+## E. The circular branch, and two mechanisms that were wrong
+
+### E1 — CCE collapses the circular branch, at every weight and layout tried
+
+Circular dimensions reported as collapsed, at the best epoch of each arm:
+
+| arm | d_gauss | λ_dab | CCE | collapsed |
+|---|---|---|---|---|
+| `r5_lambda_low` | 8 | 0.005 | off | **0 / 4** |
+| `r5_latent_4_2` | 4 | 0.02 | off | **0 / 2** |
+| `r5_tiny_platform` | 8 | 0.02 | off | 1 / 4 |
+| `r5_cce` | 8 | 0.02 | λ 0.1 | 3 / 4 |
+| `r6_cce_05` | 8 | 0.02 | λ 0.05 | 3 / 4 |
+| `r6_cce_blocks` | 8 | 0.02 | λ 0.1 + block norm | **4 / 4** |
+
+Two things keep the branch alive without any special machinery: **low λ_dab**
+and **a small Gaussian branch**. Neither has been combined with CCE.
+
+### E2 — ❌ WRONG — the CCE embedding layout was not crowding the circular block out
+
+The claim: CCE L2-normalises `concat[mu_gauss, (cos,sin)…]`, the circular
+block's norm is pinned at `sqrt(n_vMF)` = 2.0 while `mu_gauss` is unbounded, so
+the encoder shrinks the circular block's share to nothing by growing
+`||mu_gauss||`.
+
+The arithmetic is right and **the mechanism did not happen**. `mu_gauss_norm`
+was added to the loss dict to test it, and predicted to climb under the old
+layout. It went **2.26 → 1.99 — flat**. At `||mu_gauss||` ≈ 2.2 against the
+circular block's 2.0, the circular share was **0.67**; the fix moved it to
+0.71. Four percentage points, described as the cause.
+
+`cce.block_normalise` implements the fix and is **default off**. The arm that
+tested it at full CCE strength collapsed 4 of 4 circular dimensions rather
+than 3. Do not carry the explanation forward.
+
+Two general lessons, both earned twice:
+
+- A quantity whose *arithmetic* is correct is not thereby the *cause*. Both
+  this and the batch-size attribution (§E3) were plausible mechanisms with
+  supporting algebra and no measurement.
+- Compare at **matched epochs**. The first read of R6 used end-of-run
+  `val_kl_vmf` from runs that stopped at different epochs and concluded the fix
+  had worked. At matched best epochs the three CCE arms agree to within 15%.
+
+### E3 — ❌ WRONG — batch size did not explain CCE's reconstruction cost
+
+Every CCE arm ran at batch 128 (memory), every non-CCE arm at batch 256, and
+CCE arms peaked at epoch 4–5 against 18–21. The gap (+5.1% vs +8.3%) was
+attributed to batch size.
+
+R7 ran CCE at batch 256 and got **+4.9%** at the same λ_cce — no improvement.
+The cost is the contrastive weight after all, and non-linear in it: λ 0.1 →
++4.9%, λ 0.05 → +5.6%, λ 0.025 → **+6.6%**. The 0.05 step alone looked like a
+0.5pp effect and led to the wrong conclusion.
+
+### E4 — The concentration floor stops collapse without producing usage
+
+`kappa = softplus(...) + kappa_floor`. The floor was `1e-4`, inside the flat
+region where `KL ≈ κ²/4` and so `dKL/dκ ≈ κ/2` vanishes — an absorbing state,
+with the collapsed dimensions measuring κ = 1.1e-3 to 2.2e-3, sitting on it.
+
+R7 raised it to 0.5. **0 of 4 collapsed in both arms**, against 3 of 4 in every
+earlier CCE run. But median κ came out at 0.51–0.57 against a floor of 0.50,
+with the mass piled against the wall, and `val_kl_vmf` at 6.7e-5 was *below*
+`r5_cce`'s 7.6e-5 and 14× below `r5_lambda_low`'s 9.6e-4.
+
+⚠ **"N/4 collapsed" is now uninformative.** The collapse threshold is κ ≈ 0.2
+and the floor is above it, so the readout reports 0 of N by construction in
+every arm with a raised floor. Read `val_kl_vmf` and the per-dimension κ panel.
+The threshold should be made relative to the configured floor.
+
+The reference hyperspherical-VAE implementation has used `softplus(x) + 1`
+since 2018 — R7's 0.5 was reasoned from the gradient arithmetic and landed
+*below* the standard. R8 uses 1.0.
+
+### E5 — The circular mean was parameterised as an angle, and it wraps
+
+`mu_head` was `Linear(d_agg, n_vMF)` — one unbounded number per dimension, fed
+to `cos`/`sin`. Two consequences:
+
+- cos and sin repeat every 2π, so θ and θ+2π are the same point and the head
+  has infinitely many outputs meaning one thing.
+- Nothing keeps the number small. The Gaussian KL contains `½μ²` and pulls its
+  mean back; the circular KL is a function of κ **alone** and the angle appears
+  nowhere in it. Once the head drifts, `d(cos θ)/dθ = −sin θ` flips sign every
+  π, so similar cells get gradients pointing opposite ways.
+
+**Measured, on `r7_cce_low`:** 22% of values outside [−π, π], maximum 1.33
+turns. So wrapping is real but mild — not the runaway drift the mechanism
+permits, and unlikely on its own to be why the branch goes unused. The
+competing explanation is plain redundancy: eight unbounded Gaussian dimensions
+carry everything, so the circular half is dropped (§E1 supports this).
+
+`model.circular_parameterisation: direction` predicts two numbers per dimension
+and divides by their length, discarding the magnitude rather than wrapping it,
+then reads the angle with `atan2` — bounded to [−π, π], so every downstream
+consumer is unchanged. This is what the reference implementation does; the raw
+angle was the unusual choice. Default stays `"angle"`.
+
+⚠ **The origin needs guarding twice, and the obvious guard does neither.**
+`v.norm().clamp_min(eps)` still yields NaN: the norm's own backward is
+`v/||v||` = 0/0 there, and `clamp_min` only zeroes the *incoming* gradient —
+`0 × NaN` is NaN. And `atan2(0,0)` has gradient `−y/(x²+y²)` = 0/0. The fix is
+`sqrt(x² + y² + ε²)` for the first and an ε shift on one component for the
+second. A test with the head's weights zeroed caught both.
 
 ---
 

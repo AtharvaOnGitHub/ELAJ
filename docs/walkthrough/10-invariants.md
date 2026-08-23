@@ -316,3 +316,37 @@ decoder output, and `D` inflated for no benefit.
 | I18 | unit-norm samples | cos/sin off the circle |
 | I19 | `expand_to` semantics | one 3,869-gene group |
 | I21 | EXCLUDE ↔ exclude_studies | inflated `D`, dead embedding rows |
+
+---
+
+## I22 — A purity number is meaningless without the width it was measured at
+
+kNN purity depends on the ambient dimension of the latent it is measured in, and
+PCA to a common width discards variance rather than merely rotating it. Two
+numbers are comparable only when the runs share a **native** latent width and
+were projected identically.
+
+**If violated:** *silent, and it has already happened twice.* Wave R4's arms
+were compared at mixed widths until a synthetic check found an 8-point swing;
+and `r5_tiny_platform` reads 0.748 at its native 8 dimensions and 0.511 at
+`--dims 4` — the same checkpoint, the same cells.
+
+**Enforced by:** `PurityResult` carries `n_components`, and `purity.csv` has a
+`kNN_dims` column. Nothing stops a human comparing across it.
+
+---
+
+## I23 — Every new model option defaults to the behaviour that preceded it
+
+A config names a run. If adding an option changes what an existing config
+trains, that config stops being a record.
+
+**If violated:** *silent.* `d_platform: 16` was added to `ELAJ_small.yaml` and
+silently changed **40** archived experiment configs — `r4_thin_groups.yaml`
+would have trained a platform-conditioned model and written it into
+`outputs/r4_thin_groups/`.
+
+**Enforced by:** convention plus explicit pins. All 40 pre-R5 configs now state
+`model.d_platform: 0`. `kappa_floor`, `circular_parameterisation`,
+`grad_checkpointing` and `cce.block_normalise` all default to their pre-change
+values, so no pinning was needed for those.

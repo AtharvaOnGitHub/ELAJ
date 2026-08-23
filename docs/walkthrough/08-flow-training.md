@@ -420,6 +420,37 @@ exact for training. It is not exact if `drop_last` is ever turned off.
 
 ---
 
+## 4b. Gradient checkpointing — `group_encoder.grad_checkpointing`
+
+Off by default. When on, each group-encoder layer is re-run in the backward
+pass instead of storing its activations.
+
+It exists because **the model is 1.9 M parameters and ~52 GB of activations.**
+Attention is `O(G²)` per group and there are 45 groups: the probability tensor
+holds `B × heads × Σ G_k²` elements, and Σ G_k² is 6.39 M after bucketing. At
+batch 256 in bf16 that is **13 GB per layer**, doubled by the second layer and
+doubled again by CCE's second graph.
+
+That is why every CCE arm before R7 ran at batch 128, which confounded CCE
+against batch size for three waves. Checkpointing removed the constraint at
+about 30% more time per epoch — and measured, batch 256 with checkpointing cost
+4128 s/epoch against batch 128 without it at 4263 s, so it was **free**: half
+the steps and the recompute overhead cancel.
+
+The code already calls `F.scaled_dot_product_attention`, which *can* run flash
+attention at `O(G)` memory — but it passes an explicit `attn_mask` for padding,
+and flash does not support arbitrary masks, so PyTorch falls back to a backend
+that materialises the full matrix. Eliminating the padding (NestedTensor or
+varlen attention) would be the larger win and is untaken.
+
+⚠ Checkpointing must be **exactly** equivalent, not approximately.
+`use_reentrant=False` is required, not stylistic — the reentrant implementation
+mishandles inputs that do not require grad and the dropout RNG state that has
+to be replayed. Tests assert identical forward outputs *and* identical
+gradients against the un-checkpointed path.
+
+---
+
 ## 5. `CheckpointManager` — [`checkpointing.py:16`](../../src/endo_model/training/checkpointing.py:16)
 
 `save` [`:30`](../../src/endo_model/training/checkpointing.py:30) writes
@@ -447,8 +478,23 @@ is how `evaluate.py` and `infer.py` load weights without constructing one.
 | File | Written by |
 |---|---|
 | `checkpoints/epoch_XXXX_step_XXXXXXX.pt` | `CheckpointManager.save`, best 3 |
-| `metrics.csv` | `_write_metrics_csv` — one row per epoch |
+| `metrics.csv` | `_write_metrics_csv`, **once per epoch** via `on_epoch_metrics` |
 | `run_config.json` | `_save_run_config` — all four resolved configs |
+| `purity_per_study.csv` | `FinalReporter` — one row per study at the best epoch |
+| `figures/best/` | `FinalReporter` — latent panels from the best checkpoint |
+
+> ⚠ **`metrics.csv` used to be written once, after `fit()` returned.** Both
+> wave-R7 arms were cancelled at the 24 h walltime and left **no history at
+> all** — and `best_checkpoint` reads that file to find the best epoch, so the
+> recovery path could not run either. It is now rewritten every epoch, from an
+> `on_epoch_metrics` callback the `Trainer` calls after checkpointing and
+> before the figures (the figures being the slowest part of an epoch and so the
+> likeliest place for a kill to land). The call is wrapped: failing to persist a
+> diagnostic must not end a training run.
+>
+> `best_checkpoint` also falls back to the `val_nb` stored in each checkpoint
+> payload, so runs already on disk without a `metrics.csv` are still readable.
+> Either fix alone would have been enough; both are cheap.
 
 `history` carries `train_loss` / `val_loss` (the composite totals) plus every
 other loss term under `train_`/`val_` prefixes, folded in by `_record`

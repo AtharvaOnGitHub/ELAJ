@@ -152,6 +152,18 @@ number could only disagree. Dead configuration that lies is worse than none.
 | `model.group_encoder.n_buckets` | `ELAJ_*.yaml` | `4` | Size buckets for the 45 group encoders. `1` restores one padded block. |
 | `model.d_tissue` | `ELAJ_*.yaml` | `16` | Width of the tissue embedding concatenated onto `z_proj` at the decoder. `0` disables conditioning. |
 | `data.include_disease_statuses` | `corpus.yaml` | `[eutopic, ectopic, adenomyosis]` | Keeps only cells with these statuses. Empty keeps everything. |
+| `model.d_platform` | `ELAJ_*.yaml` | `0` (16 in `ELAJ_small`) | Width of the technical-covariate embedding at the decoder. `0` is the pre-R5 behaviour. |
+| `model.kappa_floor` | experiment | `1e-4` | Smallest concentration a circular dimension may take. `1e-4` is inside the flat region where the KL gradient vanishes; R7 used 0.5, R8 uses 1.0. |
+| `model.circular_parameterisation` | experiment | `angle` | `angle` predicts one unbounded number per dimension and takes `(cos, sin)`; `direction` predicts two and normalises. See [06](06-flow-model-forward.md) §5. |
+| `model.group_encoder.grad_checkpointing` | experiment | `false` | Recompute group-encoder activations in the backward pass. What makes batch 256 reachable with CCE. |
+| `model.cce.enabled` / `lambda_cce` | experiment | `false` / `0.1` | The contrastive term. 0.025 is the best setting measured. |
+| `model.cce.block_normalise` | experiment | `false` | ⚠ Dead end — kept only so the config that used it reproduces. See [11](11-findings.md) §E2. |
+
+> **Every one of these defaults to the pre-change behaviour**, so a config
+> written before the feature existed still trains the model it names. That is
+> deliberate and has been enforced since `d_platform` was added to
+> `ELAJ_small.yaml` and silently changed 40 archived configs — all of which now
+> pin `model.d_platform: 0` explicitly.
 
 `include_disease_statuses` is distinct from `exclude_studies`: it drops **cells**
 within the studies that remain, so a study id is never invalidated by it. A

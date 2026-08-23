@@ -272,12 +272,63 @@ inference is deterministic.
 ### `VonMisesBranch` — [`vonmises_vae.py:28`](../../src/endo_model/model/latent/vonmises_vae.py:28)
 
 ```python
-mu_angle = self.mu_head(cell_cls)                        # (B, n_vMF)
-kappa    = softplus(self.kappa_head(cell_cls)) + 1e-4    # strictly > 0
-loc      = stack([cos(mu_angle), sin(mu_angle)], -1)     # (B, n_vMF, 2)
+mu_angle = self._mean_angle(cell_cls)                        # (B, n_vMF)
+kappa    = softplus(self.kappa_head(cell_cls)) + kappa_floor # strictly > 0
+loc      = stack([cos(mu_angle), sin(mu_angle)], -1)         # (B, n_vMF, 2)
 sample   = PowerSpherical(loc, kappa).rsample() if training else loc
-z_vmf    = cat([sample[...,0], sample[...,1]], -1)       # (B, 2*n_vMF)
+z_vmf    = cat([sample[...,0], sample[...,1]], -1)           # (B, 2*n_vMF)
 ```
+
+Two of those lines are configurable, and both because this branch has spent
+most of the project's history unused.
+
+#### `kappa_floor` — why zero is an absorbing state
+
+The Gaussian and circular branches are **not symmetric**, and the asymmetry is
+the whole story:
+
+| | information lever | KL's grip on it |
+|---|---|---|
+| Gaussian | the mean μ, **unbounded** | `KL ⊃ ½μ²`, so `dKL/dμ = μ` — always a gradient to climb |
+| circular | the concentration κ | `KL ≈ κ²/4` near zero, so `dKL/dκ ≈ κ/2` — **vanishes** |
+
+KL against the uniform prior depends on **κ alone**: the prior is rotation
+invariant, so the mean direction is free and contributes nothing. All capacity
+rides on one lever, and that lever has a flat, sticky floor at zero. A
+dimension that drifts down has almost nothing to climb back with.
+
+The floor was `1e-4`, inside that flat region — the collapsed dimensions in
+wave R6 measured κ = 1.1e-3 to 2.2e-3, sitting on it. Raising it to 0.5 in R7
+stopped the collapse outright (0 of 4, against 3 of 4 in every earlier CCE arm)
+but did **not** produce usage: median κ came out at 0.51–0.57 against a floor
+of 0.50. The reference hyperspherical-VAE implementation has used
+`softplus(x) + 1` since 2018; R8 uses 1.0. See [11](11-findings.md) §E4.
+
+#### `circular_parameterisation` — angle or direction
+
+`_mean_angle` has two modes. `"angle"` (default, every run to R7) is
+`Linear(d_agg, n_vMF)` straight into `cos`/`sin`. `"direction"` predicts **two**
+numbers per dimension, divides by their length, and reads the angle with
+`atan2`.
+
+The difference is not normalisation — `(cos θ, sin θ)` is already a unit vector
+by identity. It is what happens when the head's output **grows**:
+
+| | map | input magnitude |
+|---|---|---|
+| `"angle"` | ℝ¹ → S¹ via cos/sin | **wraps** — θ and θ+2π are one point, so growth aliases |
+| `"direction"` | ℝ² → S¹ via v/‖v‖ | **discarded** — (2,1) and (200,100) are one point |
+
+And growth is unopposed, for the reason in the table above: the angle appears
+nowhere in the circular KL. Measured on `r7_cce_low`, 22% of values sat outside
+[−π, π] with a maximum of 1.33 turns — real wrapping, but mild.
+
+⚠ **The origin needs guarding twice.** `v.norm().clamp_min(eps)` is not enough:
+the norm's own backward is `v/‖v‖` = 0/0 there and `clamp_min` only zeroes the
+*incoming* gradient, so `0 × NaN` is still NaN. `atan2(0,0)` is a second 0/0.
+The code uses `sqrt(x² + y² + ε²)` for the first and an ε shift on one
+component for the second. This is the same class of fault as the sampler
+singularity below — finite forward, NaN backward.
 
 > **Decision:** Power Spherical, not von Mises. `torch.distributions.VonMises`
 > has **no `rsample`** — it raises `NotImplementedError` — so reconstruction

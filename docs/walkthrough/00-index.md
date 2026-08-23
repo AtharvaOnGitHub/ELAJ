@@ -35,9 +35,9 @@ defects and fragilities found while writing this.
 | 06 | [Flow: model forward](06-flow-model-forward.md) | Every module in `EndoFoundationModel.forward`, in order |
 | 07 | [Flow: losses](07-flow-losses.md) | `CompositeLoss` and each term; the annealing schedules |
 | 08 | [Flow: training](08-flow-training.md) | `train.py` → `Trainer` → epoch → step; checkpointing, resume, early stop |
-| 09 | [Flow: evaluation & inference](09-flow-eval-infer.md) | `evaluate.py`, `infer.py`, `ablation.py`, `StreamingPearson`, scib, UMAP |
+| 09 | [Flow: evaluation & inference](09-flow-eval-infer.md) | `evaluate.py`, `infer.py`, `ablation.py`, `report_purity.py`, per-study purity, scib, UMAP |
 | 10 | [Invariants and contracts](10-invariants.md) | The rules that must hold, who enforces each, what breaks otherwise |
-| 11 | [Findings](11-findings.md) | Defects and fragilities found while writing this, ranked |
+| 11 | [Findings](11-findings.md) | The run ledger (waves 0–R8), defects and fragilities, ranked |
 
 ## The five entry points
 

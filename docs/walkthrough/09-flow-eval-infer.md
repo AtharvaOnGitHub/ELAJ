@@ -224,6 +224,71 @@ numbers are in [06 §2](06-flow-model-forward.md).
 
 ---
 
+## 4d. `report_purity.py` — study mixing from finished runs
+
+    python -m scripts.report_purity --root . --run r7_cce_low --dims 4
+
+**In:** experiment *names* (not output paths — each resolves to
+`configs/experiment/<name>.yaml`). **Out:** `purity.csv` per run, one combined
+table, and `purity_per_study.csv`.
+
+No training and no UMAP. Several runs go in one invocation on purpose:
+rebuilding the validation Dataset opens every `.h5ad` and is the expensive
+part, so runs sharing a corpus share it.
+
+Three flags worth knowing:
+
+| flag | why it exists |
+|---|---|
+| `--dims` | Projects every latent to a common width. **Required** for any comparison across runs of different latent size |
+| `--runs-dir` | A config records where a run *wrote* its outputs, which stops being true the moment a finished wave is filed into a subdirectory |
+| `--k` | Neighbours per cell, default 30 |
+
+⚠ **`--dims` is not neutral, and the docstring in `project()` overstates its
+case.** That function's numbers (39.7% excess at 8 dimensions, 31.8% at 32,
+28.2% at 60) were measured on synthetic data at *fixed* separation. On a real
+latent, PCA to a narrower width **discards variance that carried study
+signal** — `r5_tiny_platform` fell from 0.748 at its native 8 to 0.511 at
+`--dims 4`. The two effects point opposite ways and this one is larger. So:
+
+- Runs of the **same** native width, projected identically, compare cleanly.
+- Runs of **different** native width do not compare cleanly at any setting —
+  native width compares different dimensionalities, and `--dims` handicaps only
+  the wider arms. `r5_latent_4_2` could not be ranked against the 8-wide arms
+  by either measurement.
+
+### Per-study purity
+
+The corpus number hides which studies are responsible for it. `r7_cce_low` sat
+at 0.300 with **`marecko_2024` alone at 74.3% excess and the other seven
+between 4% and 18%** — a very different situation from eight half-mixed
+studies, and it calls for different work (`marecko_2024` is the study whose
+scRNA/snRNA samples share one material code).
+
+It is computed in `FinalReporter` at the end of training, where the validation
+set is already built and embedded, and **again** in `report_purity` so a run
+killed at the walltime can still produce it from a checkpoint.
+
+⚠ **Read the rows together, not one at a time.** Each study's floor is its
+share of the corpus, which assumes every *other* study is reachable — so one
+isolated study inflates every other study's excess. Three equal studies with
+one isolated and two perfectly intermixed score 100%, 28% and 22%, not 100%,
+0%, 0%. A high row means that study is separated **or** something else is.
+
+### The circular-mean range check
+
+`report_purity` also prints the spread of `mu_angle`, free, since it is already
+collected for the circular figures:
+
+    circular mean (angle): |angle| max 8.39 rad = 1.33 turns,
+    22.0% of values outside [-pi, pi] -> wrapping
+
+Under the `"angle"` parameterisation the head is unbounded and `cos`/`sin`
+repeat every 2π, so values past ±π alias. See
+[06](06-flow-model-forward.md) §5 and [11](11-findings.md) §E5.
+
+---
+
 ## 5. Initialisation differences across all five entry points
 
 | | train | evaluate | infer | ablation | preflight |

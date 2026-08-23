@@ -1,0 +1,96 @@
+name: r8_latent_4_4
+description: >
+  The first latent in which the circular branch is the larger half.
+
+  Wave R8. Make the circular branch usable, having made it survivable in R7.
+
+  The diagnostic that gated this wave came back mild. R7's circular head does
+  wrap -- 22% of its values sit outside [-pi, pi] -- but the maximum is 1.33
+  turns, not the runaway drift the mechanism allows in principle. Wrapping is
+  real and worth fixing, and it is unlikely to be the whole reason the branch
+  goes unused.
+
+  The plainer explanation is competition. Eight unbounded Gaussian dimensions
+  can carry everything the decoder needs, so the circular half is redundant and
+  the model drops it -- ordinary posterior collapse, which no change to the
+  angle parameterisation touches. There is direct evidence: r5_latent_4_2, with
+  d_gauss 4, had 0 of 2 circular dimensions collapsed at the old 1e-4 floor and
+  the old angle head, when the 8-dimensional arms alongside it were collapsing
+  3 of 4. Shrinking the Gaussian kept the circular branch alive on its own.
+
+  So this arm halves the Gaussian branch and leaves everything else at
+  r8_direction's settings. Counting stored dimensions -- each circular variable
+  is (cos, sin), so two -- that is 4 Gaussian against 8 circular:
+
+    d_gauss  n_vMF   gauss dims  circ dims  ratio
+        64      8            64         16   4.00   s3_gauss64
+        48     12            48         24   2.00   r3_capacity
+        32      8            32         16   2.00   waves R1-R3
+         8      4             8          8   1.00   waves R4-R7
+         4      2             4          4   1.00   r5_latent_4_2
+         4      4             4          8   0.50   THIS ARM
+
+  Every latent this project has trained has given the Gaussian at least as much
+  room as the circular branch. This is the first that does not, and the first
+  where the model cannot satisfy the decoder from the Gaussian half alone.
+
+  Read against r8_direction, which is this arm with d_gauss 8. The two differ
+  in that one number, so the comparison is single-variable. Expect
+  reconstruction to cost something -- r5_latent_4_2 gave up 0.6pp for a
+  comparable cut -- and read val_kl_vmf and the per-dimension kappa panel
+  rather than the "N/4 collapsed" headline, which the 1.0 floor now makes
+  unreachable by construction.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r8_latent_4_4/
+seed: 24
+
+overrides:
+  # Back to the wave-R5 cap. At batch 256 with checkpointing the epoch should
+  # land near 2900 s -- 2263 s for a non-CCE batch-256 epoch, plus CCE's second
+  # pass, plus ~30% for recomputation -- so 25 epochs is about 20 h, inside
+  # train.sh's 24 h. If epochs run slower than that, cut this to 20.
+  training.max_epochs: 20
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- shared base, unchanged since wave R4 ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # Both lambdas non-zero, as required. DAB pressure is lambda * w_dab = 0.01.
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+
+  # The wave R6 embedding layout change is OFF. It was built on an explanation
+  # the mu_gauss_norm diagnostic refuted -- the Gaussian block never grew, so it
+  # was never crowding the circular block out -- and the arm that tested it
+  # collapsed 4 of 4 circular dimensions instead of 3.
+  model.cce.block_normalise: false
+
+  # ---- the latent: the one line that makes this arm what it is ----
+  # 4, not r8_direction's 8. n_vMF stays at 4, so the circular half becomes the
+  # larger of the two for the first time.
+  model.d_gauss: 4
+  model.n_vMF: 4
+  model.d_platform: 16
+
+  # The two lines that make batch 256 reachable and the circular branch
+  # survivable. See the description.
+  model.group_encoder.grad_checkpointing: true
+  # 1.0, matching the reference implementation's softplus(x) + 1.
+  model.kappa_floor: 1.0
+
+  # The change this arm exists for. See the description.
+  model.circular_parameterisation: direction

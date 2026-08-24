@@ -194,6 +194,7 @@ def cross_group_agreement(
     groups: np.ndarray,
     k: int = 100,
     seed: int = 24,
+    n_permutations: int = 0,
 ) -> dict:
     """Label agreement among neighbours from OTHER groups only.
 
@@ -216,6 +217,25 @@ def cross_group_agreement(
     cell's 30 nearest neighbours are its own donor's and too few survive the
     mask to measure anything. `neighbours_kept` reports what actually survived,
     and a low value there means the result rests on very little.
+
+    ⚠ THIS NUMBER IS NOISY WHEN THERE ARE FEW GROUPS, and it has to be read
+    with that in mind. With a latent that encodes donor and nothing else --
+    where the true answer is zero -- the measured excess ranged over:
+
+        6 donors:   -0.67 to +0.48      40 donors:  -0.04 to +0.05
+       12 donors:   -0.19 to +0.28
+       20 donors:   -0.17 to +0.13
+
+    across eight seeds. The reason is that once same-donor neighbours are gone,
+    a cell's remaining neighbours come from only one or two other donor
+    clusters, and whether those happen to share its label is close to a coin
+    flip. `duempelmann_2026` contributes **9** validation donors, which is in
+    the worst part of that range.
+
+    So set `n_permutations`. It reshuffles which donor carries which label,
+    keeping every donor's cells together, and recomputes -- giving the spread
+    this statistic has under the null for THIS dataset, and a p-value. Without
+    it, an excess of 0.2 on nine donors cannot be told from noise.
     """
     from sklearn.neighbors import NearestNeighbors
 
@@ -262,11 +282,57 @@ def cross_group_agreement(
             chances.extend([share] * int(((grp == g) & (lab == lb)).sum()))
     chance = float(np.mean(chances)) if chances else float("nan")
     head = 1.0 - chance
-    return {
+    excess = (float((agreement - chance) / head)
+              if head > 1e-12 else float("nan"))
+
+    out = {
         "n_cells": int(has_any.sum()),
         "n_labels": int(len(np.unique(lab))),
+        "n_groups": int(len(np.unique(grp))),
         "agreement": agreement,
         "chance": chance,
-        "excess": float((agreement - chance) / head) if head > 1e-12 else float("nan"),
+        "excess": excess,
         "neighbours_kept": float(kept[has_any].mean()),
+        "null_p95": float("nan"),
+        "p_value": float("nan"),
+    }
+    if n_permutations > 0:
+        out.update(_permutation_null(
+            lab, grp, neigh, usable, kept, has_any, chance, head,
+            excess, n_permutations, seed,
+        ))
+    return out
+
+
+def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
+                      observed, n_permutations, seed) -> dict:
+    """How large this statistic gets when the labels carry no information.
+
+    Labels are reshuffled BETWEEN groups, not between cells. Shuffling cells
+    would destroy the donor clustering as well and answer a different question;
+    what is being tested is whether the labels attach to the latent's structure
+    beyond the fact that a donor's cells sit together.
+
+    The neighbour search is not repeated -- only the labels move -- so this is
+    cheap however many permutations are asked for.
+    """
+    rng = np.random.default_rng(seed)
+    groups = np.unique(grp)
+    # One label per group: whatever most of its cells carry.
+    per_group = np.array([np.bincount(lab[grp == g]).argmax() for g in groups])
+
+    nulls = []
+    for _ in range(n_permutations):
+        mapping = dict(zip(groups, rng.permutation(per_group)))
+        shuffled = np.array([mapping[g] for g in grp])
+        same = shuffled[neigh] == shuffled[:, None]
+        agree = float(((same & usable).sum(axis=1)[has_any] / kept[has_any]).mean())
+        nulls.append((agree - chance) / head if head > 1e-12 else np.nan)
+
+    nulls = np.asarray([v for v in nulls if np.isfinite(v)])
+    if nulls.size == 0:
+        return {}
+    return {
+        "null_p95": float(np.percentile(np.abs(nulls), 95)),
+        "p_value": float((1 + int((nulls >= observed).sum())) / (1 + nulls.size)),
     }

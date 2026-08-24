@@ -169,7 +169,7 @@ def test_the_rendered_line_always_carries_the_cell_count():
 
 # ── cross-donor agreement ────────────────────────────────────────────────────
 
-def donors_and_phase(seed=7):
+def donors_and_phase(seed=7, n_donors=6):
     """Six donors, three per phase — the shape of the real confound.
 
     Each donor carries exactly one phase, which is true of every donor in the
@@ -177,12 +177,14 @@ def donors_and_phase(seed=7):
     without representing phase at all.
     """
     rng = np.random.default_rng(seed)
-    donor = np.repeat(np.arange(6), 60)
-    phase = np.where(donor < 3, "proliferative", "secretory")
-    by_donor = (np.repeat(rng.normal(0, 1, (6, 4)), 60, axis=0)
-                + rng.normal(0, 0.02, (360, 4)))
-    by_phase = (np.where((donor < 3)[:, None], 0.0, 8.0)
-                + rng.normal(0, 0.5, (360, 4)))
+    per, half = 60, n_donors // 2
+    n = n_donors * per
+    donor = np.repeat(np.arange(n_donors), per)
+    phase = np.where(donor < half, "proliferative", "secretory")
+    by_donor = (np.repeat(rng.normal(0, 1, (n_donors, 4)), per, axis=0)
+                + rng.normal(0, 0.02, (n, 4)))
+    by_phase = (np.where((donor < half)[:, None], 0.0, 8.0)
+                + rng.normal(0, 0.5, (n, 4)))
     return donor, phase, by_donor, by_phase
 
 
@@ -194,15 +196,53 @@ def test_the_plain_test_cannot_tell_donor_clustering_from_phase_signal():
     assert label_knn_agreement(by_phase, phase, k=30)["excess"] > 0.95
 
 
-def test_cross_donor_rejects_a_latent_that_only_knows_the_donor():
-    donor, phase, by_donor, _ = donors_and_phase()
-    r = cross_group_agreement(by_donor, phase, donor, k=100)
-    assert r["excess"] < 0.1, "donor clustering must not read as phase signal"
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
+def test_cross_donor_rejects_a_latent_that_only_knows_the_donor(seed):
+    """Judged on the permutation p-value, NOT on the raw excess.
+
+    An earlier version of this test asserted excess < 0.1 and failed, because
+    with few donors the raw number is noise: across eight seeds a latent
+    encoding donor and nothing else produced excesses from -0.67 to +0.48 at
+    six donors. Seed 3 below gives +0.59 — which would read as a strong result
+    against any fixed threshold, and is not one.
+
+    The permutation null is what makes it readable. Reshuffling which donor
+    carries which label puts that +0.59 inside a null band of the same width,
+    p = 0.075.
+    """
+    donor, phase, by_donor, _ = donors_and_phase(seed=seed)
+    r = cross_group_agreement(by_donor, phase, donor, k=100, n_permutations=200)
+    assert r["p_value"] > 0.05, (
+        f"donor-only latent read as significant phase signal "
+        f"(excess {r['excess']:+.2f}, p {r['p_value']:.3f})"
+    )
 
 
-def test_cross_donor_keeps_a_latent_that_really_knows_phase():
-    donor, phase, _, by_phase = donors_and_phase()
-    assert cross_group_agreement(by_phase, phase, donor, k=100)["excess"] > 0.9
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_cross_donor_keeps_a_latent_that_really_knows_phase(seed):
+    donor, phase, _, by_phase = donors_and_phase(seed=seed)
+    r = cross_group_agreement(by_phase, phase, donor, k=100, n_permutations=200)
+    assert r["excess"] > 0.9
+    assert r["p_value"] <= 0.05
+
+
+def test_the_null_band_widens_when_there_are_fewer_donors():
+    """Why the p-value is not optional here. duempelmann contributes 9
+    validation donors, which is squarely in the noisy range."""
+    few = cross_group_agreement(*_phase_args(6), k=100, n_permutations=200)
+    many = cross_group_agreement(*_phase_args(30), k=100, n_permutations=200)
+    assert few["null_p95"] > many["null_p95"]
+
+
+def _phase_args(n_donors: int, seed: int = 3):
+    """(latent, labels, groups) for a donor-only latent with n_donors donors."""
+    rng = np.random.default_rng(seed)
+    per = 300 // n_donors
+    donor = np.repeat(np.arange(n_donors), per)
+    phase = np.where(donor < n_donors // 2, "proliferative", "secretory")
+    latent = (np.repeat(rng.normal(0, 1, (n_donors, 4)), per, axis=0)
+              + rng.normal(0, 0.02, (n_donors * per, 4)))
+    return latent, phase, donor
 
 
 def test_cross_donor_reports_how_many_neighbours_survived():

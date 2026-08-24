@@ -72,6 +72,11 @@ def parse_args() -> argparse.Namespace:
                         "correlation. Supplied rather than inferred: a wrong "
                         "period lowers the coefficient for a reason that has "
                         "nothing to do with the model.")
+    p.add_argument("--permutations", type=int, default=200,
+                   help="Permutations for the cross-donor null. duempelmann "
+                        "contributes 9 validation donors, and at that count "
+                        "the raw excess is noise -- a donor-only latent "
+                        "produced +0.59 on synthetic data. 0 disables.")
     p.add_argument("--out", default=None,
                    help="Where to write validation.csv. Defaults to the run "
                         "directory.")
@@ -271,17 +276,26 @@ def main() -> None:
                 "AnnotationMain", "phase", "Endometriosis_stage"]:
         for bname, lat in branches.items():
             res = cross_group_agreement(lat, meta[col], meta["patient_id"],
-                                        k=max(args.k, 100))
+                                        k=max(args.k, 100),
+                                        n_permutations=args.permutations)
             if not np.isfinite(res.get("agreement", float("nan"))):
                 break
+            p_val = res.get("p_value", float("nan"))
+            verdict = ("" if not np.isfinite(p_val)
+                       else "  SIGNIFICANT" if p_val <= 0.05
+                       else "  not significant")
             logger.info(
-                "   %-9s %-26s n=%6d  agreement=%.3f  chance=%.3f  "
-                "excess=%6.1f%%  (%.0f of %d neighbours survived)",
-                bname, col, res["n_cells"], res["agreement"], res["chance"],
-                100 * res["excess"], res["neighbours_kept"], max(args.k, 100),
+                "   %-9s %-26s n=%6d  excess=%6.1f%%  null95=%.2f  p=%.3f  "
+                "(%.0f of %d neighbours kept, %d donors)%s",
+                bname, col, res["n_cells"], 100 * res["excess"],
+                res.get("null_p95", float("nan")), p_val,
+                res["neighbours_kept"], max(args.k, 100),
+                res.get("n_groups", 0), verdict,
             )
             record("cross-donor", col, bname, res["n_cells"], res["excess"],
-                   f"{res['neighbours_kept']:.0f} neighbours kept")
+                   f"p={p_val:.3f}; null95={res.get('null_p95', float('nan')):.2f}; "
+                   f"{res['neighbours_kept']:.0f} kept; "
+                   f"{res.get('n_groups', 0)} donors")
 
     # ── 5. NMI and ARI — a differently-built check on the same question ──────
     # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster

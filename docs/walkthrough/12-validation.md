@@ -53,6 +53,16 @@ identity alone reaches 27.6%, which is the same band as phase (32.1%) and grade
 (25.9%). Those two are therefore **fully explained by donor clustering** and are
 not evidence of biology.
 
+⚠ **The cross-donor test that resolves this needs a permutation null to be
+readable.** With few groups the statistic is noisy: a synthetic latent encoding
+donor and nothing else — true answer zero — produced excesses from **−0.67 to
++0.48** across eight seeds at six donors, and **+0.59** on one seed at nine.
+`duempelmann` contributes **9** validation donors. So the raw number cannot be
+compared against any fixed threshold. Reshuffling which donor carries which
+label gives the spread under the null for this dataset; on the same synthetic
+cases the p-value separates them cleanly (donor-only p = 0.08–0.85, real phase
+signal p = 0.015). **Read `p`, not `excess`.**
+
 **Cell type is the exception, and that is what makes it the result.** Cell type
 varies *within* a donor, so donor clustering cannot produce it. `AnnotationMain`
 at 85.5% excess over a 0.760 chance line, on 48,084 cells, is the one number on

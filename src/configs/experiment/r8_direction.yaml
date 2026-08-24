@@ -49,13 +49,25 @@ output_dir: outputs/r8_direction/
 seed: 24
 
 overrides:
-  # 35, against a measured 4374 s/epoch and train.sh's two-day wall: 35 epochs
-  # is 42.5 h, leaving room for the final report.
+  # 25, at a measured 4374 s/epoch: 30.4 h inside train.sh's two-day wall,
+  # leaving 17.6 h of margin rather than the 5 h a 35-epoch schedule leaves.
   #
-  # This was 20 while train.sh asked for 24 h, and both R8 arms were cancelled
-  # at epoch 18 with their best epoch being the last one they finished -- still
-  # improving, never converged. The 24 h was self-imposed, not the queue's.
-  training.max_epochs: 35
+  # WHY NOT LONGER. T_max feeds CosineAnnealingLR, so it is not a cap that early
+  # stopping trims -- it sets how long the LR stays high, and the model converges
+  # BECAUSE the LR anneals. Every non-CCE arm early-stopped at 0.87-0.97 of its
+  # T_max. So a longer schedule does not reach the same optimum sooner or later;
+  # it reaches a different one, after exploring for longer.
+  #
+  # That is a real effect and it is not demonstrated anywhere in this project's
+  # data: every T_max difference across waves is confounded with a CCE or lambda
+  # change. The argument for 35 rested on r8_direction peaking at 0.90 of its
+  # T_max, and that number is censored -- the run was killed at epoch 19 of 20,
+  # so "best at 18" may only mean "still moving when it died".
+  #
+  # T_max 20 produced the best model this project has. 25 gives a quarter more
+  # exploration than that and still anneals to 0.4% of peak. Buying 75% more
+  # exploration for 12 more hours is a bet the data does not support.
+  training.max_epochs: 25
   training.batch_size: 256
 
   training.diagnostics.log_every: 50

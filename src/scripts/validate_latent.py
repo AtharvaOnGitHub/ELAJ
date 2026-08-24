@@ -88,12 +88,18 @@ def collect(model, loader, device, order_len: int):
     import numpy as np
     import torch
 
+    # The shared helper, not a local reimplementation. `group_indices` and
+    # `group_dns_mask` are dicts OF tensors, so a `hasattr(v, "to")` test
+    # silently leaves them on the CPU and the first embedding lookup dies with
+    # "expected all tensors to be on the same device". _to_device recurses one
+    # level, which is exactly what the Batch schema needs.
+    from endo_model.training.trainer import _to_device
+
     mu_gauss, mu_angle, study = [], [], []
     model.eval()
     with torch.no_grad():
         for batch in loader:
-            batch = {k: (v.to(device) if hasattr(v, "to") else v)
-                     for k, v in batch.items()}
+            batch = _to_device(batch, device)
             out = model.encode(batch)
             mu_gauss.append(out["mu_gauss"].float().cpu().numpy())
             mu_angle.append(out["mu_angle"].float().cpu().numpy())
@@ -203,19 +209,27 @@ def main() -> None:
                    for d in range(mu_angle.shape[1]))
         logger.info("   best circular dimension: r = %.3f", best)
 
-    # ── 2. continuous covariates against the Gaussian branch ────────────────
-    logger.info("── 2. continuous covariates against the Gaussian latent")
+    # ── 2. continuous covariates, against BOTH branches ─────────────────────
+    logger.info("── 2. continuous covariates against the latent")
     for col in LINEAR_CONTINUOUS + QC_CONTROLS:
         x = _as_float(meta[col])
         ok = np.isfinite(x)
         if ok.sum() < 30:
             continue
-        r = max(abs(np.corrcoef(mu_gauss[ok, d], x[ok])[0, 1])
-                for d in range(mu_gauss.shape[1]))
+        n = int(ok.sum())
+        rg = max(abs(np.corrcoef(mu_gauss[ok, d], x[ok])[0, 1])
+                 for d in range(mu_gauss.shape[1]))
+        # Against the circular branch too: serum progesterone rises and falls
+        # with the cycle, so it is a periodic quantity and the Gaussian
+        # correlation alone would miss it sitting on the torus.
+        rc = max(circular_linear_corr(mu_angle[ok, d], x[ok])
+                 for d in range(mu_angle.shape[1]))
         kind = "NEGATIVE CONTROL" if col in QC_CONTROLS else "covariate"
-        logger.info("   %-24s max |r| over Gaussian dims = %.3f  (n=%d)  %s",
-                    col, r, int(ok.sum()), kind)
-        record("linear-corr", col, "gaussian latent", int(ok.sum()), r, kind)
+        logger.info("   %-24s gaussian |r|=%.3f  circular r=%.3f  (n=%d)  %s",
+                    col, rg, rc, n, kind)
+        record("linear-corr", col, "gaussian latent", n, rg, kind)
+        record("circular-linear", col, "circular latent", n, rc, kind)
+        _log_contributors(meta[col], study_id, names, col)
 
     # ── 3. categorical labels: kNN agreement ────────────────────────────────
     logger.info("── 3. biological labels — kNN agreement (high = latent groups it)")
@@ -227,6 +241,7 @@ def main() -> None:
         logger.info("   %s", format_agreement(col, res))
         record("knn-agreement", col, "all labelled cells",
                res["n_cells"], res["excess"], f"{res['n_labels']} labels")
+        _log_contributors(meta[col], study_id, names, col)
 
     # ── 4. patient identity — the only held-out label in every study ─────────
     logger.info("── 4. patient identity (high = memorised the individual)")
@@ -245,6 +260,25 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
     logger.info("Written to %s", path)
+
+
+def _log_contributors(values, study_id, names, col: str) -> None:
+    """Which studies actually supplied this label, and how many cells each.
+
+    The corpus has no shared metadata schema, so a headline "n=48,000" is
+    usually one study. Naming it is what stops a single-study result being read
+    as a corpus-wide one -- see docs/walkthrough/12-validation.md.
+    """
+    import numpy as np
+
+    from endo_model.evaluation.latent_validation import _is_labelled
+
+    ok = np.array([_is_labelled(v) for v in values])
+    if not ok.any():
+        return
+    ids, counts = np.unique(np.asarray(study_id)[ok], return_counts=True)
+    parts = [f"{names.get(int(i), i)} {int(c):,}" for i, c in zip(ids, counts)]
+    logger.info("        from: %s", "; ".join(parts))
 
 
 def _as_float(values):

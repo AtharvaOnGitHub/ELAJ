@@ -83,7 +83,8 @@ def corpus_key(data_cfg) -> tuple:
     )
 
 
-def build_loader(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs):
+def build_loader(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
+                 extra_obs_columns=None):
     from torch.utils.data import DataLoader
 
     from endo_model.data.collate import make_collate_fn
@@ -115,6 +116,9 @@ def build_loader(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs):
             str(Path(root) / data_cfg.sample_platform_csv)
             if data_cfg.sample_platform_csv else None
         ),
+        # Evaluation-only per-cell metadata. Never reaches the model; see
+        # EndometriosisDataset.extra_obs.
+        extra_obs_columns=extra_obs_columns,
     )
     return DataLoader(
         val,

@@ -370,6 +370,7 @@ class EndometriosisDataset:
         tissue_level_names_path: Optional[str] = None,
         study_platform_path: Optional[str] = None,
         sample_platform_path: Optional[str] = None,
+        extra_obs_columns: Optional[list[str]] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -394,6 +395,16 @@ class EndometriosisDataset:
         self._vocab = vocab
         self._split = split
         self._records: list[_CellRecord] = []
+        # Per-cell obs values carried alongside the records for evaluation only.
+        # NOT part of the Batch: nothing here reaches the model, the collate
+        # function or the schema, so the training path is untouched. Appended in
+        # the same loop as the records, which is what guarantees alignment --
+        # rebuilding the selection outside the Dataset would risk diverging from
+        # its split and disease filtering. Studies lacking a column get None,
+        # because the corpus has no shared metadata schema; see
+        # docs/walkthrough/12-validation.md.
+        self._extra_obs_columns = list(extra_obs_columns or [])
+        self._extra_obs: dict[str, list] = {c: [] for c in self._extra_obs_columns}
 
         # Collect all patient IDs across all studies first (needed for split)
         all_patient_ids: list[str] = []
@@ -543,7 +554,22 @@ class EndometriosisDataset:
                 panel.n_cells * vocab.vocab_size * 4 / 1e9,
             )
 
+            extra_cols = {
+                c: (adata.obs[c].to_numpy() if c in adata.obs.columns else None)
+                for c in self._extra_obs_columns
+            }
+            missing = [c for c, v in extra_cols.items() if v is None]
+            if missing:
+                logger.info(
+                    "Study '%s': no obs column(s) %s — those cells read as "
+                    "unlabelled for evaluation", name, ", ".join(missing),
+                )
+
             for panel_row, local_cell_idx in enumerate(cell_indices):
+                for c, arr in extra_cols.items():
+                    self._extra_obs[c].append(
+                        arr[local_cell_idx] if arr is not None else None
+                    )
                 self._records.append(
                     _CellRecord(
                         panel=panel,
@@ -581,6 +607,20 @@ class EndometriosisDataset:
     def study_ids(self) -> list[int]:
         """Study ID for each cell in dataset order — passed to PerStudyBatchSampler."""
         return [r.study_id for r in self._records]
+
+    @property
+    def extra_obs(self) -> dict:
+        """Requested obs columns, one entry per cell, in dataset order.
+
+        Object arrays, not coerced: a column can be a float in one study and a
+        string in another, and the caller knows which it wants. Cells from a
+        study without the column hold None.
+
+        Aligned with `study_ids` and with `__getitem__` by index, because both
+        are built in the same pass.
+        """
+        import numpy as _np
+        return {c: _np.asarray(v, dtype=object) for c, v in self._extra_obs.items()}
 
     @property
     def split(self) -> str:

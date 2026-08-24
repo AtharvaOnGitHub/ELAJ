@@ -14,6 +14,11 @@
 #
 #   sbatch data_collation/scripts/validate_latent.sh r8_direction
 #   sbatch data_collation/scripts/validate_latent.sh --runs-dir outputs/r8 r8_direction
+#   sbatch data_collation/scripts/validate_latent.sh --splits val test r8_direction
+#
+# --splits is what lifts the cross-donor phase test off its floor. On val alone
+# only six donors carry a phase label, and at six donors the smallest reachable
+# p is 0.10 -- the test cannot answer. val+test gives eighteen held-out donors.
 #
 # One experiment NAME, not an output path. Flags beginning with "-" pass
 # through to validate_latent.py; see report_purity.sh for the same convention.
@@ -27,8 +32,15 @@ ARMS=()
 EXTRA=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dims|--k|--out|--root|--config-dir|--runs-dir|--cycle-period)
+        --dims|--k|--out|--root|--config-dir|--runs-dir|--cycle-period|--permutations)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
+        --splits)
+            # nargs="+": take every following bare word as a split name.
+            EXTRA+=("$1"); shift
+            while [ $# -gt 0 ] && [[ "$1" != -* ]] && \
+                  [[ "$1" == train || "$1" == val || "$1" == test ]]; do
+                EXTRA+=("$1"); shift
+            done ;;
         --run)
             echo "Pass the arm name without --run; this script adds it." >&2; exit 2 ;;
         -*) EXTRA+=("$1"); shift ;;

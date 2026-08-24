@@ -72,6 +72,18 @@ def parse_args() -> argparse.Namespace:
                         "correlation. Supplied rather than inferred: a wrong "
                         "period lowers the coefficient for a reason that has "
                         "nothing to do with the model.")
+    p.add_argument("--splits", nargs="+", default=["val"],
+                   choices=["train", "val", "test"],
+                   help="Which splits to embed. More donors is the ONLY thing "
+                        "that lifts the cross-donor test off its floor: at six "
+                        "donors the smallest reachable p is 0.10, at eleven it "
+                        "is 0.002. 'val test' is the natural choice -- both are "
+                        "held out, and the test split has never been used for "
+                        "anything, so nothing has been tuned against it. Adding "
+                        "'train' brings far more donors but the model has seen "
+                        "those cells; the phase LABEL was never an input in "
+                        "either case, so what it risks is memorised placement "
+                        "rather than a leaked label.")
     p.add_argument("--permutations", type=int, default=200,
                    help="Permutations for the cross-donor null. duempelmann "
                         "contributes 9 validation donors, and at that count "
@@ -172,26 +184,48 @@ def main() -> None:
     model_cfg.n_groups = len(vocab.group_names)
     names = {s["id"]: s["name"] for s in study_configs}
 
-    logger.info("Building the validation split with %d metadata columns",
-                len(ALL_COLUMNS))
-    loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
-                          study_configs, extra_obs_columns=ALL_COLUMNS)
-    order = sampler_order(loader)
-    extra = loader.dataset.extra_obs
-
     ckpt = best_checkpoint(run_dir)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EndoFoundationModel(vocab, model_cfg).to(device)
     CheckpointManager.load(str(ckpt), model, None, map_location=device)
 
-    logger.info("Embedding %d cells", len(order))
-    collected = collect(model, loader, device, len(order))
-    if collected is None:
-        logger.error("validation loader was empty")
-        sys.exit(1)
-    mu_gauss, mu_angle, study_id = collected
+    # One embedding pass per split, concatenated. Each split is a separate
+    # Dataset, so its own sampler order is what aligns its metadata; mixing the
+    # orders would pair cells with other cells' labels.
+    parts, metas = [], []
+    for split in args.splits:
+        logger.info("Building the %s split with %d metadata columns",
+                    split, len(ALL_COLUMNS))
+        loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
+                              study_configs, extra_obs_columns=ALL_COLUMNS,
+                              split=split)
+        order = sampler_order(loader)
+        extra = loader.dataset.extra_obs
+        logger.info("Embedding %d cells from %s", len(order), split)
+        got = collect(model, loader, device, len(order))
+        if got is None:
+            logger.warning("  %s split was empty — skipped", split)
+            continue
+        parts.append(got)
+        metas.append({c: extra[c][order] for c in ALL_COLUMNS})
 
-    meta = {c: extra[c][order] for c in ALL_COLUMNS}
+    if not parts:
+        logger.error("every requested split was empty")
+        sys.exit(1)
+
+    mu_gauss = np.concatenate([p_[0] for p_ in parts])
+    mu_angle = np.concatenate([p_[1] for p_ in parts])
+    study_id = np.concatenate([p_[2] for p_ in parts])
+    meta = {c: np.concatenate([m[c] for m in metas]) for c in ALL_COLUMNS}
+    logger.info("Total: %d cells across split(s) %s",
+                len(mu_gauss), ", ".join(args.splits))
+
+    # The number that decides whether the cross-donor test can answer anything.
+    donors = {str(v) for v, ph in zip(meta["patient_id"],
+                                      meta["MenstrualCyclePhase_main"])
+              if v is not None and ph is not None
+              and str(ph).strip().lower() not in ("", "nan", "none", "unknown")}
+    logger.info("Donors carrying a menstrual phase label: %d", len(donors))
     rows: list[dict] = []
 
     def record(test, label, scope, n, value, note=""):
@@ -332,6 +366,14 @@ def main() -> None:
             for k2, v in shown.items():
                 record(f"scib-{k2}", col, bname, int(ok.sum()), v, "")
 
+    # ── 6. donor-level view, and a phase-coloured picture ───────────────────
+    # Descriptive, not statistical: with few donors this carries exactly the
+    # same information as section 4 and hits the same floor. Worth having
+    # because "the proliferative donors sit here" is reportable even when the
+    # significance test cannot run.
+    _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
+                           args.splits)
+
     out = Path(args.out) if args.out else run_dir
     out.mkdir(parents=True, exist_ok=True)
     path = out / "validation.csv"
@@ -341,6 +383,96 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
     logger.info("Written to %s", path)
+
+
+def _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
+                           splits) -> None:
+    """Where each donor sits, and a UMAP coloured by phase.
+
+    Two things the significance test cannot give: a description of the layout
+    that stands even when p is uninformative, and a picture. The picture is
+    illustration, not evidence -- UMAP flattens the latent to two dimensions and
+    should not decide anything. With few donors it also shows mostly DONORS
+    rather than phases, which is worth remembering while looking at it.
+    """
+    import numpy as np
+
+    from endo_model.evaluation.latent_validation import _is_labelled
+
+    phase = meta["MenstrualCyclePhase_main"]
+    pid = meta["patient_id"]
+    ok = np.array([_is_labelled(v) for v in phase])
+    if ok.sum() < 50:
+        return
+
+    logger.info("── 6. donor-level layout (descriptive)")
+    donors = {}
+    for d in np.unique(np.asarray(pid)[ok].astype(str)):
+        rows = np.flatnonzero(ok & (np.asarray(pid).astype(str) == d))
+        donors[d] = (str(phase[rows[0]]), len(rows), mu_gauss[rows].mean(axis=0))
+    for ph in sorted({v[0] for v in donors.values()}):
+        members = [(d, n) for d, (p_, n, _) in donors.items() if p_ == ph]
+        logger.info("   %-16s %d donors, %s cells",
+                    ph, len(members), f"{sum(n for _, n in members):,}")
+
+    # Between-phase separation of donor centroids, against within-phase spread.
+    # >1 means donors of one phase sit closer to each other than to the other
+    # phase. Descriptive only -- no p-value is possible at this donor count.
+    groups = {}
+    for d, (ph, _, c) in donors.items():
+        groups.setdefault(ph, []).append(c)
+    if len(groups) == 2:
+        (a, b) = [np.stack(v) for v in groups.values()]
+        within = float(np.mean([np.linalg.norm(x - y)
+                                for g in (a, b) for x in g for y in g
+                                if not np.allclose(x, y)]) or 0.0)
+        between = float(np.mean([np.linalg.norm(x - y) for x in a for y in b]))
+        logger.info("   donor centroids: between-phase %.3f, within-phase %.3f, "
+                    "ratio %.2f  (>1 = phases separate; %d donors, no p-value "
+                    "possible at this count)",
+                    between, within, between / within if within else float("nan"),
+                    len(donors))
+
+    try:
+        _plot_phase_umap(mu_gauss[ok], circ[ok], np.asarray(phase)[ok],
+                         run_dir, splits)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("   phase UMAP skipped (%s: %s)", type(exc).__name__, exc)
+
+
+def _plot_phase_umap(gauss, circ, phase, run_dir, splits) -> None:
+    """Both halves of the latent, coloured by menstrual phase."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from endo_model.viz.latent_panels import safe_umap
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
+    for ax, lat, title in ((axes[0], gauss, "Gaussian half"),
+                           (axes[1], circ, "circular half")):
+        coords = safe_umap(lat, seed=24)
+        if coords is None:      # umap absent, or too few cells to embed
+            ax.text(0.5, 0.5, "UMAP unavailable", ha="center", va="center")
+            ax.set_title(title); ax.set_xticks([]); ax.set_yticks([])
+            continue
+        for ph in np.unique(phase):
+            m = phase == ph
+            ax.scatter(coords[m, 0], coords[m, 1], s=2, alpha=0.4,
+                       label=f"{ph} ({m.sum():,})")
+        ax.set_title(title)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.legend(markerscale=6, fontsize=8, loc="best")
+    n_donors = "descriptive only — with few donors this shows donors, not phases"
+    fig.suptitle(f"Menstrual phase over the latent — split(s): "
+                 f"{', '.join(splits)}\n{n_donors}")
+    fig.tight_layout()
+    out = Path(run_dir) / "figures" / "phase_umap.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    logger.info("   phase UMAP written to %s", out)
 
 
 def _log_contributors(values, study_id, names, col: str) -> None:

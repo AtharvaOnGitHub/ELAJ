@@ -84,7 +84,7 @@ def corpus_key(data_cfg) -> tuple:
 
 
 def build_loader(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
-                 extra_obs_columns=None):
+                 extra_obs_columns=None, split="val"):
     from torch.utils.data import DataLoader
 
     from endo_model.data.collate import make_collate_fn
@@ -92,7 +92,7 @@ def build_loader(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
     from endo_model.data.samplers import PerStudyBatchSampler
 
     val = EndometriosisDataset(
-        split="val",
+        split=split,
         study_configs=study_configs,
         vocab=vocab,
         val_fraction=data_cfg.splits.val_fraction,

@@ -316,7 +316,8 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
     The neighbour search is not repeated -- only the labels move -- so this is
     cheap however many permutations are asked for.
     """
-    from math import comb
+    from collections import Counter
+    from math import comb, factorial
 
     rng = np.random.default_rng(seed)
     groups = np.unique(grp)
@@ -335,6 +336,18 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
         n_assign *= comb(remaining, int(c))
         remaining -= int(c)
 
+    # Not 1/n_assign. The agreement statistic compares whether two cells share a
+    # label, which is invariant to what the labels are CALLED -- so every
+    # relabelling that reproduces the same partition of donors scores
+    # identically and ties with the observed value. Only relabellings that
+    # preserve the label multiset are in the permutation space, so the count is
+    # the product of factorials of the repeated group sizes: a 3/3 split has two
+    # such assignments and a floor of 2/20 = 0.100, while 4/5 has one and a
+    # floor of 1/126 = 0.008. Getting this wrong halved the reported floor.
+    ties = 1
+    for mult in Counter(int(c) for c in group_counts).values():
+        ties *= factorial(mult)
+
     nulls = []
     for _ in range(n_permutations):
         mapping = dict(zip(groups, rng.permutation(per_group)))
@@ -346,7 +359,7 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
     nulls = np.asarray([v for v in nulls if np.isfinite(v)])
     if nulls.size == 0:
         return {}
-    floor = 1.0 / max(n_assign, 1)
+    floor = ties / max(n_assign, 1)
     if floor > 0.025:
         logger.warning(
             "Only %d distinct label assignments over %d groups: the p-value "

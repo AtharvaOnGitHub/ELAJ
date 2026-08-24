@@ -138,9 +138,10 @@ def main() -> None:
     from endo_model.configs import load_experiment
     from endo_model.data.vocabulary import GeneVocabulary
     from endo_model.evaluation.latent_validation import (
-        circular_linear_corr, format_agreement, label_knn_agreement,
-        periodic_corr,
+        circular_coordinates, circular_linear_corr, cross_group_agreement,
+        format_agreement, label_knn_agreement, periodic_corr,
     )
+    from endo_model.evaluation.scib_metrics import compute_scib_metrics
     from endo_model.evaluation.purity_report import best_checkpoint
     from endo_model.model.endo_model import EndoFoundationModel
     from endo_model.training.checkpointing import CheckpointManager
@@ -231,25 +232,81 @@ def main() -> None:
         record("circular-linear", col, "circular latent", n, rc, kind)
         _log_contributors(meta[col], study_id, names, col)
 
-    # ── 3. categorical labels: kNN agreement ────────────────────────────────
-    logger.info("── 3. biological labels — kNN agreement (high = latent groups it)")
+    # ── 3. categorical labels, on EACH HALF OF THE LATENT ───────────────────
+    # The first run tested the Gaussian half only and reported the result as
+    # "the latent groups cell type". Which half does the work is exactly the
+    # open question about the circular branch, so every label now runs on both
+    # and on the concatenation the decoder actually receives.
+    circ = circular_coordinates(mu_angle)
+    branches = {
+        "gaussian": mu_gauss,
+        "circular": circ,
+        "combined": np.concatenate([mu_gauss, circ], axis=-1),
+    }
+    logger.info("── 3. biological labels — kNN agreement, per latent half")
+    logger.info("   (branch widths: gaussian %d, circular %d, combined %d)",
+                mu_gauss.shape[1], circ.shape[1], branches["combined"].shape[1])
     dims = args.dims or None
-    for col in BIOLOGY_LABELS:
-        res = label_knn_agreement(mu_gauss, meta[col], k=args.k, n_components=dims)
-        if res["n_cells"] < args.k + 1:
-            continue
-        logger.info("   %s", format_agreement(col, res))
-        record("knn-agreement", col, "all labelled cells",
-               res["n_cells"], res["excess"], f"{res['n_labels']} labels")
-        _log_contributors(meta[col], study_id, names, col)
+    for col in BIOLOGY_LABELS + ["patient_id"]:
+        first = True
+        for bname, lat in branches.items():
+            res = label_knn_agreement(lat, meta[col], k=args.k, n_components=dims)
+            if res["n_cells"] < args.k + 1:
+                break
+            logger.info("   %-9s %s", bname, format_agreement(col, res))
+            note = ("high is BAD — individual identity" if col == "patient_id"
+                    else f"{res['n_labels']} labels")
+            record("knn-agreement", col, bname, res["n_cells"], res["excess"], note)
+            if first:
+                _log_contributors(meta[col], study_id, names, col)
+                first = False
 
-    # ── 4. patient identity — the only held-out label in every study ─────────
-    logger.info("── 4. patient identity (high = memorised the individual)")
-    res = label_knn_agreement(mu_gauss, meta["patient_id"], k=args.k,
-                              n_components=dims)
-    logger.info("   %s", format_agreement("patient_id", res))
-    record("knn-agreement", "patient_id", "all cells", res["n_cells"],
-           res["excess"], "high is BAD — individual identity, not biology")
+    # ── 4. does the label survive when same-donor neighbours are removed? ────
+    # Phase (32.1%), grade (25.9%) and donor identity (27.6%) all scored the
+    # same in the first run, which is what a latent clustering by donor looks
+    # like: each donor carries one phase and one grade, so both come for free.
+    # Excluding a cell's own donor removes that shortcut.
+    logger.info("── 4. cross-donor: same test, same-donor neighbours discarded")
+    for col in ["MenstrualCyclePhase_main", "EndometriosisGrade",
+                "AnnotationMain", "phase", "Endometriosis_stage"]:
+        for bname, lat in branches.items():
+            res = cross_group_agreement(lat, meta[col], meta["patient_id"],
+                                        k=max(args.k, 100))
+            if not np.isfinite(res.get("agreement", float("nan"))):
+                break
+            logger.info(
+                "   %-9s %-26s n=%6d  agreement=%.3f  chance=%.3f  "
+                "excess=%6.1f%%  (%.0f of %d neighbours survived)",
+                bname, col, res["n_cells"], res["agreement"], res["chance"],
+                100 * res["excess"], res["neighbours_kept"], max(args.k, 100),
+            )
+            record("cross-donor", col, bname, res["n_cells"], res["excess"],
+                   f"{res['neighbours_kept']:.0f} neighbours kept")
+
+    # ── 5. NMI and ARI — a differently-built check on the same question ──────
+    # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster
+    # first and then compare to the labels, so they fail in different ways.
+    # Agreement between the two is far stronger than either alone, and this is
+    # what the scIB benchmark (Luecken et al. 2022) reports.
+    logger.info("── 5. NMI / ARI on cell type (scIB-style, clustering-based)")
+    for col in ["AnnotationMain", "AnnotationRefined", "celltype"]:
+        vals = meta[col]
+        ok = np.array([v is not None and str(v).strip().lower()
+                       not in ("", "nan", "none", "na", "unknown") for v in vals])
+        if ok.sum() < 100:
+            continue
+        _, bio = np.unique(np.asarray(vals)[ok].astype(str), return_inverse=True)
+        for bname, lat in branches.items():
+            try:
+                m = compute_scib_metrics(lat[ok], study_id[ok], bio)
+            except Exception as exc:                      # noqa: BLE001
+                logger.warning("   %s %s: %s", bname, col, exc)
+                continue
+            shown = {k2: v for k2, v in m.items() if np.isfinite(v)}
+            logger.info("   %-9s %-20s n=%6d  %s", bname, col, int(ok.sum()),
+                        "  ".join(f"{k2}={v:.3f}" for k2, v in shown.items()))
+            for k2, v in shown.items():
+                record(f"scib-{k2}", col, bname, int(ok.sum()), v, "")
 
     out = Path(args.out) if args.out else run_dir
     out.mkdir(parents=True, exist_ok=True)

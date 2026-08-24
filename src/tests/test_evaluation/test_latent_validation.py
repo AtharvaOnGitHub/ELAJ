@@ -13,6 +13,8 @@ import pytest
 pytest.importorskip("sklearn", reason="kNN agreement needs scikit-learn")
 
 from endo_model.evaluation.latent_validation import (
+    circular_coordinates,
+    cross_group_agreement,
     circular_linear_corr,
     format_agreement,
     label_knn_agreement,
@@ -163,3 +165,73 @@ def test_the_rendered_line_always_carries_the_cell_count():
     line = format_agreement("celltype", label_knn_agreement(latent, labels, k=20))
     assert "n=" in line and "celltype" in line
     assert "too few" in format_agreement("x", {"n_cells": 2, "agreement": float("nan")})
+
+
+# ── cross-donor agreement ────────────────────────────────────────────────────
+
+def donors_and_phase(seed=7):
+    """Six donors, three per phase — the shape of the real confound.
+
+    Each donor carries exactly one phase, which is true of every donor in the
+    corpus. So a latent that groups a donor's cells together scores on phase
+    without representing phase at all.
+    """
+    rng = np.random.default_rng(seed)
+    donor = np.repeat(np.arange(6), 60)
+    phase = np.where(donor < 3, "proliferative", "secretory")
+    by_donor = (np.repeat(rng.normal(0, 1, (6, 4)), 60, axis=0)
+                + rng.normal(0, 0.02, (360, 4)))
+    by_phase = (np.where((donor < 3)[:, None], 0.0, 8.0)
+                + rng.normal(0, 0.5, (360, 4)))
+    return donor, phase, by_donor, by_phase
+
+
+def test_the_plain_test_cannot_tell_donor_clustering_from_phase_signal():
+    """Why cross_group_agreement had to be written: both latents score 100% on
+    the plain test, and only one of them represents phase."""
+    donor, phase, by_donor, by_phase = donors_and_phase()
+    assert label_knn_agreement(by_donor, phase, k=30)["excess"] > 0.95
+    assert label_knn_agreement(by_phase, phase, k=30)["excess"] > 0.95
+
+
+def test_cross_donor_rejects_a_latent_that_only_knows_the_donor():
+    donor, phase, by_donor, _ = donors_and_phase()
+    r = cross_group_agreement(by_donor, phase, donor, k=100)
+    assert r["excess"] < 0.1, "donor clustering must not read as phase signal"
+
+
+def test_cross_donor_keeps_a_latent_that_really_knows_phase():
+    donor, phase, _, by_phase = donors_and_phase()
+    assert cross_group_agreement(by_phase, phase, donor, k=100)["excess"] > 0.9
+
+
+def test_cross_donor_reports_how_many_neighbours_survived():
+    """A result resting on two surviving neighbours is not a result. The count
+    is what says whether the number can be trusted."""
+    donor, phase, by_donor, _ = donors_and_phase()
+    r = cross_group_agreement(by_donor, phase, donor, k=100)
+    assert 0 < r["neighbours_kept"] <= 100
+
+
+def test_cross_donor_returns_nan_rather_than_raising_when_starved():
+    donor, phase, _, by_phase = donors_and_phase()
+    r = cross_group_agreement(by_phase[:20], phase[:20], donor[:20], k=100)
+    assert math.isnan(r["agreement"])
+
+
+# ── circular coordinates ─────────────────────────────────────────────────────
+
+def test_circular_coordinates_are_unit_length_per_angle():
+    a = np.array([[0.0, 3.0], [6.28, 0.1]])
+    out = circular_coordinates(a)
+    assert out.shape == (2, 4)
+    n = out.shape[1] // 2
+    assert np.allclose(out[:, :n] ** 2 + out[:, n:] ** 2, 1.0)
+
+
+def test_angles_a_full_turn_apart_land_in_the_same_place():
+    """The reason angles cannot be fed to a Euclidean neighbour search raw:
+    0.01 and 0.01 + 2*pi are one point on the circle and 6.28 apart as numbers."""
+    a = circular_coordinates(np.array([[0.01]]))
+    b = circular_coordinates(np.array([[0.01 + 2 * np.pi]]))
+    assert np.allclose(a, b, atol=1e-9)

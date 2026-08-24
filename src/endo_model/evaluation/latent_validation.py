@@ -170,3 +170,103 @@ def format_agreement(name: str, r: dict) -> str:
         f"agreement={r['agreement']:.3f}  chance={r['chance']:.3f}  "
         f"excess={r['excess']:6.1%}"
     )
+
+
+def circular_coordinates(mu_angle: np.ndarray) -> np.ndarray:
+    """Circular means as (cos, sin) pairs, so a neighbour search can use them.
+
+    An angle cannot be fed to a Euclidean distance directly: 0.01 and 6.27
+    radians are adjacent on the circle and 6.26 apart as numbers. On the unit
+    circle the straight-line distance between two points is a monotone function
+    of the angle between them, so Euclidean nearest-neighbours on these
+    coordinates ARE angular nearest-neighbours.
+
+    Returns (n, 2 * n_vMF). Layout does not matter -- Euclidean distance is
+    invariant to permuting columns.
+    """
+    a = np.asarray(mu_angle, dtype=float)
+    return np.concatenate([np.cos(a), np.sin(a)], axis=-1)
+
+
+def cross_group_agreement(
+    latent: np.ndarray,
+    labels: np.ndarray,
+    groups: np.ndarray,
+    k: int = 100,
+    seed: int = 24,
+) -> dict:
+    """Label agreement among neighbours from OTHER groups only.
+
+    THE PROBLEM THIS SOLVES. Each donor in this corpus contributes one cycle
+    phase and one disease grade, so a latent that merely puts a donor's cells
+    together scores on phase and grade for free, without representing either.
+    In the first validation run phase (32.1%), grade (25.9%) and donor identity
+    itself (27.6%) all landed in the same band, which is exactly what that
+    artefact looks like.
+
+    Discarding same-donor neighbours removes the shortcut. What remains is the
+    question worth asking: does the model place a proliferative cell near
+    proliferative cells FROM OTHER PEOPLE?
+
+    `chance` is computed per cell as the share of all other-group cells that
+    carry that cell's label, then averaged -- not the global sum(p^2), because
+    excluding a cell's own group changes the pool it is being compared against.
+
+    k defaults to 100 rather than 30: if donor clustering is tight, most of a
+    cell's 30 nearest neighbours are its own donor's and too few survive the
+    mask to measure anything. `neighbours_kept` reports what actually survived,
+    and a low value there means the result rests on very little.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    labels = np.asarray(labels)
+    groups = np.asarray(groups)
+    keep = np.array([_is_labelled(v) for v in labels])
+    n = int(keep.sum())
+    if n < k + 1:
+        return {"n_cells": n, "agreement": float("nan"), "chance": float("nan"),
+                "excess": float("nan"), "neighbours_kept": 0.0, "n_labels": 0}
+
+    lat, lab = latent[keep], _encode(labels[keep])
+    grp = _encode(groups[keep].astype(str))
+
+    kk = min(k, len(lat) - 1)
+    nn = NearestNeighbors(n_neighbors=kk + 1).fit(lat)
+    _, idx = nn.kneighbors(lat)
+    neigh = idx[:, 1:]
+
+    same_group = grp[neigh] == grp[:, None]
+    same_label = lab[neigh] == lab[:, None]
+    usable = ~same_group
+    kept = usable.sum(axis=1)
+    has_any = kept > 0
+    if not has_any.any():
+        return {"n_cells": n, "agreement": float("nan"), "chance": float("nan"),
+                "excess": float("nan"), "neighbours_kept": 0.0,
+                "n_labels": int(len(np.unique(lab)))}
+
+    agreement = float(
+        ((same_label & usable).sum(axis=1)[has_any] / kept[has_any]).mean()
+    )
+
+    # Per-cell chance: among every cell NOT in this cell's group, what share
+    # carries this cell's label?
+    chances = []
+    for g in np.unique(grp):
+        others = grp != g
+        if not others.any():
+            continue
+        lab_others = lab[others]
+        for lb in np.unique(lab[grp == g]):
+            share = float((lab_others == lb).mean())
+            chances.extend([share] * int(((grp == g) & (lab == lb)).sum()))
+    chance = float(np.mean(chances)) if chances else float("nan")
+    head = 1.0 - chance
+    return {
+        "n_cells": int(has_any.sum()),
+        "n_labels": int(len(np.unique(lab))),
+        "agreement": agreement,
+        "chance": chance,
+        "excess": float((agreement - chance) / head) if head > 1e-12 else float("nan"),
+        "neighbours_kept": float(kept[has_any].mean()),
+    }

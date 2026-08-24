@@ -220,10 +220,30 @@ def test_cross_donor_rejects_a_latent_that_only_knows_the_donor(seed):
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_cross_donor_keeps_a_latent_that_really_knows_phase(seed):
-    donor, phase, _, by_phase = donors_and_phase(seed=seed)
+    """TEN donors, not six, and the reason is a hard limit rather than taste.
+
+    The permutation deals labels out to donors, so with six donors split 3/3
+    there are only C(6,3) = 20 distinct assignments — and the true one plus its
+    complete label-swap both score perfectly, putting a floor of 2/20 = 0.100
+    under the p-value. An earlier version asserted p <= 0.05 at six donors and
+    failed at 0.1045, which was the floor, not the model.
+
+    Ten donors give 252 assignments and a floor near 0.008.
+    """
+    donor, phase, _, by_phase = donors_and_phase(seed=seed, n_donors=10)
     r = cross_group_agreement(by_phase, phase, donor, k=100, n_permutations=200)
     assert r["excess"] > 0.9
+    assert r["p_floor"] < 0.05, "the test must be able to reach significance"
     assert r["p_value"] <= 0.05
+
+
+def test_the_reachable_p_value_is_reported_and_bounded_by_the_donor_count():
+    """So a non-significant result can be told from an undetectable one."""
+    six = cross_group_agreement(*_phase_args(6), k=100, n_permutations=200)
+    twelve = cross_group_agreement(*_phase_args(12), k=100, n_permutations=200)
+    assert six["n_assignments"] == 20          # C(6,3)
+    assert six["p_floor"] > 0.05               # significance unreachable
+    assert twelve["p_floor"] < 0.01            # comfortably reachable
 
 
 def test_the_null_band_widens_when_there_are_fewer_donors():

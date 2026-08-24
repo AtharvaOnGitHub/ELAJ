@@ -316,10 +316,24 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
     The neighbour search is not repeated -- only the labels move -- so this is
     cheap however many permutations are asked for.
     """
+    from math import comb
+
     rng = np.random.default_rng(seed)
     groups = np.unique(grp)
     # One label per group: whatever most of its cells carry.
     per_group = np.array([np.bincount(lab[grp == g]).argmax() for g in groups])
+
+    # How many distinct ways the labels can be dealt out to the groups. This
+    # bounds the p-value from below, and the bound bites: six donors split 3/3
+    # give only C(6,3) = 20 assignments, of which the true one and its complete
+    # label-swap both score perfectly -- so p cannot fall below 0.100 no matter
+    # how good the latent is. A non-significant result then means "could not be
+    # detected", not "no signal", and the two must not be confused.
+    _, group_counts = np.unique(per_group, return_counts=True)
+    n_assign, remaining = 1, len(per_group)
+    for c in group_counts:
+        n_assign *= comb(remaining, int(c))
+        remaining -= int(c)
 
     nulls = []
     for _ in range(n_permutations):
@@ -332,7 +346,17 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
     nulls = np.asarray([v for v in nulls if np.isfinite(v)])
     if nulls.size == 0:
         return {}
+    floor = 1.0 / max(n_assign, 1)
+    if floor > 0.025:
+        logger.warning(
+            "Only %d distinct label assignments over %d groups: the p-value "
+            "cannot fall below about %.3f, so a non-significant result here "
+            "means undetectable rather than absent.",
+            n_assign, len(per_group), floor,
+        )
     return {
         "null_p95": float(np.percentile(np.abs(nulls), 95)),
         "p_value": float((1 + int((nulls >= observed).sum())) / (1 + nulls.size)),
+        "n_assignments": int(n_assign),
+        "p_floor": float(floor),
     }

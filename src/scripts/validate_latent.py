@@ -281,9 +281,18 @@ def main() -> None:
             if not np.isfinite(res.get("agreement", float("nan"))):
                 break
             p_val = res.get("p_value", float("nan"))
-            verdict = ("" if not np.isfinite(p_val)
-                       else "  SIGNIFICANT" if p_val <= 0.05
-                       else "  not significant")
+            floor = res.get("p_floor", float("nan"))
+            if not np.isfinite(p_val):
+                verdict = ""
+            elif p_val <= 0.05:
+                verdict = "  SIGNIFICANT"
+            elif np.isfinite(floor) and floor > 0.05:
+                # Significance was never reachable: with few donors there are
+                # too few ways to deal the labels out for the permutation test
+                # to produce a small p. Not the same as "no signal".
+                verdict = f"  UNDETECTABLE (p could not fall below {floor:.2f})"
+            else:
+                verdict = "  not significant"
             logger.info(
                 "   %-9s %-26s n=%6d  excess=%6.1f%%  null95=%.2f  p=%.3f  "
                 "(%.0f of %d neighbours kept, %d donors)%s",
@@ -293,7 +302,8 @@ def main() -> None:
                 res.get("n_groups", 0), verdict,
             )
             record("cross-donor", col, bname, res["n_cells"], res["excess"],
-                   f"p={p_val:.3f}; null95={res.get('null_p95', float('nan')):.2f}; "
+                   f"p={p_val:.3f}; floor={floor:.3f}; "
+                   f"null95={res.get('null_p95', float('nan')):.2f}; "
                    f"{res['neighbours_kept']:.0f} kept; "
                    f"{res.get('n_groups', 0)} donors")
 

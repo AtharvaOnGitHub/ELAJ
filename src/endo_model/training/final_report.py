@@ -71,9 +71,6 @@ class FinalReporter:
         import torch
 
         from endo_model.evaluation.latent_collection import collect_latents
-        from endo_model.evaluation.study_mixing import (
-            describe, format_per_study, per_study_purity,
-        )
         from endo_model.training.checkpointing import CheckpointManager
 
         if checkpoint_path is None:
@@ -95,9 +92,6 @@ class FinalReporter:
             logger.info("Validation loader was empty; final figures skipped.")
             return
 
-        logger.info("Best epoch, %s", describe(latents["mu_gauss"], latents["study_id"]))
-        self._report_per_study(latents)
-
         self.fig_dir.mkdir(parents=True, exist_ok=True)
         original, self.reporter.fig_dir = self.reporter.fig_dir, self.fig_dir
         try:
@@ -110,39 +104,20 @@ class FinalReporter:
             self.reporter.fig_dir = original
         logger.info("Final figures written to %s", self.fig_dir)
 
-    def _report_per_study(self, latents: dict) -> None:
-        """Log the per-study breakdown and write it beside the run's metrics.
-
-        Done here rather than in scripts/report_purity.py because the
-        validation set is already built and already embedded at this point.
-        Measuring it separately costs a second GPU job and twenty minutes of
-        rebuilding the split to arrive at the same numbers.
-
-        Wrapped: a failure to write a diagnostic table must not lose the
-        figures that follow it, nor a finished training run.
-        """
-        from endo_model.evaluation.study_mixing import (
-            format_per_study, per_study_purity,
-        )
-
-        try:
-            rows = per_study_purity(latents["mu_gauss"], latents["study_id"])
-            if not rows:
-                return
-            logger.info(
-                "Best epoch, kNN purity per study (k=30):\n%s",
-                format_per_study(rows, self.study_names),
-            )
-            self._write_per_study_csv(rows)
-        except Exception as exc:  # noqa: BLE001 — diagnostic must not be fatal
-            logger.warning(
-                "Per-study purity skipped (%s: %s).", type(exc).__name__, exc
-            )
+        # draw_latents logged mixing and left the rows behind. Only the file is
+        # this class's job now -- the numbers appear at every latent epoch, not
+        # just this one.
+        self._write_per_study_csv(self.reporter.last_mixing_rows)
 
     def _write_per_study_csv(self, rows: list[dict]) -> None:
-        """One row per study, next to metrics.csv so both travel together."""
+        """One row per study, next to metrics.csv so both travel together.
+
+        Wrapped: a diagnostic file must not cost a finished training run.
+        """
         import csv
 
+        if not rows:
+            return
         path = self.out_dir / "purity_per_study.csv"
         self.out_dir.mkdir(parents=True, exist_ok=True)
         with open(path, "w", newline="", encoding="utf-8") as f:

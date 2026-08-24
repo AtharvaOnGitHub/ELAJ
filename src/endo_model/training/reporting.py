@@ -156,6 +156,8 @@ class EpochReporter:
         self.latent_every = latent_every
         self.max_latent_cells = max_latent_cells
         self.seed = seed
+        # Filled by draw_latents; FinalReporter writes the last set to CSV.
+        self.last_mixing_rows: list[dict] = []
         # Compute nodes have no display. matplotlib usually detects that,
         # but a figure backend guessing wrong on a 24-hour job is not worth
         # the risk when one line removes the question.
@@ -205,11 +207,43 @@ class EpochReporter:
         exactly these from the best checkpoint once training ends, and must not
         also redraw the loss panels — it has no history to draw them from.
         """
+        self.last_mixing_rows = self.report_mixing(latents)
         self._draw(
             f"latent_circular_epoch{epoch:03d}",
             lambda: circular_latent(latents["mu_angle"], latents["kappa"], epoch),
         )
         self._draw_umap(epoch, latents)
+
+    def report_mixing(self, latents: dict) -> list[dict]:
+        """Log study mixing for this set of latents, corpus and per study.
+
+        Called from `draw_latents`, so it fires on exactly the epochs that get
+        latent figures and once more at the best checkpoint. That pairing is
+        deliberate: the UMAP is the picture and this is the number behind it,
+        and reading the picture without the number is how three waves of this
+        project mistook a rearranged blob for a mixed one.
+
+        One neighbour search serves both readouts -- see study_mixing.summarise.
+        Wrapped, because a diagnostic must not end a training run.
+        """
+        from endo_model.evaluation.study_mixing import format_per_study, summarise
+
+        try:
+            line, rows = summarise(
+                latents["mu_gauss"], latents["study_id"], names=self.id_to_name
+            )
+            logger.info("%s", line)
+            if rows:
+                logger.info(
+                    "kNN purity per study:\n%s",
+                    format_per_study(rows, self.id_to_name),
+                )
+            return rows
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Study mixing skipped (%s: %s).", type(exc).__name__, exc
+            )
+            return []
 
     def _draw_umap(self, epoch: int, latents: dict[str, np.ndarray]) -> None:
         coords = safe_umap(latents["mu_gauss"], seed=self.seed)

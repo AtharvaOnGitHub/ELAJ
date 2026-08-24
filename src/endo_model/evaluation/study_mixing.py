@@ -209,3 +209,46 @@ def describe(latent: np.ndarray, study_id: np.ndarray, k: int = 30) -> str:
         f"[perfectly mixed = {floor:.3f}, fully separated = 1.000]  "
         f"→ {excess:.1%} of the way to fully separated"
     )
+
+
+def summarise(
+    latent: np.ndarray,
+    study_id: np.ndarray,
+    k: int = 30,
+    seed: int = 24,
+    n_components: int | None = None,
+    names: dict[int, str] | None = None,
+) -> tuple[str, list[dict]]:
+    """Both readouts from ONE neighbour search.
+
+    `describe` and `per_study_purity` each run their own search, which is the
+    expensive part. Called every time latent figures are drawn, that doubling
+    is worth avoiding.
+
+    Returns (one-line corpus summary, per-study rows).
+    """
+    share = own_study_share(latent, study_id, k, seed, n_components)
+    if share is None:
+        return f"kNN study purity (k={k}): too few cells to measure", []
+
+    got, floor = float(share.mean()), expected_purity(study_id)
+    headroom = 1.0 - floor
+    excess = (got - floor) / headroom if headroom > 0 else float("nan")
+    line = (
+        f"kNN study purity (k={k}): {got:.3f}  "
+        f"[perfectly mixed = {floor:.3f}, fully separated = 1.000]  "
+        f"\u2192 {excess:.1%} of the way to fully separated"
+    )
+
+    n_total = len(study_id)
+    rows = []
+    for s in np.unique(study_id):
+        idx = np.flatnonzero(study_id == s)
+        f = len(idx) / n_total
+        pur = float(share[idx].mean())
+        rows.append({
+            "study_id": int(s), "n_cells": int(len(idx)), "purity": pur,
+            "floor": float(f),
+            "excess": float((pur - f) / (1.0 - f)) if f < 1.0 else float("nan"),
+        })
+    return line, rows

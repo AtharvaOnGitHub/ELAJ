@@ -5,7 +5,7 @@
 # but not enough to raise the batch, which is the cheapest throughput win when
 # the GPU is only 70% busy.
 #SBATCH --gres=gpu:a100_80:1
-#SBATCH --time=24:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -24,7 +24,13 @@
 # densifies one cell per __getitem__, so collation is CPU-bound and starving it
 # will idle the GPU.
 #
-# Walltime is a guess until an epoch has actually been timed.  Training is
+# WALLTIME: two days, which is the queue maximum. It was 24 h for most of this
+# project's history, and that was a self-imposed limit rather than the cluster's
+# — every arm of waves R7 and R8 was cancelled by it, and every one of them had
+# its best epoch on the LAST epoch it completed, meaning all six were still
+# improving when they died. At ~4400 s/epoch two days holds about 39 epochs.
+#
+# Walltime was a guess until an epoch had actually been timed.  Training is
 # resumable — set training.resume_from_checkpoint in the experiment YAML to
 # outputs/first_run/checkpoints/<file> and resubmit.
 

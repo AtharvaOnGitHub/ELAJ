@@ -56,11 +56,13 @@ output_dir: outputs/r8_latent_2_3/
 seed: 24
 
 overrides:
-  # Back to the wave-R5 cap. At batch 256 with checkpointing the epoch should
-  # land near 2900 s -- 2263 s for a non-CCE batch-256 epoch, plus CCE's second
-  # pass, plus ~30% for recomputation -- so 25 epochs is about 20 h, inside
-  # train.sh's 24 h. If epochs run slower than that, cut this to 20.
-  training.max_epochs: 20
+  # 35, against a measured 4374 s/epoch and train.sh's two-day wall: 35 epochs
+  # is 42.5 h, leaving room for the final report.
+  #
+  # This was 20 while train.sh asked for 24 h, and both R8 arms were cancelled
+  # at epoch 18 with their best epoch being the last one they finished -- still
+  # improving, never converged. The 24 h was self-imposed, not the queue's.
+  training.max_epochs: 35
   training.batch_size: 256
 
   training.diagnostics.log_every: 50

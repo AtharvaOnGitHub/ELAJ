@@ -27,16 +27,67 @@ What survives is narrow, and nearly all of it lives in one study.
 
 ## The scoreboard
 
-| # | test | label | studies (val cells) | result |
-|---|---|---|---|---|
-| 1 | **Cycle day** | `CycleDay` — continuous, *periodic* | duempelmann (48,381) | |
-| 2 | Menstrual phase | `MenstrualCyclePhase_main` / refined | duempelmann, marecko (3,197), lin ¹ (8,109) | |
-| 3 | Cell type | `AnnotationMain`, `celltype`, `lineage` | duempelmann, marecko | |
-| 4 | Disease grade | `EndometriosisGrade` (mild / severe / non) | duempelmann | |
-| 5 | Patient identity | `patient_id` | all | |
-| 6 | QC negative controls | `pct_counts_mt`, `total_counts`, `n_genes_by_counts`, `doublet_score` | all | |
-| 7 | Train/val overlap | split membership | all | |
-| 8 | Gene signatures | inflammatory / endometriosis marker sets | all | |
+First run: `r8_direction`, epoch 18 (the 20-epoch wave-R8 arm), 121,856
+validation cells embedded.
+
+| # | test | label | n (study) | measured | chance | excess | verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | **Cycle day** | `CycleDay` | 48,128 duem. | r = **0.117** best of 4 circular dims | — | — | ❌ **negative** |
+| 2 | Menstrual phase | `MenstrualCyclePhase_main` | 48,128 duem. | 0.671 | 0.516 | **32.1%** | ⚠ confounded ¹ |
+| 2b | | `phase` | 3,072 marecko | 0.688 | 0.643 | 12.4% | weak |
+| 3 | **Cell type** | `AnnotationMain` (5) | 48,084 duem. | **0.965** | 0.760 | **85.5%** | ✅ **positive** |
+| 3b | | `AnnotationRefined` (61) | 48,085 duem. | 0.510 | 0.364 | **23.0%** | ✅ positive |
+| 3c | | `lineage` (4) | 3,072 marecko | 0.986 | 0.967 | 59.4% | ⚠ only 3.3% headroom |
+| 3d | | `celltype` (16) | 3,072 marecko | 0.283 | 0.209 | 9.3% | weak |
+| 4 | Disease grade | `EndometriosisGrade` | 48,128 duem. | 0.632 | 0.504 | 25.9% | ⚠ confounded ¹ |
+| 4b | | `Endometriosis_stage` | 3,072 marecko | 0.691 | 0.580 | 26.4% | ⚠ confounded ¹ |
+| 5 | Patient identity | `patient_id` (23) | 121,856 all | 0.321 | 0.062 | **27.6%** | ⚠ see ¹ |
+| 6 | QC negative controls | see below | 121,856 all | r = 0.18–0.29 | — | — | ⚠ **not clean** |
+| 7 | Train/val overlap | split membership | — | | | | not run |
+| 8 | Gene signatures | marker sets | — | | | | not run |
+
+¹ **Phase, grade and patient identity cannot be separated here.** Every one of
+`duempelmann`'s 9 validation donors carries exactly one phase and one grade, so
+a latent that merely clusters by donor scores on all three automatically. Patient
+identity alone reaches 27.6%, which is the same band as phase (32.1%) and grade
+(25.9%). Those two are therefore **fully explained by donor clustering** and are
+not evidence of biology.
+
+**Cell type is the exception, and that is what makes it the result.** Cell type
+varies *within* a donor, so donor clustering cannot produce it. `AnnotationMain`
+at 85.5% excess over a 0.760 chance line, on 48,084 cells, is the one number on
+this page that survives the confound.
+
+### Negative controls, in detail
+
+| covariate | Gaussian max\|r\| | circular r | n |
+|---|---|---|---|
+| `pct_counts_mt` | 0.254 | 0.203 | 121,856 |
+| `total_counts` | 0.176 | 0.231 | 121,856 |
+| `n_genes_by_counts` | 0.189 | **0.288** | 121,856 |
+| `scrublet_score` | 0.296 | 0.227 | 3,072 |
+| `scDblFinder.score` | 0.118 | 0.114 | 48,128 |
+
+**The circular branch tracks gene count (0.288) more than it tracks cycle day
+(0.117).** That is the strongest single argument that the circular latent is not
+doing the job it was built for.
+
+One caveat that softens it: `total_counts` and `n_genes_by_counts` are
+themselves correlated with cell type — different cell types carry different
+amounts of RNA — so part of this correlation is mediated by biology rather than
+being pure technical noise. It is not a clean negative control, and reporting it
+as proof of a technical latent would overstate it.
+
+### Continuous biology, for contrast
+
+| covariate | Gaussian max\|r\| | circular r |
+|---|---|---|
+| `epithelial.pseudotime` | **0.410** | 0.176 |
+| `ProgesteroneSerum` | **0.388** | 0.253 |
+
+The **Gaussian** branch tracks biology (0.39–0.41) above every QC covariate
+(0.12–0.30). The **circular** branch does the reverse. The two branches are not
+in the same state, and the split is consistent with test 1.
 
 ¹ `lin_2023`'s h5ad has no phase column. The GEO series matrix does — 5
 proliferative and 5 secretory of 13 samples — so it needs a per-sample join in

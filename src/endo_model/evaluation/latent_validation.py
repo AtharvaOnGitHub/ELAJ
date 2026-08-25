@@ -148,6 +148,150 @@ def label_knn_agreement(
     }
 
 
+def per_label_agreement(
+    latent: np.ndarray,
+    labels: np.ndarray,
+    k: int = 30,
+    seed: int = 24,
+    n_components: int | None = None,
+) -> list[dict]:
+    """`label_knn_agreement` broken out per label VALUE rather than averaged.
+
+    The average hides imbalance, and this corpus is severely imbalanced:
+    `AnnotationMain` is 88% stromal, which is why its chance line sits at 0.760.
+    A latent that found stromal cells and nothing else would still post a high
+    average. Per value, that latent shows one tall bar and four at chance.
+
+    Each value gets its OWN chance line -- the share of all cells carrying it --
+    because a value held by 5% of cells and one held by 88% are not being asked
+    the same question.
+    """
+    from endo_model.evaluation.study_mixing import own_study_share
+
+    labels = np.asarray(labels)
+    keep = np.array([_is_labelled(v) for v in labels])
+    if int(keep.sum()) < k + 1:
+        return []
+
+    text = labels[keep].astype(str)
+    names, codes = np.unique(text, return_inverse=True)
+    share = own_study_share(latent[keep], codes, k, seed, n_components)
+    if share is None:
+        return []
+
+    counts = np.bincount(codes, minlength=len(names))
+    total = counts.sum()
+    return [
+        {
+            "label": str(name),
+            "n_cells": int(counts[c]),
+            "agreement": float(share[codes == c].mean()),
+            "chance": float(counts[c] / total),
+        }
+        for c, name in enumerate(names)
+    ]
+
+
+def neighbour_confusion(
+    latent: np.ndarray,
+    labels: np.ndarray,
+    k: int = 30,
+    seed: int = 24,
+    n_components: int | None = None,
+) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Rows: a cell's own label. Columns: the labels of its k neighbours.
+
+    Every row sums to 1. The diagonal is what `per_label_agreement` reports;
+    the off-diagonal is what an agreement score throws away -- WHICH labels the
+    latent places together. Two cell types that are biologically adjacent
+    confusing with each other is a different finding from either confusing with
+    an unrelated one, and only this shows the difference.
+
+    Reads like a classifier confusion matrix, which is deliberate: it needs no
+    biology to interpret.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    labels = np.asarray(labels)
+    keep = np.array([_is_labelled(v) for v in labels])
+    if int(keep.sum()) < k + 1:
+        return np.empty((0, 0)), [], np.empty(0, dtype=int)
+
+    lat = latent[keep]
+    if n_components:
+        from endo_model.evaluation.study_mixing import project
+        lat = project(lat, n_components)
+
+    names, codes = np.unique(labels[keep].astype(str), return_inverse=True)
+    kk = min(k, len(lat) - 1)
+    _, idx = NearestNeighbors(n_neighbors=kk + 1).fit(lat).kneighbors(lat)
+    neighbour_codes = codes[idx[:, 1:]]          # own cell dropped
+
+    matrix = np.zeros((len(names), len(names)), dtype=float)
+    for c in range(len(names)):
+        rows = neighbour_codes[codes == c]
+        if rows.size == 0:
+            continue
+        matrix[c] = np.bincount(rows.ravel(),
+                                minlength=len(names)) / rows.size
+    return matrix, [str(n) for n in names], np.bincount(codes,
+                                                        minlength=len(names))
+
+
+def ordinal_centroid_distance(
+    latent: np.ndarray,
+    labels: np.ndarray,
+    order,
+) -> tuple[np.ndarray, list[str]]:
+    """Distance between the centroids of each pair of ORDERED label levels.
+
+    Only worth computing for a label whose values have a sequence -- rASRM
+    stage I to IV, or the menstrual phases. The question it asks is stronger
+    than any grouping test: does the latent recover the ORDER, so that levels
+    two steps apart sit further apart than levels one step apart?
+
+    Grouping can arise from any partition of the data. Reproducing a monotone
+    ordering cannot -- there are many more ways to group correctly than to
+    both group and order correctly -- so a gradient here is hard to obtain by
+    accident.
+
+    Levels absent from the data are dropped and the returned names say which
+    survived; `order` is the full vocabulary, not a promise that all of it is
+    present.
+    """
+    labels = np.asarray(labels).astype(str)
+    present = [str(v) for v in order if (labels == str(v)).sum() > 0]
+    if len(present) < 2:
+        return np.empty((0, 0)), []
+
+    centroids = np.stack([latent[labels == v].mean(axis=0) for v in present])
+    diff = centroids[:, None, :] - centroids[None, :, :]
+    return np.linalg.norm(diff, axis=-1), present
+
+
+def label_counts_by_group(labels: np.ndarray, groups: np.ndarray,
+                          order=None) -> tuple[list[str], list[str], np.ndarray]:
+    """Cells per (group, label) pair -- donors against phases, say.
+
+    Feeds the figure that shows the donor confound as data: if each donor row
+    holds exactly one non-zero column, knowing the donor gives the label away,
+    and a reader can see that without being told it.
+    """
+    labels = np.asarray(labels)
+    groups = np.asarray(groups)
+    keep = np.array([_is_labelled(v) for v in labels])
+    if not keep.any():
+        return [], [], np.empty((0, 0))
+
+    lab, grp = labels[keep].astype(str), groups[keep].astype(str)
+    names = ([str(v) for v in order if (lab == str(v)).any()] if order
+             else sorted(set(lab)))
+    donors = sorted(set(grp))
+    grid = np.array([[int(((grp == d) & (lab == n)).sum()) for n in names]
+                     for d in donors], dtype=float)
+    return donors, names, grid
+
+
 def _is_labelled(v) -> bool:
     if v is None:
         return False

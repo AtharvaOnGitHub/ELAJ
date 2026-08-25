@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
-#SBATCH --time=04:00:00
+#SBATCH --time=12:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -20,11 +20,22 @@
 # only six donors carry a phase label, and at six donors the smallest reachable
 # p is 0.10 -- the test cannot answer. val+test gives eighteen held-out donors.
 #
+# ALWAYS PASS --out WHEN RUNNING MORE THAN ONE SPLIT COMBINATION. The figures
+# go where --out points, so two runs sharing a directory silently overwrite
+# each other's pictures.
+#
 # One experiment NAME, not an output path. Flags beginning with "-" pass
 # through to validate_latent.py; see report_purity.sh for the same convention.
 #
-# No training. It embeds the validation split once from a checkpoint already on
-# disk, so it can run against a finished wave while the next one trains.
+# No training. It embeds the split once from a checkpoint already on disk, so
+# it can run against a finished wave while the next one trains.
+#
+# ripser is optional and only figure 23 (persistent homology) needs it. Install
+# it from a LOGIN node, where there is internet:
+#     source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+#     pip install ripser
+# Without it that one figure reports the library as missing and the other
+# fifteen are unaffected.
 
 set -euo pipefail
 
@@ -32,7 +43,8 @@ ARMS=()
 EXTRA=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dims|--k|--out|--root|--config-dir|--runs-dir|--cycle-period|--permutations)
+        --dims|--k|--out|--root|--config-dir|--runs-dir|--cycle-period|--permutations|\
+        --umap-cells|--baseline-cells|--topology-cells)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --splits)
             # nargs="+": take every following bare word as a split name.

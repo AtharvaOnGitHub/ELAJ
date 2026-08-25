@@ -40,10 +40,16 @@ logger = logging.getLogger("elaj.validate")
 CIRCULAR_CONTINUOUS = ["CycleDay"]                       # periodic — the headline
 LINEAR_CONTINUOUS = ["ProgesteroneSerum", "epithelial.pseudotime"]
 BIOLOGY_LABELS = [
-    "MenstrualCyclePhase_main", "MenstrualCyclePhase", "phase",
+    "MenstrualCyclePhase_main", "MenstrualCyclePhase", "Stage",
     "AnnotationMain", "AnnotationRefined", "celltype", "lineage",
     "EndometriosisGrade", "Endometriosis_stage",
+    # `phase` is marecko's CELL CYCLE column -- G1, G2M, S. It is kept as a
+    # NEGATIVE control, not as menstrual phase, which is what it was read as
+    # for two waves. marecko's menstrual phase is in `Stage`.
+    "phase",
 ]
+# Merged across studies from the columns above; see label_harmonisation.
+HARMONISED = ["cell family", "menstrual phase"]
 # Negative controls. These SHOULD show nothing: library size is handed to the
 # decoder explicitly and mitochondrial fraction is cell stress, so a latent
 # organised by them is organised by technical noise.
@@ -90,17 +96,45 @@ def parse_args() -> argparse.Namespace:
                         "the raw excess is noise -- a donor-only latent "
                         "produced +0.59 on synthetic data. 0 disables.")
     p.add_argument("--out", default=None,
-                   help="Where to write validation.csv. Defaults to the run "
-                        "directory.")
+                   help="Where validation.csv AND the figures go. Defaults to "
+                        "the run directory. Set it per split combination: two "
+                        "runs sharing an output directory overwrite each "
+                        "other's pictures, which is silent and total.")
+    p.add_argument("--umap-cells", type=int, default=150000,
+                   help="Points the UMAP figures draw. The full corpus is "
+                        "~800,000, which costs most of an hour to embed and "
+                        "renders as a solid block. The sample size and seed go "
+                        "on the figure.")
+    p.add_argument("--baseline-cells", type=int, default=25000,
+                   help="Cells kept for the raw-counts baseline. This is what "
+                        "separates 'the model destroyed the signal' from 'the "
+                        "signal is not in the data' -- see "
+                        "evaluation/expression_baseline.py. 0 disables it. "
+                        "Costs cells x vocab x 4 bytes in memory.")
+    p.add_argument("--topology-cells", type=int, default=2000,
+                   help="Cells sampled for the persistent-homology figure. "
+                        "The computation is roughly cubic, so this is the one "
+                        "number that decides whether that figure takes a "
+                        "minute or an hour: 900 points runs in seconds, 3000 "
+                        "in tens of minutes. 1500-2000 recovers a torus "
+                        "reliably. 0 skips the topology.")
+    p.add_argument("--no-figures", action="store_true",
+                   help="Measure and write the CSV only.")
     return p.parse_args()
 
 
-def collect(model, loader, device, order_len: int):
+def collect(model, loader, device, order_len: int, reservoir=None,
+            row_offset: int = 0):
     """Embed the split, in the loader's own order.
 
-    Returns mu_gauss, mu_angle and study_id as arrays whose row i is the i-th
-    cell the loader yielded. That ordering is what lets the metadata be joined:
-    see `sampler_order`.
+    Returns mu_gauss, mu_angle, kappa and study_id as arrays whose row i is the
+    i-th cell the loader yielded. That ordering is what lets the metadata be
+    joined: see `sampler_order`.
+
+    `reservoir`, when given, is offered each batch's raw counts for the
+    expression baseline. It is filled during this pass rather than in a second
+    one because the counts are already in memory here and re-reading the corpus
+    to get them would double the run.
     """
     import numpy as np
     import torch
@@ -112,14 +146,25 @@ def collect(model, loader, device, order_len: int):
     # level, which is exactly what the Batch schema needs.
     from endo_model.training.trainer import _to_device
 
-    mu_gauss, mu_angle, study = [], [], []
+    mu_gauss, mu_angle, kappa, study = [], [], [], []
+    seen = 0
     model.eval()
     with torch.no_grad():
         for batch in loader:
+            if reservoir is not None:
+                counts = batch["counts"].float().cpu().numpy()
+                # Tags are GLOBAL row indices, so the sampled cells can be
+                # paired with their labels afterwards. The reservoir keeps a
+                # random subset, not a prefix, so slicing would misalign it.
+                reservoir.add(counts,
+                              np.arange(row_offset + seen,
+                                        row_offset + seen + len(counts)))
+                seen += len(counts)
             batch = _to_device(batch, device)
             out = model.encode(batch)
             mu_gauss.append(out["mu_gauss"].float().cpu().numpy())
             mu_angle.append(out["mu_angle"].float().cpu().numpy())
+            kappa.append(out["kappa"].float().cpu().numpy())
             study.append(batch["study_id"].cpu().numpy())
     if not mu_gauss:
         return None
@@ -132,7 +177,8 @@ def collect(model, loader, device, order_len: int):
             f"collected {len(got)} embeddings but the sampler yielded "
             f"{order_len} indices — the metadata join would be misaligned"
         )
-    return got, np.concatenate(mu_angle), np.concatenate(study)
+    return (got, np.concatenate(mu_angle), np.concatenate(kappa),
+            np.concatenate(study))
 
 
 def sampler_order(loader) -> list[int]:
@@ -192,7 +238,12 @@ def main() -> None:
     # One embedding pass per split, concatenated. Each split is a separate
     # Dataset, so its own sampler order is what aligns its metadata; mixing the
     # orders would pair cells with other cells' labels.
-    parts, metas = [], []
+    reservoir = None
+    if args.baseline_cells > 0:
+        from endo_model.evaluation.expression_baseline import ReservoirSampler
+        reservoir = ReservoirSampler(args.baseline_cells, seed=exp_cfg.seed)
+
+    parts, metas, split_tags = [], [], []
     for split in args.splits:
         logger.info("Building the %s split with %d metadata columns",
                     split, len(ALL_COLUMNS))
@@ -202,12 +253,16 @@ def main() -> None:
         order = sampler_order(loader)
         extra = loader.dataset.extra_obs
         logger.info("Embedding %d cells from %s", len(order), split)
-        got = collect(model, loader, device, len(order))
+        # row_offset keeps the reservoir's tags pointing at rows of the
+        # CONCATENATED arrays rather than at rows of this split.
+        got = collect(model, loader, device, len(order), reservoir,
+                      row_offset=sum(len(p_[0]) for p_ in parts))
         if got is None:
             logger.warning("  %s split was empty — skipped", split)
             continue
         parts.append(got)
         metas.append({c: extra[c][order] for c in ALL_COLUMNS})
+        split_tags.append(np.full(len(got[0]), split, dtype=object))
 
     if not parts:
         logger.error("every requested split was empty")
@@ -215,18 +270,53 @@ def main() -> None:
 
     mu_gauss = np.concatenate([p_[0] for p_ in parts])
     mu_angle = np.concatenate([p_[1] for p_ in parts])
-    study_id = np.concatenate([p_[2] for p_ in parts])
+    kappa = np.concatenate([p_[2] for p_ in parts])
+    study_id = np.concatenate([p_[3] for p_ in parts])
+    split_of = np.concatenate(split_tags)
     meta = {c: np.concatenate([m[c] for m in metas]) for c in ALL_COLUMNS}
     logger.info("Total: %d cells across split(s) %s",
                 len(mu_gauss), ", ".join(args.splits))
 
+    baseline, baseline_rows = None, None
+    if reservoir is not None and len(reservoir) > args.k + 1:
+        from endo_model.evaluation.expression_baseline import counts_pca
+        logger.info("Raw-counts baseline: %d of %d cells sampled, %d genes",
+                    len(reservoir), reservoir.n_seen, reservoir.rows.shape[1])
+        baseline = counts_pca(reservoir.rows,
+                              n_components=mu_gauss.shape[1] + 2 * mu_angle.shape[1],
+                              seed=exp_cfg.seed)
+        baseline_rows = reservoir.tags
+        del reservoir
+
+    # Two derived columns, merged from whichever studies supply them. Added to
+    # `meta` so every section below picks them up without a special case.
+    #
+    # This is what takes the corpus from one study to two: duempelmann's
+    # AnnotationMain and marecko's lineage are the same four cell families, and
+    # marecko's menstrual phase is in `Stage` -- its `phase` column holds
+    # G1/S/G2M, which is CELL CYCLE and now serves as a negative control.
+    from endo_model.evaluation.label_harmonisation import (
+        LINEAGE, LINEAGE_SOURCE_COLUMNS, MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS,
+        merge_columns,
+    )
+
+    meta["cell family"] = merge_columns(meta, LINEAGE_SOURCE_COLUMNS, LINEAGE)
+    meta["menstrual phase"] = merge_columns(meta, PHASE_SOURCE_COLUMNS,
+                                            MENSTRUAL_PHASE)
+    for name, harmoniser, columns in (
+        ("cell family", LINEAGE, LINEAGE_SOURCE_COLUMNS),
+        ("menstrual phase", MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS),
+    ):
+        _log_harmonised(meta, name, harmoniser, columns, study_id, names)
+
     # The number that decides whether the cross-donor test can answer anything.
     donors = {str(v) for v, ph in zip(meta["patient_id"],
-                                      meta["MenstrualCyclePhase_main"])
+                                      meta["menstrual phase"])
               if v is not None and ph is not None
               and str(ph).strip().lower() not in ("", "nan", "none", "unknown")}
     logger.info("Donors carrying a menstrual phase label: %d", len(donors))
     rows: list[dict] = []
+    cross_donor_results: dict[str, dict] = {}
 
     def record(test, label, scope, n, value, note=""):
         rows.append({"test": test, "label": label, "scope": scope,
@@ -286,7 +376,9 @@ def main() -> None:
     logger.info("   (branch widths: gaussian %d, circular %d, combined %d)",
                 mu_gauss.shape[1], circ.shape[1], branches["combined"].shape[1])
     dims = args.dims or None
-    for col in BIOLOGY_LABELS + ["patient_id"]:
+    # The harmonised columns first: they span two studies, so they carry the
+    # most cells and the only cross-study evidence on this page.
+    for col in HARMONISED + BIOLOGY_LABELS + ["patient_id"]:
         first = True
         for bname, lat in branches.items():
             res = label_knn_agreement(lat, meta[col], k=args.k, n_components=dims)
@@ -306,8 +398,9 @@ def main() -> None:
     # like: each donor carries one phase and one grade, so both come for free.
     # Excluding a cell's own donor removes that shortcut.
     logger.info("── 4. cross-donor: same test, same-donor neighbours discarded")
-    for col in ["MenstrualCyclePhase_main", "EndometriosisGrade",
-                "AnnotationMain", "phase", "Endometriosis_stage"]:
+    for col in HARMONISED + ["EndometriosisGrade", "Endometriosis_stage",
+                             "phase"]:
+        cross_donor_results.setdefault(col, {})
         for bname, lat in branches.items():
             res = cross_group_agreement(lat, meta[col], meta["patient_id"],
                                         k=max(args.k, 100),
@@ -335,6 +428,7 @@ def main() -> None:
                 res["neighbours_kept"], max(args.k, 100),
                 res.get("n_groups", 0), verdict,
             )
+            cross_donor_results[col][bname] = res
             record("cross-donor", col, bname, res["n_cells"], res["excess"],
                    f"p={p_val:.3f}; floor={floor:.3f}; "
                    f"null95={res.get('null_p95', float('nan')):.2f}; "
@@ -383,6 +477,40 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
     logger.info("Written to %s", path)
+
+    if args.no_figures:
+        return
+
+    # ── 7. the figures ───────────────────────────────────────────────────────
+    # Into `out`, not into the run directory: two runs over different splits
+    # would otherwise overwrite each other's pictures with no warning.
+    from endo_model.evaluation.latent_bundle import LatentBundle
+    from endo_model.viz import apply_theme
+    from endo_model.viz.validation_figures import ValidationFigureWriter
+
+    logger.info("── 7. figures")
+    apply_theme()
+    bundle = LatentBundle(
+        mu_gauss=mu_gauss, mu_angle=mu_angle, kappa=kappa,
+        study_id=study_id, split=split_of, meta=meta, study_names=names,
+        baseline=baseline, baseline_rows=baseline_rows,
+    )
+    writer = ValidationFigureWriter(
+        bundle, out / "figures", k=args.k, seed=exp_cfg.seed,
+        umap_cells=args.umap_cells, cycle_period=args.cycle_period,
+        topology_cells=args.topology_cells,
+    )
+    writer.write_all()
+    # Drawn from the cross-donor measurements already made above, rather than
+    # recomputing a permutation null that took most of this run's time.
+    try:
+        from endo_model.viz import save_figure
+        save_figure(writer.cross_donor(cross_donor_results),
+                    out / "figures" / "05_cross_donor")
+        logger.info("  05_cross_donor")
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("  05_cross_donor skipped (%s: %s)",
+                       type(exc).__name__, exc)
 
 
 def _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
@@ -473,6 +601,41 @@ def _plot_phase_umap(gauss, circ, phase, run_dir, splits) -> None:
     fig.savefig(out, dpi=150)
     plt.close(fig)
     logger.info("   phase UMAP written to %s", out)
+
+
+def _log_harmonised(meta, name: str, harmoniser, columns, study_id,
+                    names) -> None:
+    """What the merge produced, and what it threw away.
+
+    The dropped values matter as much as the kept ones. A study whose phase
+    column is full of unanticipated spellings would silently contribute nothing
+    and look identical, in a cell count, to a study with no phase column at all.
+    """
+    import numpy as np
+
+    from endo_model.evaluation.latent_validation import _is_labelled
+
+    values = meta[name]
+    ok = np.array([_is_labelled(v) for v in values])
+    kept, counts = np.unique(np.asarray(values)[ok].astype(str),
+                             return_counts=True)
+    logger.info("Harmonised %-16s %6d cells, %d values: %s",
+                name, int(ok.sum()), len(kept),
+                ", ".join(f"{k} ({c:,})" for k, c in
+                          sorted(zip(kept, counts), key=lambda p: -p[1])))
+    _log_contributors(values, study_id, names, name)
+
+    for column in columns:
+        if column not in meta:
+            continue
+        missed = harmoniser.unmapped(meta[column])
+        if missed:
+            logger.warning(
+                "   %s: %d values in %s matched no rule and were dropped: %s",
+                name, sum(missed.values()), column,
+                ", ".join(f"{k} ({v:,})" for k, v in
+                          sorted(missed.items(), key=lambda p: -p[1])[:6]),
+            )
 
 
 def _log_contributors(values, study_id, names, col: str) -> None:

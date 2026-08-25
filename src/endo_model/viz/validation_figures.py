@@ -36,7 +36,7 @@ from endo_model.viz.torus_panels import (
 from endo_model.viz.validation_panels import (
     agreement_bars, confusion_heatmap, control_panel, correlation_heatmap,
     cross_donor_bars, donor_label_matrix, label_coverage, ordinal_distance,
-    per_label_bars, umap_grid,
+    per_label_bars, umap_continuous, umap_grid,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,8 @@ class ValidationFigureWriter:
         figures = {
             "01_umap_grid": self.umap_grid,
             "02_umap_phase": self.umap_phase,
+            "03_umap_untested": self.umap_untested,
+            "06_umap_continuous": self.umap_continuous,
             "04_agreement_bars": self.agreement_bars,
             "07_kappa": self.kappa,
             "09_correlation": self.correlation,
@@ -174,6 +176,65 @@ class ValidationFigureWriter:
         return umap_grid(coords, {"menstrual phase": self._phase[rows]},
                          f"Menstrual phase over the latent — "
                          f"{len(rows):,} of {self._n()}, seed {self.seed}")
+
+    def umap_untested(self):
+        """The labels the statistics could NOT settle, drawn anyway.
+
+        Disease grade came back non-significant, disease stage came back
+        negative, and cell-cycle phase cannot be tested across donors at all
+        because every donor's majority label is G1. A picture cannot rescue
+        any of those, and is not meant to -- but "no structure is visible
+        either" is worth being able to show rather than assert, and a reader
+        who is handed only a p-value will reasonably ask what it looked like.
+
+        Tissue and platform ride along because they are the decoder's inputs:
+        they are what visible structure looks like in this latent, which sets
+        the scale for reading the others.
+        """
+        coords, rows = self._coords()
+        columns = {
+            "EndometriosisGrade": self.bundle.meta.get("EndometriosisGrade"),
+            "Endometriosis_stage": self.bundle.meta.get("Endometriosis_stage"),
+            "phase": self.bundle.meta.get("phase"),
+            "tissue": self.bundle.meta.get("tissue"),
+            "platform": self.bundle.meta.get("platform"),
+        }
+        present = {k: v[rows] for k, v in columns.items()
+                   if v is not None and len(v)}
+        if not present:
+            return None
+        return umap_grid(
+            coords, present,
+            f"Labels the statistics could not settle — {len(rows):,} of "
+            f"{self._n()}, random sample, seed {self.seed}")
+
+    def umap_continuous(self):
+        """Cycle day and the other continuous covariates, as colour ramps.
+
+        Cycle day is the headline negative: the correlation against every
+        circular dimension is 0.01-0.06. What that number cannot show is
+        whether the days are laid out in ANY arrangement -- a gradient across
+        the map, a ring, or nothing. The ramp shows it.
+
+        The two strongest technical covariates are included on the same axes
+        because the circular half tracks gene count (r = 0.32) five times more
+        strongly than it tracks cycle day (r = 0.06), and the two pictures
+        side by side is that sentence made visible.
+        """
+        coords, rows = self._coords()
+        columns = ["CycleDay", "ProgesteroneSerum", "epithelial.pseudotime",
+                   "n_genes_by_counts"]
+        present = {}
+        for name in columns:
+            values = self.bundle.numeric(name)
+            if values.size and np.isfinite(values).sum() >= 100:
+                present[name] = values[rows]
+        if not present:
+            return None
+        return umap_continuous(
+            coords, present,
+            f"Continuous covariates over the latent — {len(rows):,} of "
+            f"{self._n()}, random sample, seed {self.seed}")
 
     # ── B: does the latent know the label ────────────────────────────────────
 

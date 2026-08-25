@@ -437,6 +437,87 @@ def umap_grid(coords: dict[str, np.ndarray],
     return fig
 
 
+def umap_continuous(coords: dict[str, np.ndarray],
+                    colourings: dict[str, np.ndarray],
+                    title: str) -> plt.Figure:
+    """The same UMAPs, coloured by a NUMBER rather than by a category.
+
+    Cycle day, serum progesterone and pseudotime are continuous, and forcing
+    them into a categorical legend would either bin them arbitrarily or produce
+    one colour per distinct value. A colour ramp with a scale bar keeps the
+    ordering visible, which for cycle day is the entire point -- the question
+    is whether the latent lays the days out in sequence.
+
+    Each panel is clipped to its own 2nd-98th percentile. A handful of extreme
+    values otherwise take the whole colour range and flatten everything else to
+    one shade.
+    """
+    if not coords or not colourings:
+        return _blank("nothing to draw")
+
+    rows, cols = list(coords), list(colourings)
+    fig, axes = plt.subplots(len(rows), len(cols),
+                             figsize=(5.0 * len(cols), 4.2 * len(rows)),
+                             squeeze=False)
+    for r, branch in enumerate(rows):
+        xy = coords[branch]
+        for c, name in enumerate(cols):
+            ax = axes[r][c]
+            if xy is None:
+                ax.text(0.5, 0.5, "UMAP unavailable", ha="center", va="center")
+                ax.set_xticks([]); ax.set_yticks([])
+                continue
+            n_shown = _scatter_continuous(fig, ax, xy, colourings[name], name)
+            if r == 0:
+                ax.set_title(f"{display_name(name)}\n({n_shown:,} cells "
+                             f"carry a value)", fontsize=9.5)
+            if c == 0:
+                ax.set_ylabel(branch, fontsize=10)
+            ax.set_xticks([]); ax.set_yticks([])
+            ax.set_aspect("equal", adjustable="box")
+
+    fig.suptitle(title, fontsize=11)
+    return fig
+
+
+def _scatter_cmap(dark_bias: float = 0.28):
+    """The palette's ramp with its palest end trimmed off.
+
+    The full ramp starts at cream, which on a white ground makes every
+    low-valued point invisible -- so half the cells would simply not appear and
+    the panel would read as "no cells here" rather than "low value here".
+    `theme.sequential_line_colors` already trims the ramp for the same reason
+    on line plots; this does it for scatter.
+    """
+    from matplotlib.colors import LinearSegmentedColormap
+
+    base = sequential_cmap()
+    return LinearSegmentedColormap.from_list(
+        "elaj_scatter",
+        base(np.linspace(dark_bias, 1.0, 256)),
+    )
+
+
+def _scatter_continuous(fig, ax, xy, values, name: str) -> int:
+    """One panel coloured by a number, with its own scale bar."""
+    v = np.asarray(values, dtype=float)
+    ok = np.isfinite(v)
+    if (~ok).any():
+        ax.scatter(xy[~ok, 0], xy[~ok, 1], s=1.2, alpha=0.15,
+                   color=PALETTE.grid, linewidths=0, rasterized=True)
+    if not ok.any():
+        return 0
+
+    lo, hi = np.percentile(v[ok], [2, 98])
+    if hi <= lo:
+        lo, hi = float(v[ok].min()), float(v[ok].max()) or 1.0
+    pts = ax.scatter(xy[ok, 0], xy[ok, 1], s=1.6, alpha=0.55, c=v[ok],
+                     cmap=_scatter_cmap(), vmin=lo, vmax=hi,
+                     linewidths=0, rasterized=True)
+    fig.colorbar(pts, ax=ax, shrink=0.72, label=name)
+    return int(ok.sum())
+
+
 def _scatter_coloured(ax, xy, values, max_legend: int) -> None:
     """One panel: unlabelled cells grey and underneath, then each value.
 

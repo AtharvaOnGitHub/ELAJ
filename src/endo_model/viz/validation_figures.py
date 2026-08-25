@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 # the first, except that no study in the corpus carries an age column:
 # `_age_vector` returns all-NaN, `AgeEncoder` zeroes NaN rows, and the metadata
 # token is an exactly zero vector for every cell. There is nothing to measure.
+#
+# Both of these are DECODER inputs, not encoder inputs, so the block is headed
+# "given to the decoder". Conditioning the decoder on them is what permits the
+# encoder not to store them -- which makes a high bar here informative rather
+# than expected.
 GIVEN_TO_MODEL = ("tissue", "platform")
 SHOULD_BE_ABSENT = ("study", "patient_id", "phase")   # marecko.phase = G1/S/G2M
 
@@ -179,7 +184,8 @@ class ValidationFigureWriter:
             "menstrual phase": self._phase,
             "disease grade": self.bundle.meta.get("EndometriosisGrade"),
             "disease stage": self.bundle.meta.get("Endometriosis_stage"),
-            "patient_id": self.bundle.meta.get("patient_id"),
+            "cell cycle phase (control)": self.bundle.meta.get("phase"),
+            "patient identity": self.bundle.meta.get("patient_id"),
         }
 
     def agreement_bars(self):
@@ -254,10 +260,10 @@ class ValidationFigureWriter:
     # ── G: controls ──────────────────────────────────────────────────────────
 
     def control_panel(self):
-        blocks = {"GIVEN TO THE MODEL": [], "SHOULD BE ABSENT": [],
+        blocks = {"GIVEN TO THE DECODER": [], "SHOULD BE ABSENT": [],
                   "THE TESTS": []}
         for name in GIVEN_TO_MODEL:
-            self._add_control(blocks["GIVEN TO THE MODEL"], name,
+            self._add_control(blocks["GIVEN TO THE DECODER"], name,
                               self.bundle.meta.get(name), "gaussian")
         for name in SHOULD_BE_ABSENT:
             values = (self.bundle.study_labels() if name == "study"

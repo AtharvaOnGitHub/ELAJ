@@ -63,18 +63,37 @@ def torus_tiles(mu_angle: np.ndarray, n_bins: int = 60,
 
     cols = min(3, len(pairs))
     rows = int(np.ceil(len(pairs) / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 4.2 * rows),
+    fig, axes = plt.subplots(rows, cols, figsize=(4.6 * cols, 4.6 * rows),
                              squeeze=False)
     cmap = sequential_cmap()
 
     for ax, (i, j) in zip(axes.ravel(), pairs):
         counts, _, _ = np.histogram2d(a[:, i], a[:, j], bins=n_bins,
                                       range=[[0, _TWO_PI], [0, _TWO_PI]])
+        # Clipped at the 99th percentile of the OCCUPIED bins. Cell density on
+        # a torus is heavy-tailed: a few bins hold many times the median, so a
+        # scale running to the maximum washes every real feature out to nearly
+        # the same pale tint. Clipping saturates those few bins and gives the
+        # structure the rest of the range.
+        occupied = counts[counts > 0]
+        ceiling = (float(np.percentile(occupied, 99)) if occupied.size
+                   else 1.0)
         tiled = np.tile(counts.T, (3, 3))
         ax.imshow(tiled, origin="lower", cmap=cmap, aspect="equal",
+                  vmin=0, vmax=max(ceiling, 1.0),
                   extent=(-_TWO_PI, 2 * _TWO_PI, -_TWO_PI, 2 * _TWO_PI))
+        # The eight repeated tiles are context, not data. Dimming them stops
+        # the periodic pattern competing with the one torus being described.
+        for dx in (-_TWO_PI, 0.0, _TWO_PI):
+            for dy in (-_TWO_PI, 0.0, _TWO_PI):
+                if dx == 0.0 and dy == 0.0:
+                    continue
+                ax.add_patch(plt.Rectangle((dx, dy), _TWO_PI, _TWO_PI,
+                                           facecolor=PALETTE.paper, alpha=0.55,
+                                           edgecolor="none", zorder=2))
         ax.add_patch(plt.Rectangle((0, 0), _TWO_PI, _TWO_PI, fill=False,
-                                   edgecolor=PALETTE.ink, linewidth=1.4))
+                                   edgecolor=PALETTE.ink, linewidth=1.6,
+                                   zorder=3))
         ax.set_xlabel(f"circular dim {i} (radians)")
         ax.set_ylabel(f"circular dim {j} (radians)")
         ax.set_xticks([0, np.pi, _TWO_PI], ["0", "π", "2π"])
@@ -84,7 +103,8 @@ def torus_tiles(mu_angle: np.ndarray, n_bins: int = 60,
 
     fig.suptitle(
         f"Pairs of circular dimensions on the torus — {len(a):,} cells\n"
-        "each panel tiled 3×3; the outlined square is one full torus",
+        "each panel tiled 3×3, the outlined square is one full torus; "
+        "colour is cell density, clipped at the 99th percentile",
         fontsize=11,
     )
     return fig
@@ -113,26 +133,34 @@ def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
            if len(a) > max_points else np.arange(len(a)))
 
     xyz = torus_embedding(a[idx, dim_major], a[idx, dim_minor])
-    fig = plt.figure(figsize=(12, 5.6))
+    fig = plt.figure(figsize=(12, 6.2))
     for n, (elev, azim) in enumerate(((28, 35), (68, 120))):
         ax = fig.add_subplot(1, 2, n + 1, projection="3d")
         if colour_by is None:
             ax.scatter(*xyz.T, s=1.5, alpha=0.25, c=PALETTE.primary,
-                       linewidths=0)
+                       linewidths=0, rasterized=True)
         else:
             v = np.asarray(colour_by)[idx]
             pts = ax.scatter(*xyz.T, s=1.5, alpha=0.35, c=v,
-                             cmap=sequential_cmap(), linewidths=0)
+                             cmap=sequential_cmap(), linewidths=0,
+                             rasterized=True)
             if n == 1:
                 fig.colorbar(pts, ax=ax, shrink=0.6, label=colour_name)
         ax.view_init(elev=elev, azim=azim)
         ax.set_box_aspect((1, 1, 0.45))
-        ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
-        ax.set_title(f"view {n + 1}", fontsize=10)
+        # Everything except the points. The default 3-D axes draw three shaded
+        # panes and their edges, which showed as faint grey boxes around a
+        # figure whose only content is the doughnut.
+        ax.set_axis_off()
+        # The doughnut occupied about 40% of each panel because the default
+        # 3-D margins are generous and the box aspect flattens it further.
+        # Zooming crops the empty space instead of shrinking the subject.
+        ax.set_xlim(xyz[:, 0].min() * 0.72, xyz[:, 0].max() * 0.72)
+        ax.set_ylim(xyz[:, 1].min() * 0.72, xyz[:, 1].max() * 0.72)
 
     fig.suptitle(
         f"Circular dimensions {dim_major} and {dim_minor} on the torus they "
-        f"span — {len(idx):,} cells\n"
+        f"span — {len(idx):,} cells, two viewpoints\n"
         "topology exact, distances stretched: a flat torus does not fit in 3-D "
         "without distortion",
         fontsize=11,
@@ -153,12 +181,15 @@ def circle_occupancy_panel(mu_angle: np.ndarray, rows: list[dict],
     """
     a = _wrap(mu_angle)
     n_dims = a.shape[1]
-    fig = plt.figure(figsize=(3.2 * n_dims, 7.4))
+    fig = plt.figure(figsize=(3.2 * n_dims, 6.0))
+    # The polar row is the figure; the statistics summarise it. Two equal rows
+    # gave the bar chart 60% of the height for three numbers per dimension.
+    grid = fig.add_gridspec(2, n_dims, height_ratios=(2.0, 1.0), hspace=0.35)
 
     edges = np.linspace(0, _TWO_PI, n_bins + 1)
     centres = 0.5 * (edges[:-1] + edges[1:])
     for d in range(n_dims):
-        ax = fig.add_subplot(2, n_dims, d + 1, projection="polar")
+        ax = fig.add_subplot(grid[0, d], projection="polar")
         counts, _ = np.histogram(a[:, d], bins=edges)
         ax.bar(centres, counts, width=_TWO_PI / n_bins,
                color=PALETTE.categorical[d % len(PALETTE.categorical)],
@@ -166,20 +197,28 @@ def circle_occupancy_panel(mu_angle: np.ndarray, rows: list[dict],
         ax.set_yticklabels([])
         ax.set_title(f"dim {d}", fontsize=10, pad=12)
 
-    ax = fig.add_subplot(2, 1, 2)
+    ax = fig.add_subplot(grid[1, :])
     stats = ("resultant", "occupancy", "entropy")
-    width = 0.26
+    width = 0.24
     x = np.arange(n_dims)
     for n, key in enumerate(stats):
         ax.bar(x + (n - 1) * width, [r[key] for r in rows], width,
                label=key, color=PALETTE.categorical[n],
                edgecolor=PALETTE.ink, linewidth=0.4)
+        for d in range(n_dims):
+            ax.text(x[d] + (n - 1) * width, rows[d][key] + 0.03,
+                    f"{rows[d][key]:.2f}", ha="center", va="bottom",
+                    fontsize=7, color=PALETTE.ink_soft)
     ax.set_xticks(x, [f"dim {d}" for d in range(n_dims)])
     ax.set_ylabel("value")
-    ax.set_ylim(0, 1.05)
-    ax.legend(title="resultant: 0 = spread, 1 = one angle\n"
-                    "occupancy / entropy: 1 = whole circle used",
-              fontsize=8, title_fontsize=8, loc="upper right")
+    ax.set_ylim(0, 1.22)
+    ax.set_axisbelow(True)
+    # Outside the axes: at upper right it sat on top of the last dimension's
+    # bars, which are the tallest on the chart by construction.
+    ax.legend(loc="upper left", bbox_to_anchor=(1.005, 1.0), fontsize=8,
+              frameon=False, title="resultant: 0 = spread, 1 = one angle\n"
+                                   "occupancy / entropy: 1 = whole circle",
+              title_fontsize=7.5)
 
     fig.suptitle(f"How much of each circle carries cells — {len(a):,} cells",
                  fontsize=11)
@@ -256,25 +295,28 @@ def persistence_panel(result: dict, threshold: float,
 
     diagrams = result["diagrams"]
     fig, axes = plt.subplots(1, len(diagrams),
-                             figsize=(5.0 * len(diagrams), 4.6), squeeze=False)
+                             figsize=(5.4 * len(diagrams), 4.8), squeeze=False)
     finite = [d[np.isfinite(d).all(axis=1)] for d in diagrams]
-    top = max((float(d[:, 1].max()) for d in finite if d.size), default=1.0)
-    lim = top * 1.08
 
     for dim, ax in enumerate(axes[0]):
         d = finite[dim]
+        # Each panel scaled to ITS OWN diagram. Sharing one limit across both
+        # put every H0 feature -- all of which are born at radius 0 -- onto a
+        # single vertical line at the left edge of an axis sized for H1.
+        lim = (float(d[:, 1].max()) * 1.08 if d.size else 1.0) or 1.0
         ax.plot([0, lim], [0, lim], color=PALETTE.spine, linewidth=1.0)
         if dim == 1 and np.isfinite(threshold):
             ax.fill_between([0, lim], [0, lim], [threshold, lim + threshold],
                             color=PALETTE.cream, zorder=0,
                             label=f"below cut-off ({threshold:.2f})")
-            ax.legend(fontsize=8, loc="lower right")
+            ax.legend(fontsize=8, loc="lower right", framealpha=0.95)
         if d.size:
-            ax.scatter(d[:, 0], d[:, 1], s=18, alpha=0.7,
+            ax.scatter(d[:, 0], d[:, 1], s=16, alpha=0.55,
                        color=PALETTE.categorical[dim % len(PALETTE.categorical)],
-                       edgecolors=PALETTE.ink, linewidths=0.3)
-        ax.set_xlim(0, lim); ax.set_ylim(0, lim)
+                       edgecolors=PALETTE.ink, linewidths=0.25, zorder=4)
+        ax.set_xlim(-lim * 0.03, lim); ax.set_ylim(0, lim)
         ax.set_xlabel("birth radius"); ax.set_ylabel("death radius")
+        ax.set_axisbelow(True)
         name = {0: "H₀ — connected pieces", 1: "H₁ — loops"}.get(
             dim, f"H{dim}")
         ax.set_title(f"{name}      count above cut-off: {betti.get(dim, 0)}",
@@ -307,13 +349,18 @@ def dimension_panel(variance: np.ndarray, intrinsic: dict[str, float],
     ax = axes[0]
     if variance.size:
         x = np.arange(1, variance.size + 1)
+        # axisbelow: the theme's gridlines were drawn OVER the bars and read as
+        # white stripes cutting across them.
+        ax.set_axisbelow(True)
         ax.bar(x, variance, color=PALETTE.primary, edgecolor=PALETTE.ink,
-               linewidth=0.4, label="per direction")
+               linewidth=0.4, label="per direction", zorder=3)
         twin = ax.twinx()
         twin.plot(x, np.cumsum(variance), color=PALETTE.secondary,
-                  marker="o", markersize=4, linewidth=1.4, label="cumulative")
+                  marker="o", markersize=4, linewidth=1.4, label="cumulative",
+                  zorder=4)
         twin.set_ylim(0, 1.02)
         twin.set_ylabel("cumulative share")
+        twin.grid(False)
         ax.set_xticks(x)
     ax.set_xlabel("principal direction")
     ax.set_ylabel("share of variance")
@@ -322,19 +369,25 @@ def dimension_panel(variance: np.ndarray, intrinsic: dict[str, float],
     ax = axes[1]
     names = list(intrinsic)
     y = np.arange(len(names))
+    ax.set_axisbelow(True)
     ax.barh(y, [allocated.get(n, 0) for n in names], color=PALETTE.cream,
-            edgecolor=PALETTE.ink, linewidth=0.5, label="dimensions allocated")
+            edgecolor=PALETTE.ink, linewidth=0.5, label="dimensions allocated",
+            zorder=2)
     ax.barh(y, [intrinsic[n] for n in names], height=0.5,
             color=PALETTE.primary, edgecolor=PALETTE.ink, linewidth=0.5,
-            label="intrinsic dimension (two-NN)")
+            label="intrinsic dimension (two-NN)", zorder=3)
+    widest = max([allocated.get(n, 0) for n in names], default=1)
     for n, name in enumerate(names):
         if np.isfinite(intrinsic[name]):
-            ax.text(intrinsic[name] + 0.1, n, f"{intrinsic[name]:.2f}",
-                    va="center", fontsize=9, color=PALETTE.ink)
+            ax.text(intrinsic[name] + widest * 0.015, n,
+                    f"{intrinsic[name]:.2f}", va="center", fontsize=9,
+                    color=PALETTE.ink, zorder=5)
     ax.set_yticks(y, names)
     ax.set_xlabel("dimensions")
     ax.set_title("Allocated against occupied", fontsize=10)
-    ax.legend(fontsize=8, loc="lower right")
+    # Outside: at lower right it sat across the end of the widest bar.
+    ax.legend(loc="upper left", bbox_to_anchor=(1.005, 1.0), fontsize=8,
+              frameon=False)
 
     fig.suptitle("How much of the latent's capacity carries variation",
                  fontsize=11)

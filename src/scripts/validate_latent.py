@@ -147,6 +147,11 @@ def collect(model, loader, device, order_len: int, reservoir=None,
     from endo_model.training.trainer import _to_device
 
     mu_gauss, mu_angle, kappa, study = [], [], [], []
+    # Collected here because they are BATCH TENSOR fields, not obs columns.
+    # extra_obs cannot reach them, so the control panel's "given to the model"
+    # block silently had nothing to draw and the figure lost a third of its
+    # argument without any error.
+    tissue, platform = [], []
     seen = 0
     model.eval()
     with torch.no_grad():
@@ -160,6 +165,10 @@ def collect(model, loader, device, order_len: int, reservoir=None,
                               np.arange(row_offset + seen,
                                         row_offset + seen + len(counts)))
                 seen += len(counts)
+            # Level 2 is tissue_type and code 0 is the assay: the two the
+            # decoder is conditioned on, which is what makes them controls.
+            tissue.append(batch["tissue_levels"][:, 2].cpu().numpy())
+            platform.append(batch["platform_codes"][:, 0].cpu().numpy())
             batch = _to_device(batch, device)
             out = model.encode(batch)
             mu_gauss.append(out["mu_gauss"].float().cpu().numpy())
@@ -178,7 +187,8 @@ def collect(model, loader, device, order_len: int, reservoir=None,
             f"{order_len} indices — the metadata join would be misaligned"
         )
     return (got, np.concatenate(mu_angle), np.concatenate(kappa),
-            np.concatenate(study))
+            np.concatenate(study), np.concatenate(tissue),
+            np.concatenate(platform))
 
 
 def sampler_order(loader) -> list[int]:
@@ -274,6 +284,23 @@ def main() -> None:
     study_id = np.concatenate([p_[3] for p_ in parts])
     split_of = np.concatenate(split_tags)
     meta = {c: np.concatenate([m[c] for m in metas]) for c in ALL_COLUMNS}
+
+    # The two decoder covariates, named rather than left as integer codes.
+    # These are the "given to the model" block of the control panel: the
+    # decoder is conditioned on both, which is exactly why a latent that still
+    # encodes them has not done what the conditioning was meant to allow.
+    tissue_names = {}
+    if data_cfg.tissue_level_names_csv:
+        from endo_model.data.tissue_level_names import TissueLevelNames
+        tissue_names = TissueLevelNames(
+            Path(root) / data_cfg.tissue_level_names_csv
+        ).for_index(2)
+    meta["tissue"] = np.array(
+        [tissue_names.get(int(v), f"tissue {int(v)}")
+         for v in np.concatenate([p_[4] for p_ in parts])], dtype=object)
+    meta["platform"] = np.array(
+        [f"assay {int(v)}" for v in np.concatenate([p_[5] for p_ in parts])],
+        dtype=object)
     logger.info("Total: %d cells across split(s) %s",
                 len(mu_gauss), ", ".join(args.splits))
 

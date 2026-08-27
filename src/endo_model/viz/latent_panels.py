@@ -34,6 +34,52 @@ logger = logging.getLogger(__name__)
 # is one that stores something.
 _COLLAPSE_KAPPA = 0.2
 
+# AN ABSOLUTE THRESHOLD ALONE IS NOT ENOUGH, and wave R8 proved it in the worst
+# way: the run reported "0/4 dimensions collapsed" on a figure whose dim 1 had
+# median kappa of exactly 1.00 with every cell on that value.
+#
+# The reason is that kappa_floor became a trained parameter of the model. R7 set
+# it to 0.5 and R8 to 1.0, both ABOVE this 0.2 line, so a dimension pinned to
+# the floor -- as dead as a dimension can be -- reads as comfortably clear of
+# the threshold. The readout was unreachable by construction, and it said the
+# opposite of the truth for twenty-five epochs.
+#
+# So collapse is also judged RELATIVE to whatever floor the run used: a
+# dimension whose cells are piled on the lowest concentration the model can
+# emit is collapsed regardless of what that number happens to be. The floor is
+# taken from the data when the caller does not supply it, since every figure
+# here is drawn from arrays rather than from a config.
+_FLOOR_TOLERANCE = 0.01      # within 1% of the floor counts as sitting on it
+_PINNED_FRACTION = 0.5       # half the cells on the floor is a collapsed dim
+
+
+def _kappa_floor(kappa: np.ndarray) -> float:
+    """The smallest concentration this run's model emitted."""
+    finite = kappa[np.isfinite(kappa)]
+    return float(finite.min()) if finite.size else float("nan")
+
+
+def collapse_verdict(column: np.ndarray, floor: float) -> tuple[bool, str]:
+    """Is one circular dimension dead, and by which of the two criteria?
+
+    Returns the verdict and a short reason, so a figure can say WHY rather than
+    only that it happened -- "83% of cells on the floor" and "median kappa
+    0.03" are different failures and want different responses.
+    """
+    finite = column[np.isfinite(column)]
+    if not finite.size:
+        return True, "no finite κ"
+
+    median = float(np.median(finite))
+    if median < _COLLAPSE_KAPPA:
+        return True, f"median κ {median:.2g} < {_COLLAPSE_KAPPA}"
+
+    if np.isfinite(floor) and floor > 0:
+        pinned = float((finite <= floor * (1.0 + _FLOOR_TOLERANCE)).mean())
+        if pinned >= _PINNED_FRACTION:
+            return True, f"{pinned:.0%} of cells at the floor κ={floor:.3g}"
+    return False, ""
+
 # Circular latents live on S^1, embedded in a 2-D ambient space. Matches
 # vonmises_vae._CIRCLE_DIM.
 _CIRCLE_DIM = 2
@@ -152,7 +198,8 @@ def latent_umap(
 
 
 def circular_latent(
-    mu_angle: np.ndarray, kappa: np.ndarray, epoch: int
+    mu_angle: np.ndarray, kappa: np.ndarray, epoch: int,
+    kappa_floor: float | None = None,
 ) -> plt.Figure:
     """The Power Spherical branch: where each dimension points, and how sharply.
 
@@ -162,13 +209,19 @@ def circular_latent(
     placed in the same place, which is no information at all.
 
     Bottom row: the concentration for that dimension. This is the decisive
-    panel. kappa is floored at 1e-4 by the sampler, so a distribution piled at
-    the floor means the dimension is dead, whatever the angles look like — and
-    a dead dimension's angles are unconstrained noise that can still look
-    structured by chance.
+    panel. A distribution piled on the floor means the dimension is dead,
+    whatever the angles look like — and a dead dimension's angles are
+    unconstrained noise that can still look structured by chance.
+
+    `kappa_floor` is the smallest concentration the model may emit. It is a
+    trained model's configuration rather than a constant, and it has moved: 1e-4
+    up to R6, 0.5 in R7, 1.0 in R8. Pass it when known; inferred from the data
+    otherwise. See `collapse_verdict` for why judging collapse without it
+    reported the opposite of the truth for an entire wave.
     """
     n_dims = mu_angle.shape[1]
-    fig = plt.figure(figsize=(2.6 * n_dims, 5.6))
+    floor = _kappa_floor(kappa) if kappa_floor is None else float(kappa_floor)
+    fig = plt.figure(figsize=(2.9 * n_dims, 5.9))
 
     for d in range(n_dims):
         ax = fig.add_subplot(2, n_dims, d + 1, projection="polar")
@@ -183,24 +236,30 @@ def circular_latent(
             ax.hist(np.log10(np.clip(finite, 1e-6, None)), bins=40,
                     color=PALETTE.secondary, alpha=0.85)
             median = float(np.median(finite))
-            dead = median < _COLLAPSE_KAPPA
+            dead, why = collapse_verdict(kappa[:, d], floor)
             ax.axvline(np.log10(_COLLAPSE_KAPPA), ls="--", lw=1.2,
                        color=PALETTE.muted)
+            # The floor is drawn too. Without it a reader cannot tell a
+            # dimension that chose a low concentration from one that was
+            # stopped at the lowest value available to it.
+            if np.isfinite(floor) and floor > 0:
+                ax.axvline(np.log10(floor), ls=":", lw=1.4,
+                           color=PALETTE.bad if dead else PALETTE.spine)
             ax.set_title(
                 f"median κ = {median:.2e}\n≈ {_kl_nats(median):.1e} nats"
-                + ("  COLLAPSED" if dead else ""),
+                + (f"\nCOLLAPSED — {why}" if dead else ""),
                 fontsize=8, color=PALETTE.bad if dead else PALETTE.ink,
             )
         ax.set_xlabel("log₁₀ κ", fontsize=8)
         ax.set_yticks([])
 
-    n_dead = int(
-        sum(np.median(kappa[:, d]) < _COLLAPSE_KAPPA for d in range(n_dims))
-    )
+    n_dead = sum(collapse_verdict(kappa[:, d], floor)[0]
+                 for d in range(n_dims))
     fig.suptitle(
         f"Power Spherical latent (epoch {epoch}) — "
         f"{n_dead}/{n_dims} dimensions collapsed"
-        + ("   [dashed line = collapse threshold]" if n_dead == 0 else "")
+        f"   [dashed = absolute threshold κ={_COLLAPSE_KAPPA};"
+        f" dotted = this run's floor κ={floor:.3g}]"
     )
     fig.tight_layout()
     return fig

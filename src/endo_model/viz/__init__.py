@@ -10,6 +10,8 @@ from endo_model.viz.palette import BERRY, PALETTE, Palette
 from endo_model.viz.theme import (
     apply_theme,
     build_rcparams,
+    cyclic_cmap,
+    cyclic_colors,
     save_figure,
     sequential_cmap,
     sequential_line_colors,
@@ -21,6 +23,8 @@ __all__ = [
     "Palette",
     "apply_theme",
     "build_rcparams",
+    "cyclic_cmap",
+    "cyclic_colors",
     "save_figure",
     "sequential_cmap",
     "sequential_line_colors",

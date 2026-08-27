@@ -57,6 +57,29 @@ PHASE_DAYS: dict[str, float] = {
 
 CYCLE_PERIOD_DAYS = 28.0
 
+# THE OTHER CYCLE, and the one this corpus can actually resolve.
+#
+# The menstrual cycle is a DONOR-level variable here: every patient was
+# biopsied once, so all of their cells sit at one cycle day and there is no
+# within-sample variation for a per-cell encoder to represent. The cell cycle
+# is not like that. G1 -> S -> G2M -> G1 runs in every proliferating cell, it
+# varies WITHIN a single sample, and it returns to where it started. That is
+# the process a circular latent is built for, and it has never been tested as
+# a periodic variable -- only as three flat categories.
+#
+# Positions are duration-weighted midpoints of a ~24 h cycle rather than equal
+# thirds, because the phases are not equal: roughly G1 11 h, S 8 h, G2M 5 h.
+# Equal thirds would place G2M a third of a turn from S when it is nearer a
+# fifth, and the correlation would be depressed for a reason that has nothing
+# to do with the model.
+CELL_CYCLE_HOURS: dict[str, float] = {
+    "G1": 5.5,       # 0 - 11 h
+    "S": 15.0,       # 11 - 19 h
+    "G2M": 21.5,     # 19 - 24 h
+}
+
+CELL_CYCLE_PERIOD_HOURS = 24.0
+
 
 @dataclass(frozen=True)
 class Harmoniser:
@@ -203,6 +226,43 @@ def phase_angle(names, period: float = CYCLE_PERIOD_DAYS) -> np.ndarray:
     """
     return np.array(
         [2.0 * np.pi * PHASE_DAYS[n] / period if n in PHASE_DAYS else np.nan
+         for n in names],
+        dtype=float,
+    )
+
+
+CELL_CYCLE = Harmoniser(
+    name="cell_cycle_phase",
+    mapping={
+        # marecko_2024.phase, and the Seurat/scanpy convention generally.
+        "g1": "G1", "s": "S", "g2m": "G2M",
+        # Spellings seen in the garcia_alonso and li_2025 columns.
+        "g2/m": "G2M", "g2_m": "G2M", "g0": "G1", "g0/g1": "G1", "g1/g0": "G1",
+    },
+    order=("G1", "S", "G2M"),
+    periodic=True,
+)
+
+# marecko's `phase`; garcia_alonso and li_2025 write it in these columns. Note
+# that `Stage` is NOT here -- that is menstrual phase, and reading one as the
+# other was a live bug for two waves.
+CELL_CYCLE_SOURCE_COLUMNS = ("phase", "CellCycle Phase", "Phase",
+                             "cell_cycle_phase")
+
+
+def cell_cycle_angle(names,
+                     period: float = CELL_CYCLE_PERIOD_HOURS) -> np.ndarray:
+    """Cell-cycle phase names -> their angle around the cycle, NaN if unmapped.
+
+    Lets G1/S/G2M be compared against the circular latent with the same
+    circular-circular correlation `CycleDay` uses, rather than only as three
+    unordered categories. The phases have an order and that order WRAPS -- G2M
+    is followed by G1 -- so treating them as categories throws away the one
+    property that makes them a test of a circular latent.
+    """
+    return np.array(
+        [2.0 * np.pi * CELL_CYCLE_HOURS[n] / period
+         if n in CELL_CYCLE_HOURS else np.nan
          for n in names],
         dtype=float,
     )

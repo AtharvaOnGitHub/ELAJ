@@ -437,6 +437,61 @@ def umap_grid(coords: dict[str, np.ndarray],
     return fig
 
 
+def umap_cyclic(coords: dict[str, np.ndarray], angles: np.ndarray,
+                title: str, tick_labels: dict[float, str] | None = None,
+                ) -> plt.Figure:
+    """The UMAPs coloured by a PERIODIC variable, on a cyclic colour map.
+
+    A sequential ramp cannot show a cycle honestly: its two ends are its most
+    different colours, and for a periodic variable those two values are
+    adjacent. G2M is followed by G1. Colouring that way draws a hard boundary
+    exactly where the data is continuous.
+
+    A cyclic map returns to its own start, so the seam disappears and a cycle
+    the model has laid out appears as colour rotating smoothly. `tick_labels`
+    puts the phase names on the colour bar at their own angles, so a reader
+    does not have to convert radians.
+    """
+    from endo_model.viz.theme import cyclic_cmap
+
+    if not coords:
+        return _blank("nothing to draw")
+
+    v = np.asarray(angles, dtype=float)
+    ok = np.isfinite(v)
+    rows = list(coords)
+    fig, axes = plt.subplots(1, len(rows), figsize=(5.6 * len(rows), 4.6),
+                             squeeze=False)
+    for c, branch in enumerate(rows):
+        ax = axes[0][c]
+        xy = coords[branch]
+        if xy is None:
+            ax.text(0.5, 0.5, "UMAP unavailable", ha="center", va="center")
+            ax.set_xticks([]); ax.set_yticks([])
+            continue
+        if (~ok).any():
+            ax.scatter(xy[~ok, 0], xy[~ok, 1], s=1.2, alpha=0.12,
+                       color=PALETTE.grid, linewidths=0, rasterized=True)
+        pts = ax.scatter(xy[ok, 0], xy[ok, 1], s=2.0, alpha=0.6, c=v[ok],
+                         cmap=cyclic_cmap(), vmin=0.0, vmax=2 * np.pi,
+                         linewidths=0, rasterized=True)
+        ax.set_title(f"{branch}   ({int(ok.sum()):,} cells labelled)",
+                     fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_aspect("equal", adjustable="box")
+        if c == len(rows) - 1:
+            bar = fig.colorbar(pts, ax=ax, shrink=0.78)
+            if tick_labels:
+                bar.set_ticks(list(tick_labels))
+                bar.set_ticklabels(list(tick_labels.values()))
+            else:
+                bar.set_ticks([0, np.pi, 2 * np.pi])
+                bar.set_ticklabels(["0", "π", "2π"])
+
+    fig.suptitle(title, fontsize=11)
+    return fig
+
+
 def umap_continuous(coords: dict[str, np.ndarray],
                     colourings: dict[str, np.ndarray],
                     title: str) -> plt.Figure:

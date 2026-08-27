@@ -366,6 +366,44 @@ def main() -> None:
                    for d in range(mu_angle.shape[1]))
         logger.info("   best circular dimension: r = %.3f", best)
 
+    # ── 1b. the OTHER cycle, and the one this corpus can resolve ────────────
+    # Menstrual cycle day is a DONOR-level variable here: each patient was
+    # biopsied once, so all of their cells share one cycle day and a per-cell
+    # encoder has no within-sample variation to represent. The cell cycle is
+    # not like that -- G1 -> S -> G2M -> G1 runs inside every proliferating
+    # cell, varies within a single sample, and returns to where it started.
+    # It has only ever been tested here as three flat categories, which throws
+    # away the ordering and the wrap that make it a test of a circular latent.
+    from endo_model.evaluation.label_harmonisation import (
+        CELL_CYCLE, CELL_CYCLE_PERIOD_HOURS, CELL_CYCLE_SOURCE_COLUMNS,
+        cell_cycle_angle,
+    )
+
+    logger.info("── 1b. cell-cycle phase against the circular latent")
+    cc_names = merge_columns(meta, CELL_CYCLE_SOURCE_COLUMNS, CELL_CYCLE)
+    meta["cell cycle phase"] = cc_names
+    if cc_names.size:
+        _log_harmonised(meta, "cell cycle phase", CELL_CYCLE,
+                        CELL_CYCLE_SOURCE_COLUMNS, study_id, names)
+        cc_hours = cell_cycle_angle(cc_names) * CELL_CYCLE_PERIOD_HOURS / (2 * np.pi)
+        ok = np.isfinite(cc_hours)
+        if ok.sum() >= 30:
+            for d in range(mu_angle.shape[1]):
+                r = periodic_corr(mu_angle[ok, d], cc_hours[ok],
+                                  CELL_CYCLE_PERIOD_HOURS)
+                logger.info("   cell cycle vs circular dim %d: r = %.3f  (n=%d)",
+                            d, r, int(ok.sum()))
+                record("periodic", "cell cycle phase", f"circular dim {d}",
+                       int(ok.sum()), r)
+            # Against the Gaussian half too. The circular branch's claim is
+            # that it represents periodic structure BETTER, and that is a
+            # comparison rather than an absolute.
+            rg = max(circular_linear_corr(mu_angle[ok, d], cc_hours[ok])
+                     for d in range(mu_angle.shape[1]))
+            logger.info("   circular-linear (best circular dim): r = %.3f", rg)
+        else:
+            logger.info("   only %d labelled cells — skipped", int(ok.sum()))
+
     # ── 2. continuous covariates, against BOTH branches ─────────────────────
     logger.info("── 2. continuous covariates against the latent")
     for col in LINEAR_CONTINUOUS + QC_CONTROLS:

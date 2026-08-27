@@ -17,7 +17,9 @@ from pathlib import Path
 import numpy as np
 
 from endo_model.evaluation.label_harmonisation import (
-    LINEAGE, LINEAGE_SOURCE_COLUMNS, MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS,
+    CELL_CYCLE, CELL_CYCLE_HOURS, CELL_CYCLE_PERIOD_HOURS,
+    CELL_CYCLE_SOURCE_COLUMNS, LINEAGE, LINEAGE_SOURCE_COLUMNS,
+    MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS, cell_cycle_angle,
 )
 from endo_model.evaluation.latent_topology import (
     betti_numbers, circle_occupancy, explained_variance, intrinsic_dimension,
@@ -31,12 +33,12 @@ from endo_model.viz import save_figure
 from endo_model.viz.latent_panels import safe_umap
 from endo_model.viz.torus_panels import (
     circle_occupancy_panel, dimension_panel, kappa_panel, persistence_panel,
-    torus_surface, torus_tiles,
+    phase_on_circles, torus_surface, torus_tiles,
 )
 from endo_model.viz.validation_panels import (
     agreement_bars, confusion_heatmap, control_panel, correlation_heatmap,
     cross_donor_bars, donor_label_matrix, label_coverage, ordinal_distance,
-    per_label_bars, umap_continuous, umap_grid,
+    per_label_bars, umap_continuous, umap_cyclic, umap_grid,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,6 +110,9 @@ class ValidationFigureWriter:
             "16_donor_by_phase": self.donor_by_phase,
             "17_phase_ordering": self.phase_ordering,
             "18_control_panel": self.control_panel,
+            "25_cellcycle_on_circles": self.cell_cycle_on_circles,
+            "26_cellcycle_umap": self.cell_cycle_umap,
+            "27_cellcycle_torus": self.cell_cycle_torus,
             "20_torus_tiles": self.torus_tiles,
             "21_torus_surface": self.torus_surface,
             "22_circle_occupancy": self.circle_occupancy,
@@ -391,6 +396,71 @@ class ValidationFigureWriter:
                               "Cells carrying each label, by study")
 
     # ── H: the shape of the circular latent ──────────────────────────────────
+
+    # ── Check A: the cycle this corpus can actually resolve ──────────────────
+
+    def _cell_cycle(self) -> tuple[np.ndarray, np.ndarray]:
+        """Harmonised cell-cycle phase, and its angle around the 24 h cycle.
+
+        Separate from menstrual phase for a reason that is easy to get wrong,
+        and was got wrong here for two waves: `phase` in marecko holds
+        G1/S/G2M, which is CELL cycle. Its menstrual phase is in `Stage`.
+        """
+        names = self.bundle.harmonised(CELL_CYCLE, CELL_CYCLE_SOURCE_COLUMNS)
+        if not names.size:
+            return names, np.array([])
+        return names, cell_cycle_angle(names)
+
+    def cell_cycle_on_circles(self):
+        """Where G1, S and G2M sit on each circular dimension.
+
+        The most direct test available of whether the circular latent has
+        learned a cycle. Unlike the menstrual cycle -- which is constant within
+        a donor here, so a per-cell encoder has nothing to represent -- the cell
+        cycle varies WITHIN a sample and returns to its start.
+        """
+        names, _ = self._cell_cycle()
+        if not names.size:
+            return None
+        return phase_on_circles(
+            self.bundle.mu_angle, names, CELL_CYCLE.order,
+            "Cell-cycle phase around each circular dimension")
+
+    def cell_cycle_umap(self):
+        names, angle = self._cell_cycle()
+        if not angle.size or not np.isfinite(angle).any():
+            return None
+        coords, rows = self._coords()
+        ticks = {2 * np.pi * h / CELL_CYCLE_PERIOD_HOURS: n
+                 for n, h in CELL_CYCLE_HOURS.items()}
+        return umap_cyclic(
+            coords, angle[rows],
+            f"Cell-cycle phase over the latent — {len(rows):,} of "
+            f"{self._n()}, cyclic colour so G2M adjoins G1",
+            tick_labels=ticks)
+
+    def cell_cycle_torus(self):
+        """The cell cycle painted onto the doughnut itself.
+
+        If the model has laid this cycle around one of its circles, the colour
+        travels round the ring and closes. If it has not, the colours are
+        scattered over the surface with no rotation. That is a claim a reader
+        can check by looking, which no correlation coefficient allows.
+        """
+        names, angle = self._cell_cycle()
+        if not angle.size or not np.isfinite(angle).any():
+            return None
+        rows = self._occupancy()
+        if len(rows) < 2:
+            return None
+        best = sorted(range(len(rows)), key=lambda d: -rows[d]["entropy"])[:2]
+        from endo_model.viz.theme import cyclic_cmap
+        return torus_surface(
+            self.bundle.mu_angle, best[0], best[1], seed=self.seed,
+            colour_by=angle, colour_name="cell-cycle phase (radians)",
+            cmap=cyclic_cmap(), vmin=0.0, vmax=2 * np.pi,
+            subtitle="coloured by cell-cycle phase on a cyclic map — a learned "
+                     "cycle appears as colour travelling round the ring")
 
     def torus_tiles(self):
         return torus_tiles(self.bundle.mu_angle)

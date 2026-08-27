@@ -132,6 +132,40 @@ def sequential_cmap(palette: Palette = PALETTE) -> LinearSegmentedColormap:
     )
 
 
+def cyclic_cmap(name: str = "twilight_shifted"):
+    """A colormap whose two ends are the same colour.
+
+    THE ONLY MAP THAT CAN HONESTLY SHOW A CYCLE. Every other palette in this
+    project runs light to dark, which means its first and last values look
+    maximally different. For a periodic variable those two values are
+    ADJACENT -- G2M is followed by G1, cycle day 28 by day 1 -- so a sequential
+    ramp draws a hard boundary exactly where the data is continuous, and a
+    reader sees a split that does not exist.
+
+    A cyclic map returns to its starting colour, so a variable that goes round
+    once produces a smooth colour rotation with no seam. On the torus figures
+    that is the whole visual argument: if the model has laid the cell cycle out
+    around one of its circles, the colours travel round the ring and close.
+
+    This is a deliberate departure from the project palette. `twilight_shifted`
+    is perceptually uniform and cyclic; no arrangement of the berry/teal
+    sequential ramp is either, and inventing one would trade a real property
+    for visual consistency.
+    """
+    return mpl.colormaps[name]
+
+
+def cyclic_colors(n: int, name: str = "twilight_shifted") -> list:
+    """`n` colours evenly spaced around a cyclic map, first != last.
+
+    Sampled over [0, 1) rather than [0, 1] so the last colour does not repeat
+    the first -- with three categories, endpoint sampling would give G1 and G2M
+    the same colour and destroy the ordering the map exists to show.
+    """
+    cmap = cyclic_cmap(name)
+    return [cmap(i / max(n, 1)) for i in range(n)]
+
+
 def sequential_line_colors(
     n: int, palette: Palette = PALETTE, dark_bias: float = 0.30
 ) -> list:

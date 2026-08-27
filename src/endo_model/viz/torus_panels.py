@@ -113,7 +113,10 @@ def torus_tiles(mu_angle: np.ndarray, n_bins: int = 60,
 def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
                   max_points: int = 20000, seed: int = 24,
                   colour_by: np.ndarray | None = None,
-                  colour_name: str = "") -> plt.Figure:
+                  colour_name: str = "", cmap=None,
+                  vmin: float | None = None,
+                  vmax: float | None = None,
+                  subtitle: str = "") -> plt.Figure:
     """One pair of circular dimensions on an actual doughnut, in 3-D.
 
     Two views of the same cloud, from different angles, because a single fixed
@@ -124,6 +127,15 @@ def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
     three dimensions without distortion, so the outer rim is spread wider than
     the inner one. Distances read off this picture are wrong. The caption says
     so on the figure.
+
+    `colour_by` takes a number per cell and `cmap` the map to read it with.
+    For a PERIODIC quantity pass a cyclic map (see viz.theme.cyclic_cmap) and
+    fix vmin/vmax to the full turn: a sequential ramp puts its two extreme
+    colours at values the process treats as adjacent, drawing a hard seam
+    across data that is continuous there. With a cyclic map, a cycle the model
+    has learned appears as colour travelling round the ring and closing.
+    Cells with no value are drawn faintly rather than dropped, so the ring's
+    shape stays visible under a sparse label.
     """
     from endo_model.evaluation.latent_topology import torus_embedding
 
@@ -140,10 +152,15 @@ def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
             ax.scatter(*xyz.T, s=1.5, alpha=0.25, c=PALETTE.primary,
                        linewidths=0, rasterized=True)
         else:
-            v = np.asarray(colour_by)[idx]
-            pts = ax.scatter(*xyz.T, s=1.5, alpha=0.35, c=v,
-                             cmap=sequential_cmap(), linewidths=0,
-                             rasterized=True)
+            v = np.asarray(colour_by, dtype=float)[idx]
+            ok = np.isfinite(v)
+            if (~ok).any():
+                ax.scatter(*xyz[~ok].T, s=1.0, alpha=0.06, c=PALETTE.grid,
+                           linewidths=0, rasterized=True)
+            pts = ax.scatter(*xyz[ok].T, s=1.5, alpha=0.35, c=v[ok],
+                             cmap=cmap or sequential_cmap(),
+                             vmin=vmin, vmax=vmax,
+                             linewidths=0, rasterized=True)
             if n == 1:
                 fig.colorbar(pts, ax=ax, shrink=0.6, label=colour_name)
         ax.view_init(elev=elev, azim=azim)
@@ -152,19 +169,85 @@ def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
         # panes and their edges, which showed as faint grey boxes around a
         # figure whose only content is the doughnut.
         ax.set_axis_off()
-        # The doughnut occupied about 40% of each panel because the default
-        # 3-D margins are generous and the box aspect flattens it further.
-        # Zooming crops the empty space instead of shrinking the subject.
-        ax.set_xlim(xyz[:, 0].min() * 0.72, xyz[:, 0].max() * 0.72)
-        ax.set_ylim(xyz[:, 1].min() * 0.72, xyz[:, 1].max() * 0.72)
+        # Tight to the data, which removes the default 3-D padding without
+        # cutting anything. Scaling the limits by a factor -- as this did at
+        # 0.72 -- crops a shape centred on the origin from BOTH sides, and
+        # sliced the outer rim off the ring.
+        ax.set_xlim(xyz[:, 0].min(), xyz[:, 0].max())
+        ax.set_ylim(xyz[:, 1].min(), xyz[:, 1].max())
+        ax.set_zlim(xyz[:, 2].min(), xyz[:, 2].max())
 
     fig.suptitle(
         f"Circular dimensions {dim_major} and {dim_minor} on the torus they "
         f"span — {len(idx):,} cells, two viewpoints\n"
         "topology exact, distances stretched: a flat torus does not fit in 3-D "
-        "without distortion",
+        "without distortion" + (f"\n{subtitle}" if subtitle else ""),
         fontsize=11,
     )
+    return fig
+
+
+def phase_on_circles(mu_angle: np.ndarray, labels, order,
+                     title: str, n_bins: int = 48) -> plt.Figure:
+    """Where each phase of a cyclic process sits on each circular dimension.
+
+    THE MOST DIRECT TEST THERE IS of whether a circular latent has learned a
+    cycle. One polar panel per circular dimension; within each, one coloured
+    ring per phase, showing that phase's distribution of angles.
+
+    What a working dimension looks like: the phases occupy different arcs, and
+    those arcs ADVANCE around the circle in the order the process runs. What a
+    dimension that has not learned it looks like: every phase covers the whole
+    ring, so the colours lie on top of each other everywhere.
+
+    Each phase is normalised to its own maximum rather than plotted as raw
+    counts, because cell-cycle labels are severely imbalanced -- roughly 94% of
+    cells are in G1 -- and raw counts would draw one enormous ring and two
+    invisible ones whatever the angles did.
+
+    Colours come from a cyclic map so the last phase is adjacent to the first,
+    which is what the data does.
+    """
+    from endo_model.evaluation.latent_validation import _is_labelled
+    from endo_model.viz.theme import cyclic_colors
+
+    labels = np.asarray(labels)
+    keep = np.array([_is_labelled(v) for v in labels])
+    if keep.sum() < 30:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "too few labelled cells", ha="center", va="center")
+        ax.set_axis_off()
+        return fig
+
+    text = labels[keep].astype(str)
+    present = [str(v) for v in order if (text == str(v)).any()]
+    colours = dict(zip(present, cyclic_colors(len(present))))
+
+    a = _wrap(mu_angle[keep])
+    n_dims = a.shape[1]
+    fig, axes = plt.subplots(1, n_dims, figsize=(3.5 * n_dims, 4.4),
+                             subplot_kw={"projection": "polar"}, squeeze=False)
+
+    edges = np.linspace(0, _TWO_PI, n_bins + 1)
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    for d, ax in enumerate(axes[0]):
+        for name in present:
+            counts, _ = np.histogram(a[text == name, d], bins=edges)
+            share = counts / counts.max() if counts.max() else counts
+            ax.plot(np.append(centres, centres[0]), np.append(share, share[0]),
+                    color=colours[name], linewidth=1.8,
+                    label=f"{name} ({int((text == name).sum()):,})"
+                    if d == 0 else None)
+            ax.fill(np.append(centres, centres[0]),
+                    np.append(share, share[0]), color=colours[name], alpha=0.12)
+        ax.set_yticklabels([])
+        ax.set_title(f"circular dim {d}", fontsize=10, pad=14)
+    axes[0][0].legend(loc="upper left", bbox_to_anchor=(-0.35, 1.18),
+                      fontsize=8, frameon=False)
+
+    fig.suptitle(f"{title}\neach phase scaled to its own maximum; colours run "
+                 f"round a cyclic map, so the last phase adjoins the first",
+                 fontsize=11)
     return fig
 
 

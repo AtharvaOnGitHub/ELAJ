@@ -141,8 +141,26 @@ def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
 
     a = _wrap(mu_angle)
     rng = np.random.default_rng(seed)
-    idx = (rng.choice(len(a), max_points, replace=False)
-           if len(a) > max_points else np.arange(len(a)))
+    if colour_by is None:
+        idx = (rng.choice(len(a), max_points, replace=False)
+               if len(a) > max_points else np.arange(len(a)))
+    else:
+        # Sample the LABELLED cells first. Drawing a uniform sample of the
+        # corpus and then colouring it wastes the budget on cells that have no
+        # value: cell-cycle phase exists for one study covering 2.5% of the
+        # cells, so a 20,000-cell uniform sample contained about 145 labelled
+        # points and the figure came out blank.
+        labelled = np.flatnonzero(np.isfinite(np.asarray(colour_by,
+                                                         dtype=float)))
+        if len(labelled) > max_points:
+            labelled = rng.choice(labelled, max_points, replace=False)
+        # A thin uniform sample underneath, so the ring's shape stays visible
+        # even where nothing is labelled.
+        spare = max(max_points - len(labelled), 0)
+        rest = np.setdiff1d(np.arange(len(a)), labelled, assume_unique=False)
+        background = (rng.choice(rest, min(spare, len(rest)), replace=False)
+                      if spare and len(rest) else np.empty(0, dtype=int))
+        idx = np.concatenate([background, labelled]).astype(int)
 
     xyz = torus_embedding(a[idx, dim_major], a[idx, dim_minor])
     fig = plt.figure(figsize=(12, 6.2))

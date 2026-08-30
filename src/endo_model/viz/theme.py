@@ -120,6 +120,44 @@ def apply_theme(palette: Palette = PALETTE) -> None:
     logger.debug("ELAJ visualisation theme applied")
 
 
+def heatmap_axes(ax) -> None:
+    """Turn the grid off on an axes that carries an image.
+
+    The project theme sets `axes.grid` True with `axisbelow` True, which gives
+    gridlines a zorder of 0.5. `imshow` draws its image at zorder 0, so the
+    grid lands ON TOP of every heatmap in the project -- a row of pale lines
+    across the cells that reads as an artefact of the data. `axisbelow` cannot
+    fix it, because there is nothing below zorder 0 to move the grid to.
+
+    Call this immediately after any `imshow`.
+    """
+    ax.grid(False)
+    ax.set_axisbelow(True)
+
+
+def square_view(ax, xy, pad: float = 0.04) -> None:
+    """Give a scatter a square window centred on its own cloud.
+
+    `set_aspect("equal", adjustable="box")` is correct -- a UMAP stretched to
+    fill a differently shaped panel is a different picture -- but it shrinks
+    the axes box to the data's aspect, so a round cloud and a wide one produce
+    boxes of different heights and a grid of panels stops lining up.
+
+    Padding the limits to a square first means equal aspect yields a square
+    box every time, so rows align, while the cloud inside is still scaled
+    uniformly and keeps its shape.
+    """
+    import numpy as _np
+    x0, x1 = float(_np.min(xy[:, 0])), float(_np.max(xy[:, 0]))
+    y0, y1 = float(_np.min(xy[:, 1])), float(_np.max(xy[:, 1]))
+    half = max(x1 - x0, y1 - y0) / 2.0
+    half = (half if half > 0 else 1.0) * (1.0 + pad)
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    ax.set_xlim(cx - half, cx + half)
+    ax.set_ylim(cy - half, cy + half)
+    ax.set_aspect("equal", adjustable="box")
+
+
 def sequential_cmap(palette: Palette = PALETTE) -> LinearSegmentedColormap:
     """The palette's cream→berry ramp as a matplotlib colormap.
 

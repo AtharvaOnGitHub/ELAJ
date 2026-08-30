@@ -26,10 +26,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-# These figures are built for the thesis deck, so they read the berry
-# palette rather than the project default. Every PALETTE.* below is berry.
-from endo_model.viz.palette import BERRY as PALETTE
-from endo_model.viz.theme import sequential_cmap
+# The project default, not berry. These panels were originally drawn for the
+# thesis deck and read BERRY; they now go in the dissertation alongside the
+# validation figures, and two palettes in one document reads as two documents.
+from endo_model.viz.palette import PALETTE
+from endo_model.viz.theme import heatmap_axes, sequential_cmap
 
 
 # One colour per disease status, fixed, used by every panel that draws them.
@@ -262,6 +263,7 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=(0.55 * n + 4, 0.55 * n + 3))
     im = ax.imshow(matrix, vmin=low, vmax=high, cmap=sequential_cmap(PALETTE))
+    heatmap_axes(ax)
     ax.set_xticks(range(n), studies, rotation=60, ha="right")
     ax.set_yticks(range(n), studies)
     ax.set_title("Shared genes between studies (Jaccard)")
@@ -273,7 +275,73 @@ def gene_panel_overlap(panels: dict[str, set]) -> plt.Figure:
                     color="white" if matrix[i, j] > low + (high - low) * 0.55
                     else PALETTE.ink)
     cb = fig.colorbar(im, ax=ax, shrink=0.7, label="genes shared")
-    cb.ax.set_yticklabels([f"{v * 100:.0f}%" for v in cb.get_ticks()])
+    # A formatter, not set_yticklabels: the latter assumes the tick locations
+    # are already fixed and matplotlib warns that they are not.
+    cb.ax.yaxis.set_major_formatter(lambda v, _: f"{v * 100:.0f}%")
+    return fig
+
+
+def _pairwise_jaccard(panels: dict[str, set]) -> np.ndarray:
+    """Every pairwise overlap, as a flat array of the upper triangle."""
+    studies = sorted(panels)
+    out = []
+    for i in range(len(studies)):
+        for j in range(i + 1, len(studies)):
+            a, b = panels[studies[i]], panels[studies[j]]
+            union = len(a | b)
+            out.append(len(a & b) / union if union else 0.0)
+    return np.asarray(out, dtype=float)
+
+
+def vocabulary_gain(panels: dict[str, set], vocab: set) -> plt.Figure:
+    """Pairwise gene overlap before and after restricting to the vocabulary.
+
+    This is the figure behind the vocabulary decision. Modelling the union of
+    every study's panel means most cells carry nothing for most genes;
+    modelling the intersection throws away genes that most studies measured
+    perfectly well. Restricting to genes that appear in a known pathway does
+    neither, and the question is what it buys.
+
+    Each dot is one pair of studies, so the two rows hold the same pairs
+    measured two ways and the shift between them is the answer. The range is
+    what matters rather than the mean: the model has to cope with the worst
+    pair, not the average one.
+    """
+    raw = _pairwise_jaccard(panels)
+    inside = _pairwise_jaccard({k: (v & vocab) for k, v in panels.items()})
+    if raw.size == 0:
+        fig, ax = plt.subplots(figsize=(7, 3))
+        ax.text(0.5, 0.5, "fewer than two studies", ha="center", va="center")
+        ax.set_axis_off()
+        return fig
+
+    fig, ax = plt.subplots(figsize=(9, 3.6))
+    rows = [
+        ("model vocabulary", inside, PALETTE.primary),
+        ("all measured genes", raw, PALETTE.muted),
+    ]
+    rng = np.random.default_rng(24)
+    for y, (label, values, colour) in enumerate(rows):
+        # Jittered, because 66 pairs on one line overplot into a single blob
+        # and the density is half of what the figure is reporting.
+        ax.scatter(values, np.full(values.size, y) + rng.uniform(-0.11, 0.11,
+                                                                values.size),
+                   s=26, color=colour, alpha=0.55, linewidths=0, zorder=3)
+        lo, hi = float(values.min()), float(values.max())
+        ax.plot([lo, hi], [y, y], color=colour, linewidth=2.2, alpha=0.9,
+                solid_capstyle="round", zorder=2)
+        ax.text(lo, y + 0.24, f"{lo * 100:.0f}%", ha="center", va="bottom",
+                fontsize=9, color=PALETTE.ink, fontweight="semibold")
+        ax.text(hi, y + 0.24, f"{hi * 100:.0f}%", ha="center", va="bottom",
+                fontsize=9, color=PALETTE.ink, fontweight="semibold")
+
+    ax.set_yticks(range(len(rows)), [r[0] for r in rows])
+    ax.set_ylim(-0.55, len(rows) - 0.15)
+    ax.set_xlabel("share of genes shared by a pair of studies")
+    ax.xaxis.set_major_formatter(lambda v, _: f"{v * 100:.0f}%")
+    ax.set_title(f"Gene panel overlap, {raw.size} study pairs")
+    ax.grid(True, axis="x")
+    ax.grid(False, axis="y")
     return fig
 
 
@@ -294,6 +362,7 @@ def disease_by_site(counts: dict[tuple[str, str], int]) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(1.6 * len(statuses) + 4, 0.5 * len(sites) + 3))
     shown = np.where(matrix > 0, matrix, np.nan)
     im = ax.imshow(np.log10(shown), cmap=sequential_cmap(PALETTE))
+    heatmap_axes(ax)
     ax.set_xticks(range(len(statuses)), statuses, rotation=20, ha="right")
     ax.set_yticks(range(len(sites)), [_short_site(s) for s in sites])
     ax.set_title("Cells by anatomical site and disease status")
@@ -521,6 +590,7 @@ def metadata_completeness(present: dict[str, dict]) -> plt.Figure:
         figsize=(1.1 * len(fields) + 5, 0.45 * len(studies) + 3)
     )
     im = ax.imshow(matrix, vmin=0, vmax=1, cmap="Blues", aspect="auto")
+    heatmap_axes(ax)
     ax.set_xticks(range(len(fields)), fields, rotation=25, ha="right")
     ax.set_yticks(range(len(studies)), studies)
     ax.set_title("Metadata completeness")
@@ -649,6 +719,7 @@ def study_site_matrix(counts: dict[str, dict]) -> plt.Figure:
     )
     shown = np.where(matrix > 0, matrix, np.nan)
     im = ax.imshow(np.log10(shown), cmap=sequential_cmap(PALETTE), aspect="auto")
+    heatmap_axes(ax)
     ax.set_xticks(range(len(sites)), [_short_site(s) for s in sites],
                   rotation=35, ha="right")
     ax.set_yticks(range(len(studies)), studies)

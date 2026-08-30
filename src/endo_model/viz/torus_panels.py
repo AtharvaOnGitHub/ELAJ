@@ -26,7 +26,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from endo_model.viz.palette import PALETTE
-from endo_model.viz.theme import sequential_cmap
+from endo_model.viz.theme import heatmap_axes, sequential_cmap
 
 _TWO_PI = 2.0 * np.pi
 
@@ -82,6 +82,7 @@ def torus_tiles(mu_angle: np.ndarray, n_bins: int = 60,
         ax.imshow(tiled, origin="lower", cmap=cmap, aspect="equal",
                   vmin=0, vmax=max(ceiling, 1.0),
                   extent=(-_TWO_PI, 2 * _TWO_PI, -_TWO_PI, 2 * _TWO_PI))
+        heatmap_axes(ax)
         # The eight repeated tiles are context, not data. Dimming them stops
         # the periodic pattern competing with the one torus being described.
         for dx in (-_TWO_PI, 0.0, _TWO_PI):
@@ -102,9 +103,7 @@ def torus_tiles(mu_angle: np.ndarray, n_bins: int = 60,
         ax.set_axis_off()
 
     fig.suptitle(
-        f"Pairs of circular dimensions on the torus — {len(a):,} cells\n"
-        "each panel tiled 3×3, the outlined square is one full torus; "
-        "colour is cell density, clipped at the 99th percentile",
+        f"Pairs of circular dimensions on the torus — {len(a):,} cells",
         fontsize=11,
     )
     return fig
@@ -196,10 +195,8 @@ def torus_surface(mu_angle: np.ndarray, dim_major: int = 0, dim_minor: int = 1,
         ax.set_zlim(xyz[:, 2].min(), xyz[:, 2].max())
 
     fig.suptitle(
-        f"Circular dimensions {dim_major} and {dim_minor} on the torus they "
-        f"span — {len(idx):,} cells, two viewpoints\n"
-        "topology exact, distances stretched: a flat torus does not fit in 3-D "
-        "without distortion" + (f"\n{subtitle}" if subtitle else ""),
+        f"Circular dimensions {dim_major} and {dim_minor} on their torus "
+        f"— {len(idx):,} cells" + (f" · {subtitle}" if subtitle else ""),
         fontsize=11,
     )
     return fig
@@ -243,12 +240,19 @@ def phase_on_circles(mu_angle: np.ndarray, labels, order,
 
     a = _wrap(mu_angle[keep])
     n_dims = a.shape[1]
-    fig, axes = plt.subplots(1, n_dims, figsize=(3.5 * n_dims, 4.4),
+    # Wrapped at two columns, as kappa_panel is: four polar plots in one row
+    # gives a figure three times wider than tall, and at column width each
+    # circle ends up too small to see which arc belongs to which phase.
+    p_cols = 2 if n_dims > 2 else n_dims
+    p_rows = int(np.ceil(n_dims / p_cols))
+    fig, axes = plt.subplots(p_rows, p_cols,
+                             figsize=(4.3 * p_cols, 4.5 * p_rows),
                              subplot_kw={"projection": "polar"}, squeeze=False)
 
     edges = np.linspace(0, _TWO_PI, n_bins + 1)
     centres = 0.5 * (edges[:-1] + edges[1:])
-    for d, ax in enumerate(axes[0]):
+    polar_flat = axes.ravel()
+    for d, ax in enumerate(polar_flat[:n_dims]):
         for name in present:
             counts, _ = np.histogram(a[text == name, d], bins=edges)
             share = counts / counts.max() if counts.max() else counts
@@ -260,12 +264,16 @@ def phase_on_circles(mu_angle: np.ndarray, labels, order,
                     np.append(share, share[0]), color=colours[name], alpha=0.12)
         ax.set_yticklabels([])
         ax.set_title(f"circular dim {d}", fontsize=10, pad=14)
-    axes[0][0].legend(loc="upper left", bbox_to_anchor=(-0.35, 1.18),
-                      fontsize=8, frameon=False)
+    for ax in polar_flat[n_dims:]:
+        ax.set_axis_off()
+    # One legend for the figure, below it, rather than hanging off the first
+    # polar axes where it overlapped the neighbouring circle.
+    handles, labels = polar_flat[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="lower center", ncol=len(handles),
+                   fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.02))
 
-    fig.suptitle(f"{title}\neach phase scaled to its own maximum; colours run "
-                 f"round a cyclic map, so the last phase adjoins the first",
-                 fontsize=11)
+    fig.suptitle(title, fontsize=11)
     return fig
 
 
@@ -344,7 +352,12 @@ def kappa_panel(kappa: np.ndarray, kappa_floor: float | None = None,
     """
     k = np.asarray(kappa, dtype=float)
     n_dims = k.shape[1]
-    fig, axes = plt.subplots(1, n_dims, figsize=(3.1 * n_dims, 3.4),
+    # Wrapped rather than strung out in one row. Four panels side by side gave
+    # a figure 3.6 times wider than tall, which at column width leaves each
+    # histogram about 2 cm across and its axis labels unreadable.
+    cols = 2 if n_dims > 2 else n_dims
+    rows_n = int(np.ceil(n_dims / cols))
+    fig, axes = plt.subplots(rows_n, cols, figsize=(4.6 * cols, 3.5 * rows_n),
                              squeeze=False)
 
     positive = k[k > 0]
@@ -354,7 +367,8 @@ def kappa_panel(kappa: np.ndarray, kappa_floor: float | None = None,
     lo, hi = float(positive.min()), float(positive.max())
     bins = np.logspace(np.log10(max(lo, 1e-6)), np.log10(max(hi, 1e-5)), n_bins)
 
-    for d, ax in enumerate(axes[0]):
+    flat = axes.ravel()
+    for d, ax in enumerate(flat[:n_dims]):
         ax.hist(k[:, d], bins=bins,
                 color=PALETTE.categorical[d % len(PALETTE.categorical)],
                 edgecolor="none", alpha=0.85)
@@ -365,10 +379,12 @@ def kappa_panel(kappa: np.ndarray, kappa_floor: float | None = None,
         ax.set_xscale("log")
         ax.set_xlabel("κ (log scale)")
         ax.set_title(f"dim {d}   median {np.median(k[:, d]):.2f}", fontsize=10)
-        if d == 0:
+        if d % cols == 0:
             ax.set_ylabel("cells")
-            if kappa_floor is not None:
-                ax.legend(fontsize=8)
+        if d == 0 and kappa_floor is not None:
+            ax.legend(fontsize=8)
+    for ax in flat[n_dims:]:
+        ax.set_axis_off()
 
     fig.suptitle(f"Per-cell concentration κ — {len(k):,} cells", fontsize=11)
     return fig
@@ -425,8 +441,7 @@ def persistence_panel(result: dict, threshold: float,
 
     fig.suptitle(
         f"Persistent homology of the circular latent — "
-        f"{result.get('n_points', 0):,} cells sampled\n"
-        "computed in the latent's own dimensions; nothing is projected",
+        f"{result.get('n_points', 0):,} cells sampled",
         fontsize=11,
     )
     return fig

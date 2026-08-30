@@ -11,6 +11,8 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
+from endo_model.viz.theme import heatmap_axes
+
 from endo_model.viz.palette import PALETTE
 
 
@@ -27,6 +29,7 @@ def tissue_coverage_heatmap(coverage: dict[str, np.ndarray]) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=(1.4 * len(levels) + 4, 0.42 * len(studies) + 2))
     im = ax.imshow(matrix, aspect="auto", vmin=0.0, vmax=1.0, cmap="Blues")
+    heatmap_axes(ax)
     ax.set_xticks(range(len(levels)), levels, rotation=20, ha="right")
     ax.set_yticks(range(len(studies)), studies)
     ax.set_title("Cells with a usable tissue level value")

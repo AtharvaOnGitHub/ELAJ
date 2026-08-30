@@ -298,8 +298,15 @@ def main() -> None:
     meta["tissue"] = np.array(
         [tissue_names.get(int(v), f"tissue {int(v)}")
          for v in np.concatenate([p_[4] for p_ in parts])], dtype=object)
+    # Named, not coded. "assay 1" on a bar chart tells a reader nothing, and
+    # the codes are an implementation detail of the conditioning tensor rather
+    # than something a figure should expose. Names come from the assay_family
+    # column of study_platform.csv, which is where the codes are defined.
+    _ASSAY_NAMES = {0: "unknown", 1: "droplet 3\u2032",
+                    2: "droplet 5\u2032", 3: "microwell"}
     meta["platform"] = np.array(
-        [f"assay {int(v)}" for v in np.concatenate([p_[5] for p_ in parts])],
+        [_ASSAY_NAMES.get(int(v), f"assay {int(v)}")
+         for v in np.concatenate([p_[5] for p_ in parts])],
         dtype=object)
     logger.info("Total: %d cells across split(s) %s",
                 len(mu_gauss), ", ".join(args.splits))

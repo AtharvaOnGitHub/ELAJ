@@ -25,7 +25,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from endo_model.viz.palette import PALETTE
-from endo_model.viz.theme import sequential_cmap
+from endo_model.viz.theme import heatmap_axes, sequential_cmap, square_view
 
 # The three latent halves every categorical test runs against, in a fixed
 # order and colour so the same branch is the same colour in every figure.
@@ -258,6 +258,7 @@ def confusion_heatmap(matrix: np.ndarray, names: list[str],
                                     1.4 + 0.55 * len(names)))
     im = ax.imshow(matrix, cmap=sequential_cmap(), vmin=0, vmax=1,
                    aspect="auto")
+    heatmap_axes(ax)
     fig.colorbar(im, ax=ax, shrink=0.8,
                  label="share of neighbours with this label")
 
@@ -399,6 +400,15 @@ def umap_grid(coords: dict[str, np.ndarray],
     One UMAP per row, reused across that row's columns, so the panels differ
     only in colour and can be compared directly.
 
+    Two things are deliberate. Every panel gets a square window around its own
+    cloud (`square_view`), so equal aspect produces a square box everywhere and
+    the rows line up -- previously each box shrank to its own cloud's aspect and
+    the grid visibly stepped between rows. And the legend for a colouring is
+    drawn once, under the bottom panel of its column, rather than beside every
+    panel: a legend beside each axes both duplicated itself down the column and
+    took a different width in each row, which was the other half of the
+    misalignment.
+
     Cells with no value for a colouring are drawn in light grey and counted in
     the legend. Most labels in this corpus exist for one study, so a panel that
     is mostly grey is reporting coverage, not failure.
@@ -407,11 +417,8 @@ def umap_grid(coords: dict[str, np.ndarray],
         return _blank("nothing to draw")
 
     rows, cols = list(coords), list(colourings)
-    # Wider per panel to leave room for a legend BESIDE each one. Legends were
-    # drawn at loc="best", which for a scatter filling its own axes means on
-    # top of the data -- and the donor panel's legend was 41 UUIDs.
     fig, axes = plt.subplots(len(rows), len(cols),
-                             figsize=(5.6 * len(cols), 4.2 * len(rows)),
+                             figsize=(3.9 * len(cols), 4.15 * len(rows) + 1.1),
                              squeeze=False)
     for r, branch in enumerate(rows):
         xy = coords[branch]
@@ -421,20 +428,29 @@ def umap_grid(coords: dict[str, np.ndarray],
                 ax.text(0.5, 0.5, "UMAP unavailable", ha="center", va="center")
                 ax.set_xticks([]); ax.set_yticks([])
                 continue
-            _scatter_coloured(ax, xy, colourings[name], max_legend)
+            handles = _scatter_coloured(ax, xy, colourings[name], max_legend)
             if r == 0:
                 ax.set_title(display_name(name), fontsize=10)
             if c == 0:
                 ax.set_ylabel(branch, fontsize=10)
             ax.set_xticks([]); ax.set_yticks([])
-            # Equal aspect so a wide latent and a compact one are not stretched
-            # to fill differently shaped panels and compared as if alike.
-            # "box" shrinks the axes box; "datalim" expands the limits instead
-            # and pushed the whole cloud into one corner of an empty panel.
-            ax.set_aspect("equal", adjustable="box")
-
-    fig.suptitle(title, fontsize=11)
+            square_view(ax, xy)
+            # One legend per column, under the last row that has one to give.
+            if handles and r == len(rows) - 1:
+                _legend_below(ax, handles)
     return fig
+
+
+def _legend_below(ax, handles, max_per_col: int = 4) -> None:
+    """Legend under the axes, in as many columns as it takes to stay shallow.
+
+    Under rather than beside, so it consumes figure height that every column
+    spends equally instead of axes width that each column spends differently.
+    """
+    ncol = max(1, int(np.ceil(len(handles) / max_per_col)))
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.02),
+              fontsize=8, frameon=False, ncol=ncol, markerscale=7,
+              handletextpad=0.4, columnspacing=1.1, borderpad=0.2)
 
 
 def umap_cyclic(coords: dict[str, np.ndarray], angles: np.ndarray,
@@ -592,7 +608,7 @@ def _scatter_coloured(ax, xy, values, max_legend: int) -> None:
 
     present = ~missing
     if not present.any():
-        return
+        return list(ax.get_legend_handles_labels()[0])
     names, counts = np.unique(values[present].astype(str), return_counts=True)
     order = np.argsort(-counts)
     listed = len(names) <= max_legend
@@ -606,14 +622,12 @@ def _scatter_coloured(ax, xy, values, max_legend: int) -> None:
                    label=f"{short_id(names[i], 22)} ({counts[i]:,})"
                    if listed else None)
     if listed:
-        _legend_outside(ax, markerscale=7)
-    else:
-        ax.text(0.02, 0.98, f"{len(names):,} values, none labelled\n"
-                            f"largest {counts[order[0]]:,} cells",
-                transform=ax.transAxes, ha="left", va="top", fontsize=7.5,
-                color=PALETTE.ink_soft)
-        if missing.any():
-            _legend_outside(ax, markerscale=7)
+        return list(ax.get_legend_handles_labels()[0])
+    ax.text(0.02, 0.98, f"{len(names):,} values, none labelled\n"
+                        f"largest {counts[order[0]]:,} cells",
+            transform=ax.transAxes, ha="left", va="top", fontsize=7.5,
+            color=PALETTE.ink_soft)
+    return list(ax.get_legend_handles_labels()[0]) if missing.any() else []
 
 
 def correlation_heatmap(matrix: np.ndarray, covariates: list[str],
@@ -637,6 +651,7 @@ def correlation_heatmap(matrix: np.ndarray, covariates: list[str],
     top = float(np.nanmax(matrix)) if np.isfinite(matrix).any() else 1.0
     im = ax.imshow(matrix, cmap=sequential_cmap(), vmin=0,
                    vmax=max(top, 0.05), aspect="auto")
+    heatmap_axes(ax)
     fig.colorbar(im, ax=ax, shrink=0.8,
                  label=f"|correlation|   (scale ends at {top:.2f})")
 
@@ -690,6 +705,7 @@ def label_coverage(counts: dict[str, dict[str, int]], title: str) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(2.0 + 0.72 * len(labels),
                                     1.8 + 0.46 * len(studies)))
     ax.imshow(shown, cmap=sequential_cmap(), aspect="auto", vmin=0, vmax=top)
+    heatmap_axes(ax)
     ax.set_xticks(range(len(labels)), [display_name(c) for c in labels],
                   rotation=45, ha="right", fontsize=8)
     ax.set_yticks(range(len(studies)), studies, fontsize=8)
@@ -730,6 +746,7 @@ def donor_label_matrix(donors: list[str], labels: list[str],
     top = float(shown.max()) if shown.size else 1.0
     im = ax.imshow(shown, cmap=sequential_cmap(), aspect="auto",
                    vmin=0, vmax=top)
+    heatmap_axes(ax)
     bar = fig.colorbar(im, ax=ax, shrink=0.55, label="cells (log scale)")
     ticks = [0, top / 2, top]
     bar.set_ticks(ticks)
@@ -768,6 +785,7 @@ def ordinal_distance(matrix: np.ndarray, names: list[str],
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.6))
     ax = axes[0]
     im = ax.imshow(matrix, cmap=sequential_cmap(), aspect="auto")
+    heatmap_axes(ax)
     fig.colorbar(im, ax=ax, shrink=0.85, label="mean latent distance")
     ax.set_xticks(range(len(names)), names, rotation=45, ha="right", fontsize=8)
     ax.set_yticks(range(len(names)), names, fontsize=8)

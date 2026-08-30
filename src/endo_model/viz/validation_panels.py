@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from endo_model.viz.palette import PALETTE
 from endo_model.viz.theme import heatmap_axes, sequential_cmap, square_view
@@ -170,77 +172,74 @@ def _label_with_n(label: str, per_branch: dict) -> str:
 
 
 def cross_donor_bars(results: dict[str, dict[str, dict]],
-                     title: str) -> plt.Figure:
+                     title: str, k: int = 100) -> plt.Figure:
     """The same measurement with same-donor neighbours discarded, plus the null.
 
-    Each donor carries one phase and one grade, so a latent that merely puts a
-    donor's cells together scores on both without representing either.
-    Excluding a cell's own donor removes that shortcut.
+    One bar per label and branch, with a marker at the 95th percentile of the
+    reshuffled-label null. A bar past its marker is a result no reshuffling
+    reached; the marker and the p-value are the same statement, so they cannot
+    disagree.
 
-    The grey band is the 95th percentile of the statistic when the labels are
-    reshuffled between donors. It is drawn because the raw excess is NOISE at
-    low donor counts -- a latent encoding donor and nothing else measured -0.67
-    to +0.48 across eight seeds at six donors -- so a bar has no meaning
-    except against its own null.
+    An earlier version drew the null as a grey band spanning both signs, built
+    from the 95th percentile of the ABSOLUTE nulls. That band is two-sided while
+    the test is one-sided, and where the null is asymmetric the two part company:
+    the strongest result in this figure sat inside its own band at p = 0.005. The
+    band is gone rather than recoloured.
 
-    The p-floor is printed per row. With few donors there are too few ways to
-    deal the labels out for a small p to be reachable at all, and a bar that
-    cannot reach significance is a different thing from one that failed to.
+    Rows the corpus cannot test at all are dropped to a note beneath the axes.
+    Six of fifteen rows saying "p could not fall below 1.00" is a statement about
+    the donor count, and it belongs in one line rather than in six bars.
     """
-    rows = [(label, branch, r)
-            for label, per in results.items()
-            for branch, r in per.items()
-            if np.isfinite(r.get("excess", np.nan))]
+    rows, untestable = [], []
+    for label, branches in results.items():
+        for branch, r in branches.items():
+            if not r:
+                continue
+            if r.get("p_floor", 0.0) >= 1.0:
+                untestable.append(f"{display_name(label)} ({r.get('n_groups', 0)} donors)")
+                continue
+            rows.append((f"{display_name(label)} — {branch}", r))
     if not rows:
-        return _blank("no label had enough cross-donor neighbours to measure")
+        return _blank("no label had enough donors to test")
 
-    fig, ax = plt.subplots(figsize=(12, 0.34 * len(rows) + 2.2))
+    fig, ax = plt.subplots(figsize=(9.5, 0.42 * len(rows) + 2.4))
     y = np.arange(len(rows))
-    for i, (_, branch, r) in enumerate(rows):
+    for i, (name, r) in enumerate(rows):
+        sig = r.get("p_value", 1.0) <= 0.05
+        ax.barh(i, r["excess"], 0.62, zorder=2,
+                color=PALETTE.primary if sig else PALETTE.muted,
+                edgecolor="none")
         null = r.get("null_p95", np.nan)
-        # A row whose p-floor is above 0.05 could never have reached
-        # significance, whatever the latent did. Its null band spans the whole
-        # axis and would dominate the picture while meaning nothing, so it is
-        # drawn faintly and the row is named as untestable instead.
-        testable = not (np.isfinite(r.get("p_floor", np.nan))
-                        and r["p_floor"] > 0.05)
-        if np.isfinite(null) and testable:
-            ax.barh(i, 2 * null, left=-null, height=0.78,
-                    color=PALETTE.cream, edgecolor="none", zorder=0)
-        ax.barh(i, r["excess"], 0.5,
-                color=BRANCH_COLOURS.get(branch, PALETTE.primary),
-                edgecolor=PALETTE.ink, linewidth=0.4,
-                alpha=1.0 if testable else 0.35, zorder=2)
-
+        if np.isfinite(null):
+            ax.plot([null, null], [i - 0.36, i + 0.36], color=PALETTE.ink,
+                    linewidth=1.6, solid_capstyle="butt", zorder=4)
     ax.axvline(0, color=PALETTE.ink, linewidth=1.0, zorder=3)
-    ax.set_yticks(y, [f"{display_name(label)} — {branch}"
-                      for label, branch, _ in rows], fontsize=8.5)
-    ax.set_xlabel("excess agreement over chance, own donor excluded")
+
+    ax.set_yticks(y, [n for n, _ in rows])
     ax.invert_yaxis()
-    ax.set_axisbelow(True)
+    ax.set_xlabel("excess agreement over chance, own donor excluded")
+    ax.grid(True, axis="x"); ax.grid(False, axis="y")
 
-    # Pad for the annotation column by measuring it, rather than multiplying
-    # the axis by a guessed 1.42 and leaving a third of the figure empty.
-    lo, hi = ax.get_xlim()
-    ax.set_xlim(lo, hi + (hi - lo) * 0.34)
-    at = hi + (hi - lo) * 0.02
-    for i, (_, _, r) in enumerate(rows):
-        p, floor = r.get("p_value", np.nan), r.get("p_floor", np.nan)
-        reachable = np.isfinite(floor) and floor > 0.05
-        ax.text(at, i,
-                (f"{r.get('n_groups', 0)} donors — p could not fall below "
-                 f"{floor:.2f}") if reachable else
-                f"p = {p:.3f}    {r.get('n_groups', 0)} donors",
-                va="center", fontsize=8,
-                color=PALETTE.ink_soft if reachable else PALETTE.ink)
+    right = ax.get_xlim()[1]
+    for i, (_, r) in enumerate(rows):
+        ax.text(right, i, f"  p = {r.get('p_value', float('nan')):.3f}"
+                          f"   {r.get('n_groups', 0)} donors",
+                va="center", ha="left", fontsize=8, color=PALETTE.ink_soft)
 
-    handles = [plt.Rectangle((0, 0), 1, 1, color=PALETTE.cream),
-               plt.Line2D([], [], color=PALETTE.ink, linewidth=1.0)]
-    ax.legend(handles, ["95% of the reshuffled-label null", "no excess"],
-              fontsize=8, loc="lower right", framealpha=0.95)
-    ax.set_title(title, fontsize=11)
+    handles = [Patch(facecolor=PALETTE.primary, label="p ≤ 0.05"),
+               Patch(facecolor=PALETTE.muted, label="p > 0.05"),
+               Line2D([0], [0], color=PALETTE.ink, linewidth=1.6,
+                      label="95th percentile of the reshuffled-label null")]
+    ax.legend(handles=handles, fontsize=8, frameon=False,
+              loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=3)
+    if untestable:
+        ax.set_title(title + "\n" if False else title, fontsize=11)
+        fig.text(0.5, -0.10, "not testable on this corpus, every donor sharing "
+                 "one label: " + "; ".join(sorted(set(untestable))),
+                 ha="center", fontsize=8, color=PALETTE.ink_soft)
+    else:
+        ax.set_title(title, fontsize=11)
     return fig
-
 
 def confusion_heatmap(matrix: np.ndarray, names: list[str],
                       counts: np.ndarray, title: str) -> plt.Figure:
@@ -729,46 +728,59 @@ def label_coverage(counts: dict[str, dict[str, int]], title: str) -> plt.Figure:
     return fig
 
 
-def donor_label_matrix(donors: list[str], labels: list[str],
-                       grid: np.ndarray, title: str) -> plt.Figure:
-    """Donors down the side, label values across, cells in each box.
+def donor_label_matrix(matrix: np.ndarray, donors: list[str],
+                       labels: list[str], title: str) -> plt.Figure:
+    """Which label each donor carries, and how many labels each donor carries.
 
-    Shows the confound as data rather than as a caption. If every donor row has
-    exactly one filled column, then knowing the donor gives the label for free,
-    and the reader can see that without being told.
+    The point is not how many cells sit in a cell; it is that every row has
+    exactly one filled cell. A heatmap on a log colour scale said that badly:
+    the colour bar invited a reader to compare magnitudes, the empty cells read
+    as missing data rather than as structure, and truncated donor identifiers
+    on the axis named nothing. Both panels here answer one question instead.
+
+    Left: one marker per donor at the label it carries, donors numbered rather
+    than named by their identifier. Right: the number of distinct labels per
+    donor. If any donor had been sampled twice, that histogram would have mass
+    somewhere other than 1, and the confound this figure documents would not
+    exist.
     """
-    if grid.size == 0:
-        return _blank("no donor carried this label")
+    if matrix.size == 0 or not donors or not labels:
+        return _blank("no donor carries this label")
 
-    fig, ax = plt.subplots(figsize=(2.6 + 0.95 * len(labels),
-                                    1.8 + 0.20 * len(donors)))
-    shown = np.log10(grid + 1)
-    top = float(shown.max()) if shown.size else 1.0
-    im = ax.imshow(shown, cmap=sequential_cmap(), aspect="auto",
-                   vmin=0, vmax=top)
-    heatmap_axes(ax)
-    bar = fig.colorbar(im, ax=ax, shrink=0.55, label="cells (log scale)")
-    ticks = [0, top / 2, top]
-    bar.set_ticks(ticks)
-    bar.set_ticklabels([f"{10 ** t - 1:,.0f}" for t in ticks])
+    present = matrix > 0
+    per_donor = present.sum(axis=1)
+    order = np.lexsort((np.arange(len(donors)), present.argmax(axis=1)))
 
-    ax.set_xticks(range(len(labels)), labels, rotation=30, ha="right",
-                  fontsize=8.5)
-    # Truncated: patient_id is a full UUID, and 47 of them down the side made
-    # the identifiers the most prominent thing on a figure about phases.
-    ax.set_yticks(range(len(donors)), [short_id(d) for d in donors],
-                  fontsize=6.5)
-    ax.set_xticks(np.arange(len(labels) + 1) - 0.5, minor=True)
-    ax.set_yticks(np.arange(len(donors) + 1) - 0.5, minor=True)
-    ax.grid(which="minor", color=PALETTE.paper, linewidth=0.8)
-    ax.tick_params(which="minor", length=0)
+    fig, (left, right) = plt.subplots(
+        1, 2, figsize=(3.2 + 0.85 * len(labels), 0.34 * len(donors) + 2.4),
+        gridspec_kw={"width_ratios": [len(labels) + 1, 2.1]})
 
-    filled = int((grid > 0).sum(axis=1).max()) if len(donors) else 0
-    ax.set_xlabel(f"{len(donors)} donors; most values carried by any one "
-                  f"donor: {filled}")
-    ax.set_title(title, fontsize=11)
+    for row, d in enumerate(order):
+        for col in np.flatnonzero(present[d]):
+            left.scatter(col, row, s=110, color=PALETTE.primary,
+                         zorder=3, linewidths=0)
+    left.set_xticks(range(len(labels)), labels, rotation=30, ha="right")
+    left.set_yticks(range(len(donors)), [f"D{i + 1}" for i in range(len(donors))])
+    left.set_xlim(-0.6, len(labels) - 0.4)
+    left.set_ylim(len(donors) - 0.4, -0.6)
+    left.grid(True, axis="y"); left.grid(False, axis="x")
+    left.set_title("label carried", fontsize=10)
+
+    counts = np.bincount(per_donor, minlength=3)
+    bars = np.arange(len(counts))
+    right.bar(bars, counts, color=PALETTE.primary, width=0.62)
+    for b, c in zip(bars, counts):
+        if c:
+            right.text(b, c, f"{int(c)}", ha="center", va="bottom", fontsize=9,
+                       color=PALETTE.ink)
+    right.set_xticks(bars, [str(b) for b in bars])
+    right.set_xlabel("labels per donor")
+    right.set_ylabel("donors")
+    right.set_ylim(0, max(counts.max() * 1.2, 1))
+    right.set_title("how many each carries", fontsize=10)
+
+    fig.suptitle(title, fontsize=11)
     return fig
-
 
 def ordinal_distance(matrix: np.ndarray, names: list[str],
                      title: str) -> plt.Figure:

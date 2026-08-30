@@ -511,8 +511,17 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
             "means undetectable rather than absent.",
             n_assign, len(per_group), floor,
         )
+    # Signed, one-sided, to match the p-value directly beneath it. The old
+    # value was percentile(|nulls|, 95), which is a two-sided band on absolute
+    # values while the p-value is one-sided on signed ones. The two disagree
+    # whenever the null is asymmetric, and here it badly is: cell family sat
+    # INSIDE a band of 0.97 at p = 0.005, because the 0.97 came from large
+    # negative nulls being made positive. A figure drawn from that band says
+    # "not significant" about a result the test calls significant.
     return {
-        "null_p95": float(np.percentile(np.abs(nulls), 95)),
+        "null_p95": float(np.percentile(nulls, 95)),
+        "null_p05": float(np.percentile(nulls, 5)),
+        "null_abs_p95": float(np.percentile(np.abs(nulls), 95)),
         "p_value": float((1 + int((nulls >= observed).sum())) / (1 + nulls.size)),
         "n_assignments": int(n_assign),
         "p_floor": float(floor),

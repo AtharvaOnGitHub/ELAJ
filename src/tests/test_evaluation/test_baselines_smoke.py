@@ -55,7 +55,13 @@ def labelled_two_study(tmp_path):
     return vocab, configs
 
 
-def _sampler_order(dataset, batch_size=8):
+def _sampler_order(dataset, batch_size=7):
+    """The sampler's order with drop_last, as the benchmark script reads it.
+
+    Seven, not eight: the fixture holds 48 and 40 cells, both multiples of
+    eight, and a batch size that divides every study leaves no tail to drop
+    and nothing for the alignment check below to test. Seven leaves 6 and 5.
+    """
     sampler = PerStudyBatchSampler(dataset.study_ids, batch_size=batch_size,
                                    shuffle=False, drop_last=True)
     return [i for batch in sampler for i in batch]

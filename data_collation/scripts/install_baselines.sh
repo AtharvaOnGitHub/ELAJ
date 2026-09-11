@@ -3,24 +3,31 @@
 #
 #   bash data_collation/scripts/install_baselines.sh
 #
-# Run on a login node, once. The job script (benchmark_baselines.sh) assumes
-# these are present and reports any method whose package is still missing
-# rather than failing, so a partial install still produces a partial table.
+# Run on a login node, once. Safe to re-run.
 #
-# WHAT AND WHY.
-#   scanpy        the common substrate: normalisation, PCA, HVG selection.
-#   scikit-misc   scanpy's seurat_v3 HVG flavour delegates its loess to this
-#                 and only discovers it is absent at call time.
-#   harmonypy     Harmony. Pure numpy; no GPU.
-#   scanorama     Scanorama. Pure numpy; no GPU.
-#   scvi-tools    scVI and scANVI. Uses the module-loaded PyTorch.
-#   scib-metrics  the field's batch/bio battery. Pulls in jax; if that fights
-#                 the cluster, `pip install scib` is the older pure-numpy
-#                 fallback and evaluation/scib_metrics.py already handles both.
+# THE CONSTRAINT THIS HAS TO RESPECT. numpy, pandas, scipy, anndata, h5py,
+# matplotlib and torch come from cluster modules, which sit on PYTHONPATH
+# ahead of the venv. Anything pip installs into the venv under those names is
+# shadowed at import time and only serves to confuse pip's resolver. The
+# first attempt at this script let scanpy 1.12 pull numpy 2 into the venv;
+# the module's numpy 1.26 still won at import and every numpy-2-compiled
+# package then failed on `numpy.dtypes.StringDType`.
 #
-# The torch and anndata that ship as cluster modules are left alone: scvi-tools
-# is pinned below to a release that accepts them, and `--no-deps` is NOT used
-# so that pip can pull whatever else scvi needs without replacing torch.
+# So: the module versions are read at runtime and written to a constraints
+# file, pip is told it may not choose any other version of them, and the
+# packages we want are pinned to releases that accept that stack:
+#
+#   scanpy 1.10.x       last series accepting numpy 1.26 / anndata 0.10
+#   scvi-tools 1.2.x    last series accepting anndata 0.10.8+
+#   mudata <0.4         0.4 wants anndata 0.11
+#   tensorboard <2.19   2.19+ wants protobuf 6; the module ships 5
+#   harmonypy <1        the run_harmony API the wrapper was written against
+#   jax <0.5            what scvi 1.2 and flax 0.9 were released against;
+#                       CPU-only is fine, scvi's SCVI/SCANVI run on torch
+#
+# scib-metrics is best-effort. evaluation/scib_metrics.py falls back to `scib`
+# and then to sklearn-only NMI/ARI, so a failed install here costs metrics,
+# not the run.
 
 set -euo pipefail
 
@@ -37,35 +44,66 @@ module load matplotlib/3.9.2-gfbf-2024a
 export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
-echo "torch  : $(python -c 'import torch; print(torch.__version__, torch.cuda.is_available())')"
-echo "anndata: $(python -c 'import anndata; print(anndata.__version__)')"
+WORK="$(mktemp -d)"
+CONSTRAINTS="$WORK/constraints.txt"
 
-pip install --upgrade \
-    "scanpy>=1.10" \
-    "scikit-misc" \
-    "harmonypy>=0.0.9" \
-    "scanorama>=1.7" \
-    "scvi-tools>=1.2,<1.4"
-
-# scib-metrics wants jax. Try it; fall back to the older scib if it will not
-# resolve, and say which one landed so the log is unambiguous.
-if pip install "scib-metrics>=0.5"; then
-    echo "scib backend: scib-metrics"
-else
-    echo "scib-metrics failed to install; falling back to scib" >&2
-    pip install "scib>=1.1"
-    echo "scib backend: scib"
-fi
+echo "── module-provided versions (these are pinned) ──"
+python - "$CONSTRAINTS" <<'PY'
+import importlib, sys
+pins = []
+for pkg, dist in (("numpy", "numpy"), ("pandas", "pandas"), ("scipy", "scipy"),
+                  ("anndata", "anndata"), ("h5py", "h5py"),
+                  ("matplotlib", "matplotlib"), ("torch", "torch")):
+    m = importlib.import_module(pkg)
+    print(f"  {dist:<12} {m.__version__}")
+    pins.append(f"{dist}=={m.__version__}")
+open(sys.argv[1], "w").write("\n".join(pins) + "\n")
+PY
 
 echo
-echo "── verifying ──"
+echo "── clearing venv-local copies that shadow nothing and confuse pip ──"
+# These may or may not be present; each uninstall is allowed to be a no-op.
+for pkg in numpy pandas scipy anndata matplotlib jax jaxlib scanpy scvi-tools \
+           mudata tensorboard scib-metrics; do
+    pip uninstall -y "$pkg" >/dev/null 2>&1 || true
+done
+
+echo
+echo "── installing against the constraints ──"
+pip install -c "$CONSTRAINTS" \
+    "scanpy>=1.10,<1.11" \
+    "scikit-misc" \
+    "harmonypy>=0.0.9,<1" \
+    "scanorama>=1.7" \
+    "scvi-tools>=1.2,<1.3" \
+    "mudata<0.4" \
+    "tensorboard<2.19" \
+    "jax<0.5" "jaxlib<0.5"
+
+echo
+echo "── scib backend (best effort) ──"
+if pip install -c "$CONSTRAINTS" "scib-metrics>=0.5,<0.6" "jax<0.5" "jaxlib<0.5"; then
+    echo "scib backend: scib-metrics"
+elif pip install -c "$CONSTRAINTS" "scib>=1.1"; then
+    echo "scib backend: scib"
+else
+    echo "no scib backend installed; scib_metrics.py will use sklearn-only NMI/ARI" >&2
+fi
+
+rm -rf "$WORK"
+
+echo
+echo "── verifying (imports, not just pip's opinion) ──"
 python - <<'PY'
 import importlib
-for pkg in ("scanpy", "skmisc", "harmonypy", "scanorama", "scvi"):
+ok = True
+for pkg in ("numpy", "pandas", "anndata", "scanpy", "skmisc", "harmonypy",
+            "scanorama", "scvi", "torch"):
     try:
         m = importlib.import_module(pkg)
         print(f"  {pkg:<12} {getattr(m, '__version__', 'ok')}")
     except Exception as exc:                                   # noqa: BLE001
+        ok = False
         print(f"  {pkg:<12} MISSING ({type(exc).__name__}: {exc})")
 for pkg in ("scib_metrics", "scib"):
     try:
@@ -73,7 +111,8 @@ for pkg in ("scib_metrics", "scib"):
     except Exception:                                          # noqa: BLE001
         continue
 else:
-    print("  scib         MISSING: neither scib-metrics nor scib imports")
+    print("  scib         none (sklearn-only NMI/ARI)")
 import torch
-print(f"  torch        {torch.__version__} cuda={torch.cuda.is_available()}")
+print(f"  cuda         {torch.cuda.is_available()}  (False on a login node is normal)")
+raise SystemExit(0 if ok else 1)
 PY

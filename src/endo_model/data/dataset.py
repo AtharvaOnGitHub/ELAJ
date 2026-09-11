@@ -609,6 +609,66 @@ class EndometriosisDataset:
         return [r.study_id for r in self._records]
 
     @property
+    def patient_ids(self) -> list[str]:
+        """Patient ID for each cell in dataset order, aligned with `study_ids`."""
+        return [r.patient_id for r in self._records]
+
+    def counts_csr(self, indices=None):
+        """Counts for the requested cells as one CSR matrix, in the order asked.
+
+        Shape ``(len(indices), vocab_size)`` in global vocabulary coordinates,
+        or every cell in dataset order when ``indices`` is None. Genes a study
+        never measured are structurally absent rather than ``DNS_SENTINEL``; see
+        ``StudyPanel.as_csr`` for why, and ``measured_by_study`` for the mask
+        that preserves the distinction.
+
+        Each study's panel is converted once and its rows gathered, rather
+        than densifying cells one at a time through ``__getitem__`` -- which at
+        a million cells by fifteen thousand genes is ~60 GB of float32 that
+        would then be re-sparsified. Rows are gathered per panel and restored
+        to the requested order afterwards, so a caller passing the sampler's
+        order (which interleaves studies) gets its rows back in that order.
+        """
+        import scipy.sparse as _sp
+
+        wanted = (np.arange(len(self._records)) if indices is None
+                  else np.asarray(indices, dtype=np.int64))
+        if wanted.size == 0:
+            width = self._records[0].panel.vocab_size if self._records else 0
+            return _sp.csr_matrix((0, width), dtype=np.float32)
+
+        # Output position -> (panel, panel_row), grouped by panel identity so
+        # each panel is converted to CSR exactly once.
+        by_panel: dict[int, tuple[StudyPanel, list[int], list[int]]] = {}
+        for out_pos, idx in enumerate(wanted):
+            rec = self._records[int(idx)]
+            entry = by_panel.setdefault(id(rec.panel), (rec.panel, [], []))
+            entry[1].append(rec.panel_row)
+            entry[2].append(out_pos)
+
+        blocks, positions = [], []
+        for panel, rows, out_pos in by_panel.values():
+            blocks.append(panel.as_csr()[np.asarray(rows)])
+            positions.extend(out_pos)
+        stacked = _sp.vstack(blocks, format="csr")
+        # `positions[i]` is where block row i belongs; invert to gather.
+        order = np.empty(len(positions), dtype=np.int64)
+        order[np.asarray(positions)] = np.arange(len(positions))
+        return stacked[order]
+
+    def measured_by_study(self) -> dict[int, np.ndarray]:
+        """``study_id -> (vocab_size,) bool`` mask of genes that study measured.
+
+        One entry per study present in this split. What ``counts_csr`` cannot
+        carry, kept alongside it so the two can be used together.
+        """
+        seen: dict[int, np.ndarray] = {}
+        for rec in self._records:
+            if rec.study_id not in seen:
+                seen[rec.study_id] = rec.panel.measured_mask
+        return seen
+
+    @property
     def extra_obs(self) -> dict:
         """Requested obs columns, one entry per cell, in dataset order.
 

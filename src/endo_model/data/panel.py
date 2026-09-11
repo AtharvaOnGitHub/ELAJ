@@ -83,9 +83,51 @@ class StudyPanel:
         out[cols] = self._data[start:end]    # panel genes: measured non-zero
         return out
 
+    def as_csr(self) -> scipy.sparse.csr_matrix:
+        """The whole panel as one CSR matrix in GLOBAL vocabulary coordinates.
+
+        Shape ``(n_cells, vocab_size)``. This is the representation every
+        competing method reads -- scVI, Harmony, Scanorama, PCA -- and none of
+        them can hold a "not measured" marker that differs from an implicit
+        zero, so genes outside the panel are structurally absent here rather
+        than ``DNS_SENTINEL``. The distinction is not lost: ``measured_mask``
+        says which genes this study measured, so a caller that wants the
+        intersection of every study's panel can build it.
+
+        ``counts()`` remains the path the model reads and is byte-for-byte
+        unchanged. This exists so the baseline comparison never has to densify
+        a million rows to get a matrix it will immediately re-sparsify.
+
+        The data is copied. The panel's arrays are shared with every
+        ``counts()`` call, and a caller scaling or log-transforming the
+        returned matrix in place would otherwise corrupt what the model sees.
+        """
+        matrix = scipy.sparse.csr_matrix(
+            (self._data.copy(), self._global_idx[self._indices], self._indptr.copy()),
+            shape=(self._n_cells, self._vocab_size),
+        )
+        matrix.sort_indices()
+        return matrix
+
+    @property
+    def measured_mask(self) -> np.ndarray:
+        """``(vocab_size,)`` bool: which vocabulary genes this panel measured.
+
+        A gene that is True here and zero in a cell is a measured zero. A gene
+        that is False was never on this study's panel. ``counts()`` encodes the
+        second case as ``DNS_SENTINEL``; ``as_csr()`` cannot, so this carries it.
+        """
+        mask = np.zeros(self._vocab_size, dtype=bool)
+        mask[self._global_idx] = True
+        return mask
+
     @property
     def n_cells(self) -> int:
         return self._n_cells
+
+    @property
+    def vocab_size(self) -> int:
+        return self._vocab_size
 
     @property
     def nbytes(self) -> int:

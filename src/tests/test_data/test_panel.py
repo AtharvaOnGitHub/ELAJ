@@ -85,3 +85,64 @@ def test_sparse_storage_is_smaller_than_dense():
         scipy.sparse.csr_matrix(dense.astype(np.float32)), global_idx, vocab_size
     )
     assert panel.nbytes < n_cells * vocab_size * 4
+
+
+# ---------------------------------------------------------------------------
+# as_csr / measured_mask — the whole-panel view the baseline comparison reads
+# ---------------------------------------------------------------------------
+
+
+class TestAsCsr:
+    def test_agrees_with_counts_row_by_row_where_measured(self):
+        """The sparse view and the dense view are the same numbers."""
+        rng = np.random.default_rng(3)
+        vocab_size, n_panel, n_cells = 120, 40, 25
+        global_idx = np.sort(rng.choice(vocab_size, n_panel, replace=False))
+        dense = rng.poisson(0.6, size=(n_cells, n_panel)).astype(np.float32)
+        panel = StudyPanel(scipy.sparse.csr_matrix(dense), global_idx, vocab_size)
+
+        csr = panel.as_csr()
+        assert csr.shape == (n_cells, vocab_size)
+        full = csr.toarray()
+        for i in range(n_cells):
+            expected = panel.counts(i)
+            measured = expected != DNS_SENTINEL
+            assert np.array_equal(full[i][measured], expected[measured])
+
+    def test_unmeasured_genes_are_structurally_absent_not_sentinel(self):
+        """A CSR cannot hold DNS; it must hold nothing there, not -1."""
+        panel = StudyPanel(scipy.sparse.csr_matrix(np.array([[3.0, 0.0]])),
+                           np.array([2, 5]), vocab_size=8)
+        csr = panel.as_csr()
+        assert csr.nnz == 1
+        assert csr.toarray()[0, 0] == 0.0          # never measured -> 0, not -1
+        assert (csr.data != DNS_SENTINEL).all()
+
+    def test_measured_mask_marks_exactly_the_panel(self):
+        panel = StudyPanel(scipy.sparse.csr_matrix(np.zeros((2, 3))),
+                           np.array([1, 4, 6]), vocab_size=8)
+        mask = panel.measured_mask
+        assert mask.dtype == bool and mask.shape == (8,)
+        assert np.flatnonzero(mask).tolist() == [1, 4, 6]
+
+    def test_returned_matrix_is_a_copy(self):
+        """Mutating the sparse view must not change what the model reads."""
+        panel = StudyPanel(scipy.sparse.csr_matrix(np.array([[2.0, 7.0]])),
+                           np.array([0, 1]), vocab_size=2)
+        before = panel.counts(0).copy()
+        csr = panel.as_csr()
+        csr.data[:] = 99.0
+        assert np.array_equal(panel.counts(0), before)
+
+    def test_unsorted_global_idx_produces_sorted_indices(self):
+        """scipy assumes sorted column indices; an unsorted panel must not leak that."""
+        panel = StudyPanel(scipy.sparse.csr_matrix(np.array([[1.0, 2.0, 3.0]])),
+                           np.array([7, 2, 5]), vocab_size=10)
+        csr = panel.as_csr()
+        assert csr.has_sorted_indices
+        assert csr.toarray()[0].tolist() == [0, 0, 2, 0, 0, 3, 0, 1, 0, 0]
+
+    def test_vocab_size_property(self):
+        panel = StudyPanel(scipy.sparse.csr_matrix(np.zeros((1, 1))),
+                           np.array([0]), vocab_size=17)
+        assert panel.vocab_size == 17

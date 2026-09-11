@@ -491,3 +491,60 @@ def test_disease_filter_preserves_original_row_indices():
     codes[7] = DISEASE_STATUS_TO_INT["ectopic"]
     keep = {DISEASE_STATUS_TO_INT["ectopic"]}
     assert _select_disease_cells(list(range(10)), codes, keep, "s", "train") == [7]
+
+
+# ---------------------------------------------------------------------------
+# counts_csr / measured_by_study — the split as one sparse matrix
+# ---------------------------------------------------------------------------
+
+
+class TestCountsCsr:
+    def test_every_row_matches_getitem_where_measured(self, two_study_setup):
+        """The bulk path and the per-cell path must agree, cell by cell."""
+        vocab, study_configs = two_study_setup
+        ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
+        csr = ds.counts_csr()
+        assert csr.shape == (len(ds), vocab.vocab_size)
+        full = csr.toarray()
+        for i in range(len(ds)):
+            dense = ds[i]["counts"]
+            measured = dense != DNS_SENTINEL
+            assert np.array_equal(full[i][measured], dense[measured])
+            assert (full[i][~measured] == 0).all()
+
+    def test_requested_order_is_preserved_across_interleaved_studies(
+            self, two_study_setup):
+        """The sampler interleaves studies; rows must come back as asked."""
+        vocab, study_configs = two_study_setup
+        ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
+        rng = np.random.default_rng(7)
+        order = rng.permutation(len(ds))[: len(ds) // 2]
+        csr = ds.counts_csr(order)
+        assert csr.shape[0] == len(order)
+        full = csr.toarray()
+        for pos, idx in enumerate(order):
+            dense = ds[int(idx)]["counts"]
+            measured = dense != DNS_SENTINEL
+            assert np.array_equal(full[pos][measured], dense[measured])
+
+    def test_empty_request_gives_empty_matrix_of_right_width(self, two_study_setup):
+        vocab, study_configs = two_study_setup
+        ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
+        csr = ds.counts_csr([])
+        assert csr.shape == (0, vocab.vocab_size)
+
+    def test_measured_by_study_distinguishes_the_narrower_panel(self, two_study_setup):
+        """Study 1 measured 60 genes; study 0 measured all 100."""
+        vocab, study_configs = two_study_setup
+        ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
+        measured = ds.measured_by_study()
+        assert set(measured) == {0, 1}
+        assert measured[0].sum() == 100
+        assert measured[1].sum() == 60
+
+    def test_patient_ids_align_with_study_ids(self, two_study_setup):
+        vocab, study_configs = two_study_setup
+        ds = EndometriosisDataset(study_configs, vocab, split="train", seed=24)
+        assert len(ds.patient_ids) == len(ds.study_ids) == len(ds)
+        for i in range(len(ds)):
+            assert ds.patient_ids[i] == ds[i]["patient_id"]

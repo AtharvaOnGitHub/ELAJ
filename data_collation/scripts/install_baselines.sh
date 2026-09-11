@@ -6,24 +6,28 @@
 # Run on a login node, once. Safe to re-run.
 #
 # THE CONSTRAINT THIS HAS TO RESPECT. numpy, pandas, scipy, anndata, h5py,
-# matplotlib and torch come from cluster modules, which sit on PYTHONPATH
-# ahead of the venv. Anything pip installs into the venv under those names is
-# shadowed at import time and only serves to confuse pip's resolver. The
-# first attempt at this script let scanpy 1.12 pull numpy 2 into the venv;
-# the module's numpy 1.26 still won at import and every numpy-2-compiled
-# package then failed on `numpy.dtypes.StringDType`.
+# matplotlib, protobuf and torch come from cluster modules, which sit on
+# PYTHONPATH ahead of the venv. Anything pip installs into the venv under
+# those names is shadowed at import time and only serves to confuse pip's
+# resolver. Worse, a module package can import a venv package: the module
+# anndata 0.10.9 imports zarr, found a venv zarr 3 that the first attempt had
+# pulled in, and died on a numpy 2 attribute before anything else could run.
 #
-# So: the module versions are read at runtime and written to a constraints
-# file, pip is told it may not choose any other version of them, and the
-# packages we want are pinned to releases that accept that stack:
-#
-#   scanpy 1.10.x       last series accepting numpy 1.26 / anndata 0.10
-#   scvi-tools 1.2.x    last series accepting anndata 0.10.8+
-#   mudata <0.4         0.4 wants anndata 0.11
-#   tensorboard <2.19   2.19+ wants protobuf 6; the module ships 5
-#   harmonypy <1        the run_harmony API the wrapper was written against
-#   jax <0.5            what scvi 1.2 and flax 0.9 were released against;
-#                       CPU-only is fine, scvi's SCVI/SCANVI run on torch
+# So, in this order:
+#   1. uninstall every venv-local package the first attempt left that is
+#      numpy-2-only or shadows a module, BEFORE importing anything;
+#   2. read the module versions at runtime into a pip constraints file, so
+#      pip may not choose any other version of them;
+#   3. install the packages we want, pinned to releases that accept that
+#      stack:
+#        scanpy 1.10.x       last series accepting numpy 1.26 / anndata 0.10
+#        scvi-tools 1.2.x    last series accepting anndata 0.10.8+
+#        mudata <0.4         0.4 wants anndata 0.11
+#        tensorboard <2.19   2.19+ wants protobuf 6; the module ships 5
+#        harmonypy <1        the run_harmony API the wrapper was written against
+#        jax <0.5            what scvi 1.2 and flax 0.9 were released against;
+#                            CPU-only is fine, scvi's SCVI/SCANVI run on torch
+#        zarr <3, xarray <2025, numcodecs <0.14   numpy-1-era, if pulled in
 #
 # scib-metrics is best-effort. evaluation/scib_metrics.py falls back to `scib`
 # and then to sklearn-only NMI/ARI, so a failed install here costs metrics,
@@ -47,27 +51,37 @@ source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 WORK="$(mktemp -d)"
 CONSTRAINTS="$WORK/constraints.txt"
 
-echo "── module-provided versions (these are pinned) ──"
-python - "$CONSTRAINTS" <<'PY'
-import importlib, sys
-pins = []
-for pkg, dist in (("numpy", "numpy"), ("pandas", "pandas"), ("scipy", "scipy"),
-                  ("anndata", "anndata"), ("h5py", "h5py"),
-                  ("matplotlib", "matplotlib"), ("torch", "torch")):
-    m = importlib.import_module(pkg)
-    print(f"  {dist:<12} {m.__version__}")
-    pins.append(f"{dist}=={m.__version__}")
-open(sys.argv[1], "w").write("\n".join(pins) + "\n")
-PY
-
-echo
-echo "── clearing venv-local copies that shadow nothing and confuse pip ──"
-# These may or may not be present; each uninstall is allowed to be a no-op.
-for pkg in numpy pandas scipy anndata matplotlib jax jaxlib scanpy scvi-tools \
-           mudata tensorboard scib-metrics; do
+# ── 1. clear venv-local copies BEFORE importing anything ────────────────────
+echo "── clearing venv-local copies left by the first attempt ──"
+for pkg in numpy pandas scipy anndata matplotlib h5py protobuf \
+           zarr numcodecs xarray \
+           jax jaxlib flax optax chex orbax-checkpoint tensorstore numpyro \
+           scanpy scvi-tools mudata tensorboard scib-metrics scib; do
     pip uninstall -y "$pkg" >/dev/null 2>&1 || true
 done
 
+# ── 2. read what the modules provide, and forbid pip from changing it ───────
+echo
+echo "── module-provided versions (these are pinned) ──"
+python - "$CONSTRAINTS" <<'PYEOF'
+import importlib, sys
+pins = []
+for dist in ("numpy", "pandas", "scipy", "anndata", "h5py", "matplotlib",
+             "torch", "protobuf"):
+    try:
+        m = importlib.import_module(dist)
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  {dist:<12} not importable ({type(exc).__name__}); not pinned")
+        continue
+    print(f"  {dist:<12} {m.__version__}")
+    pins.append(f"{dist}=={m.__version__}")
+# Not module-provided, but numpy-2-only in their latest releases. If anything
+# pulls them in, it gets the numpy-1-era line.
+pins += ["zarr<3", "numcodecs<0.14", "xarray<2025"]
+open(sys.argv[1], "w").write("\n".join(pins) + "\n")
+PYEOF
+
+# ── 3. install against the constraints ──────────────────────────────────────
 echo
 echo "── installing against the constraints ──"
 pip install -c "$CONSTRAINTS" \
@@ -92,9 +106,10 @@ fi
 
 rm -rf "$WORK"
 
+# ── 4. verify by importing, not by pip's opinion ────────────────────────────
 echo
-echo "── verifying (imports, not just pip's opinion) ──"
-python - <<'PY'
+echo "── verifying ──"
+python - <<'PYEOF'
 import importlib
 ok = True
 for pkg in ("numpy", "pandas", "anndata", "scanpy", "skmisc", "harmonypy",
@@ -115,4 +130,4 @@ else:
 import torch
 print(f"  cuda         {torch.cuda.is_available()}  (False on a login node is normal)")
 raise SystemExit(0 if ok else 1)
-PY
+PYEOF

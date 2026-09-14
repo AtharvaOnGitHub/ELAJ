@@ -40,6 +40,7 @@ defects and fragilities found while writing this.
 | 11 | [Findings](11-findings.md) | The run ledger (waves 0–R8), defects and fragilities, ranked |
 | 12 | [Validating the latent](12-validation.md) | What can honestly be tested, the scoreboard, the donor confound |
 | 13 | [Comparing against other methods](13-baselines.md) | `benchmark_baselines.py` — scVI, scANVI, Harmony, Scanorama, PCA on the same cells with the same scorer |
+| 14 | [Where along the encoder is the biology lost?](14-stage-probe.md) | `probe_stages.py` — every encoder stage, and every group encoder's input and output, under the benchmark scorer |
 
 ## The five entry points
 

@@ -37,6 +37,7 @@ from endo_model.model.embeddings.value_encoder import ValueEncoder
 from endo_model.model.encoders.aggregation import AggregationEncoder
 from endo_model.model.encoders.batched import BucketedGroupEncoder
 from endo_model.model.encoders.token_constructor import TokenConstructor
+from endo_model.model.encoder_stages import EncoderStages
 from endo_model.model.gene_layout import MeasuredGeneLayoutCache
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace
 
@@ -133,12 +134,13 @@ class EndoFoundationModel(nn.Module):
             list(vocabulary.group_names), self._group_global_idxs
         )
 
-    def encode(self, batch: dict) -> dict[str, Tensor]:
-        """Everything up to and including the latent. No decoder.
+    def encode_stages(self, batch: dict) -> EncoderStages:
+        """The encoder with every intermediate kept. See encoder_stages.py.
 
-        Split out for CCE's second view, which needs only `mu_gauss` and
-        `mu_angle` and was calling the full `forward` to get them — building
-        and holding a decoder graph over ~15,000 genes that nothing read.
+        This is the one encoder path. `encode` returns its `.latent`; the
+        stage probe reads the rest. Keeping the intermediates costs nothing
+        here: under autograd they are held by the graph anyway, and under
+        `no_grad` the caller drops the ones it does not want.
         """
         # ── Tokenise ─────────────────────────────────────────────────────────
         group_tokens = self.token_constructor(batch)          # {name: (B,G_k,D)}
@@ -156,7 +158,21 @@ class EndoFoundationModel(nn.Module):
         cell_cls = self.aggregation_encoder(group_cls_dict, meta_tokens)
         # cell_cls: (B, d_agg) — the only per-cell tensor leaving the encoder
 
-        return self.latent_space(cell_cls)     # dict with z_proj etc.
+        return EncoderStages(
+            group_tokens=group_tokens,
+            group_cls=group_cls_dict,
+            cell_cls=cell_cls,
+            latent=self.latent_space(cell_cls),    # dict with z_proj etc.
+        )
+
+    def encode(self, batch: dict) -> dict[str, Tensor]:
+        """Everything up to and including the latent. No decoder.
+
+        Split out for CCE's second view, which needs only `mu_gauss` and
+        `mu_angle` and was calling the full `forward` to get them — building
+        and holding a decoder graph over ~15,000 genes that nothing read.
+        """
+        return self.encode_stages(batch).latent
 
     def forward(self, batch: dict) -> dict[str, Tensor]:
         """Full forward pass.

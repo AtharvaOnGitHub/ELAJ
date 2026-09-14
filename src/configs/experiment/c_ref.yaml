@@ -4,9 +4,11 @@ description: >
   is the control-included runs; c_ref is its reference arm.
 
   WHY NOW. The baseline benchmark (outputs/benchmarks/r8_all) put r8_direction
-  below 16-component PCA on every biology metric: 84% same-family neighbours
-  against 98%, 75% on the cross-donor family test against 98%, 12% on
-  cross-donor phase against 29 to 63%. The latent is under-resolved and the
+  below 16-component PCA on every biology metric, as excess over chance:
+  0.84 on same-family neighbours against 0.98, 0.75 on the cross-donor
+  family test against 0.98, 0.12 on cross-donor phase against 0.29 to 0.63.
+  In raw terms ELAJ puts 5% of a cell's family neighbours in the wrong
+  family where PCA puts 0.5%. The latent is under-resolved and the
   work is training. A retrain is the moment to lift the deadline exclusion of
   controls, because the corpus, the splits, and the reference checkpoint all
   change anyway, and every later arm should be compared against a model that

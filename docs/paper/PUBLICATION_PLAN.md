@@ -1,319 +1,289 @@
 # ELAJ publication plan
 
-Working document. Three lanes: **journal gap analysis**, **translational value**, **ablations**.
-Started 10 September 2026.
+Working document. Started 10 September 2026; rewritten 14 September 2026 after
+the baseline benchmark and the decision to target Nature Machine Intelligence.
 
 ---
 
-## 0. Positioning, before anything else
+## 0. The decision
 
-### Where the work currently stands
+**Target: Nature Machine Intelligence.** The model is the contribution. The
+architecture (pathway-grouped attention, the DNS sentinel, the bifurcated
+latent) and the validation protocol (cross-donor agreement with a permutation
+null) are presented as general machine-learning ideas for multi-study
+single-cell data, with the endometrial corpus as the setting they are
+demonstrated in.
 
-What ELAJ has that is genuinely strong:
+**Fallback: Genome Biology**, only if the training campaign cannot bring the
+latent above scVI. That outcome still supports a biology-first paper; it does
+not support an ML one.
 
-- The corpus. Twelve datasets, 1,700,766 cells, 272 donors, harmonised to one vocabulary, ontology
-  and donor namespace. It did not exist before. The de-duplication of 138,151 re-used cells is the
-  kind of detail reviewers respect.
-- The validation framework. Cross-donor design, permutation nulls, a reported p-value floor, and a
-  $\sum p^2$ chance line rather than $1/n$. This is more statistically careful than most papers in
-  this space and should be foregrounded, not buried.
-- The architecture. Pathway grouping is a real idea with an arithmetic argument behind it, and the
-  effective gene space derivation gives it a theoretical spine.
-- An honest negative result with a control experiment that explains it.
+**Not pursued now: Nature Methods.** It wants a method shown across tissues.
+ELAJ is one model on one organ. If the grouping idea is later shown to
+transfer, that is a second paper.
 
-What it does not yet have, and what every accepted paper in these venues does:
+**Timeline: a submittable manuscript in four weeks, by 12 October 2026.** The
+four weeks are for the diagnosis, the training campaign, the ablations that
+back each claim, and the writing. Anything not on that path is deferred to §9.
 
-| Missing | Severity |
+---
+
+## 1. Where the work stands
+
+### 1.1 The benchmark (11 September 2026, `outputs/benchmarks/r8_all`)
+
+r8_direction against PCA-16, Harmony, Scanorama, scVI, and scANVI on the same
+238,592 held-out cells, same scorer. Values are excess over chance.
+
+| | ELAJ | PCA-16 | Harmony | Scanorama | scVI | scANVI* |
+|---|---:|---:|---:|---:|---:|---:|
+| knn cell family | 0.84 | 0.98 | 0.98 | 0.98 | 0.98 | 0.98 |
+| cross-donor family | 0.75 | 0.98 | 0.94 | 0.98 | 0.96 | 0.97 |
+| cross-donor phase | 0.12 | 0.29 | 0.52 | 0.57 | 0.60 | 0.63 |
+| knn patient (low is good) | 0.24 | 0.73 | 0.69 | 0.82 | 0.81 | 0.81 |
+| cross-donor neighbours kept of 100 | 72 | 45 | 32 | 29 | 27 | 27 |
+
+*scANVI was supervised on family; its phase rows are the fair ones.
+
+In raw terms: ELAJ puts 5% of a cell's family neighbours in the wrong family
+where PCA puts 0.5%. The latent is under-resolved. It is also the only
+embedding that does not encode the donor, and that is real, but on the
+donor-free tests the others still win. **The baselines encode donor and
+biology; ELAJ encodes less of both.**
+
+Two asymmetries in the baselines' favour, to be removed before any number is
+quoted in the paper:
+
+- Every baseline was fitted on the cells it was scored on. ELAJ never saw
+  those donors. The fair comparison is scVI trained on the 196 training
+  donors and applied to the 76 held-out ones.
+- Harmony is 50-dimensional and Scanorama 100 against ELAJ's 16. PCA at 16
+  already beats ELAJ, so width is not the explanation, but the widths must
+  be matched or stated.
+
+### 1.2 What this means
+
+Every transformer single-cell model published so far has lost to scVI and to
+HVG-PCA zero-shot: Geneformer and scGPT in Kedzierska et al. (Genome Biology
+2025), scBERT and scGPT against logistic regression in Boiarsky et al.
+(2023). The field's answer was fine-tuning. Ours is a diagnosis of where the
+signal is lost and a training campaign that fixes it, which none of those
+papers did and which is itself a result an NMI reader wants.
+
+**The paper does not exist until ELAJ beats scVI on the fair comparison on
+the test the paper is about.** Everything in §2 to §5 serves that.
+
+---
+
+## 2. The claims and what each needs
+
+The rule: every claim in the paper has an experiment behind it, or the claim
+comes out.
+
+| # | claim | evidence required | status |
+|---|---|---|---|
+| C1 | Pathway-grouped attention is an inductive bias that lets a transformer run over 15,495 genes at D/G = 45 times less cost than flat attention at matched effective gene space | the cost argument (thesis App. D.8, §4.3.2); flat attention shown infeasible at this vocabulary | done |
+| C2 | The grouping carries biology, not only cost | the per-group probe (§3.1); the random-grouping ablation (§5.1) at equal sizes and parameters | probe running |
+| C3 | The DNS sentinel lets one model read studies with different panels without imputation | the DNS-removed ablation (§5.1) | not started |
+| C4 | A donor-blind latent can be trained that matches or beats scVI on cross-donor biology | the c_ training campaign (§4) scored against the inductive scVI | not started |
+| C5 | Cross-donor agreement with a permutation null separates learned biology from learned donor identity, and standard metrics do not | the benchmark table: baselines score 0.7 to 0.8 on patient identity while scoring at the ceiling on scIB | done, needs writing |
+| C6 | The circular branch: what it was for, and what happened | Gaussian-only ablation (§5.1); the R7/R8 collapse history | partly done |
+| C7 | The latent is usable: one demonstration a reader can picture | §6 | not started |
+
+C4 is the one the paper cannot be submitted without. C2 is the one a
+reviewer asks for first.
+
+---
+
+## 3. Phase A: diagnose (this week)
+
+### 3.1 The stage probe (`outputs/probes/r8_stages`, running)
+
+Scores the five per-cell tensors along the encoder and the input and output
+of each of the 45 group encoders with the benchmark scorer. Walkthrough 14
+has the reading table. The outcomes and what each sends us to:
+
+| if | then the fix is in |
 |---|---|
-| Comparison against established methods (scVI, scANVI, Harmony, Scanorama) | **Blocking** |
-| Any new biology | **Blocking** for Nat Comms |
-| External validation on a held-out study | **Blocking** |
-| Controls in the model at all | **Blocking** for translation |
-| Ablation of the central architectural claim | **Blocking** for Nat Mach Intell |
-| Interpretability output despite having the ideal structure for it | High |
-| Public code, weights, deposited data, reporting summary | High, but cheap |
+| `groups/concat` and `cell_cls` high, `mu_gauss` low | the bottleneck: latent width, `beta_max`, `free_bits`, DAB pressure |
+| `groups/concat` high, `cell_cls` low | aggregation: `AggregationEncoder`, `d_agg` |
+| `groups/concat` low, `tokens/concat` high | the group encoders: depth, `d_token`, training signal |
+| `tokens/concat` low | tokenisation: value encoder, DSBN, DNS |
+| most `group/<g>` at or below `tokens/<g>` | attention within groups is not earning its parameters; C2 needs a different defence |
 
-### Honest read on the target
+- [ ] **A1** Read the probe. Write the one-paragraph finding into §1 of this document.
+- [ ] **A2** Per-dimension KL of the Gaussian branch on r8_direction: how many of the 8 dimensions carry information. Free bits at 0.25 nats over 8 dimensions is a 2-nat floor; if half the dimensions sit on it the effective latent is 4-wide.
+- [ ] **A3** Inductive scVI: train on the 196 training donors, embed the 76 held-out ones. Same for PCA and scANVI. Harmony and Scanorama have no out-of-sample map and stay transductive, flagged. This is the number ELAJ has to beat. Needs a `fit_split` setting on `BaselineMethod`.
 
-**Nature Communications as it stands today: not yet.** The editor test is "why do these results
-matter beyond one setup", and right now the answer is a methods demonstration on one disease with
-no new biology and no method comparison. That is a desk-reject risk, not a review risk.
+### 3.2 What the probe cannot tell us
 
-**Nature Machine Intelligence: different bar, also not yet.** A methods venue wants the
-architectural claim tested. Gene grouping has never been ablated, which is the one experiment a
-methods reviewer will ask for first.
-
-Both are reachable. The question is which lane to lead with, because it changes what we build:
-
-- **Biology lane (Nat Comms):** controls retrained, a disease finding, external validation. The
-  corpus is the hero, the model is the instrument.
-- **Methods lane (Nat Mach Intell, or Genome Biology / Cell Reports Methods as strong fallbacks):**
-  benchmarks, ablations, interpretability, the effective-gene-space theory. The model is the hero.
-
-**Recommendation: build the biology lane, keep the methods results as a strong Methods section.**
-Reason: the corpus is genuinely unique and cannot be replicated by a better-resourced group in a
-weekend, whereas the architecture can. Also, retraining with controls unblocks translation, which
-is what Animesh asked for.
-
-**Decision needed from Atharva + Animesh before work starts.** Everything below is sequenced
-assuming the biology lane; flag if we go the other way.
+Whether the gap closes with training. That is Phase B, and it starts before
+the probe is read, because the reference arm is needed either way.
 
 ---
 
-## 1. Lane one: closing the gap to a Nature-family paper
+## 4. Phase B: the training campaign (weeks 1 to 3)
 
-### 1.1 Benchmarking against established methods — **highest priority**
+The `c_` series: control-included runs. `c_ref` is r8_direction with the
+controls back in (about 1.2 M training cells, T_max 22, one 48 h job). Every
+later arm is compared against it.
 
-This is the single largest gap. Currently ELAJ is compared only against a study-mean baseline and a
-raw-counts PCA. No reviewer will accept that.
+### 4.1 Compute
 
-- [ ] **1.1.1** Run scVI on the same corpus, same splits, same gene set. Standard settings, then a
-      light sweep.
-- [ ] **1.1.2** Run scANVI (uses labels; the fair comparison for our labelled subset).
-- [ ] **1.1.3** Run Harmony and Scanorama as non-deep baselines. Cheap, and Harmony is a strong
-      performer on less complex tasks so it is an honest test.
-- [ ] **1.1.4** Run scGPT and Geneformer zero-shot. We already argue in the thesis that zero-shot
-      foundation models underperform; we should show it on *our* data rather than cite it.
-- [ ] **1.1.5** Compute the full scIB metric suite for all methods: NMI, ARI, ASW (label and batch),
-      graph connectivity, kBET, iLISI, cLISI, PCR, isolated-label scores. Report the aggregate
-      batch-correction and bio-conservation scores the field expects.
-- [ ] **1.1.6** Add our own cross-donor excess and permutation p-value as an extra column for every
-      method. This is where ELAJ should differentiate: our metric is harder than scIB's and we can
-      show other methods score worse on it.
-- [ ] **1.1.7** One figure: methods on rows, metrics on columns, the standard scIB heatmap.
+Two A100 80 GB, 48 h wall, one GPU per run. That is **two arms per two days,
+about twenty arms in four weeks if the queue is kind**, and the campaign has
+to be planned as a sequence of decisions, not a sweep. One arm always
+running; the other slot for whatever the last result pointed at.
 
-**Note on framing.** We may not win on every scIB metric, and that is survivable if we win on the
-cross-donor test and on parameter efficiency. Decide in advance how to present a mixed result
-honestly rather than discovering it late.
+### 4.2 The sequence
 
-### 1.2 External validation — leave-one-study-out
+Arms are named `c_<what changed>`. Each arm changes one thing against its
+parent and its YAML says what and why, as the r-series did.
 
-The current validation leans on `duempelmann_2026`, which supplies 67,072 of the labelled held-out
-cells. Reviewers now explicitly reject within-cohort leave-one-out as external validation, because
-the training and test data share sequencing centre, platform and pipeline.
+**Wave 1, submitted now, no diagnosis needed:**
 
-- [ ] **1.2.1** Retrain holding out `duempelmann_2026` entirely. Test on it. This is the real
-      external validation and it is the experiment most likely to be demanded.
-- [ ] **1.2.2** Repeat for `mareckova_2024` (the atlas) as a second held-out study.
-- [ ] **1.2.3** Report degradation honestly. If cross-donor cell family drops from 0.719, say by how
-      much and why.
-- [ ] **1.2.4** If a genuinely independent dataset appears post-corpus-freeze, use it as a true
-      external cohort. Worth a fresh PRISMA sweep before submission anyway.
+- [x] **c_ref** r8_direction + controls. Submitted 14 September.
+- [ ] **c_wide** `d_gauss` 8 to 32, `n_vMF` unchanged. The cheapest test of the bottleneck hypothesis. If the probe says the bottleneck is the loss, this arm should recover most of the gap on its own.
 
-### 1.3 Biological discovery — the thing that makes it a Nature Communications paper
+**Wave 2, chosen from the probe:**
 
-Currently the paper says "the representation works". It needs to also say "and here is something we
-learned about endometriosis that nobody knew".
+- [ ] **c_beta** `beta_max` 0.5 to 0.1, if the bottleneck is the loss and c_wide was not enough.
+- [ ] **c_nodab** DAB off. The adversarial study term pulls biology out with the study signal; the decoder-side platform covariates (R5) were meant to make it unnecessary and it was never removed after they landed.
+- [ ] **c_deep** group encoder 2 to 4 layers, if the group encoders are where the signal is lost.
+- [ ] **c_agg** `d_agg` 64 to 128 and aggregation 2 to 4 layers, if aggregation is where it is lost.
 
-Candidate routes, best first:
+**Wave 3, on the best of wave 2:**
 
-- [ ] **1.3.1 Eutopic vs control.** Requires the controls retrain (§2.1). Does the latent separate
-      eutopic endometrium of patients from healthy endometrium, and if so, which cell types and
-      which pathways drive it? This is the highest-value finding available to us and it is the one
-      the field cares about, because it underlies any non-invasive test.
-- [ ] **1.3.2 Cross-study replication of a cell state.** Find a population that appears in the
-      latent, is present in ≥3 studies, and was reported in ≤1. Requires the corpus to be doing work
-      no single study could.
-- [ ] **1.3.3 Pathway-level disease signature.** Use the 45 groups directly (see §1.4). Which
-      pathway groups shift between disease states, controlling for tissue and study.
-- [ ] **1.3.4 Hormonal axis.** Progesterone correlates at r = 0.333 on the Gaussian branch, higher
-      than every technical covariate. That is a real signal we have under-reported. Can we infer
-      hormonal state from expression in samples lacking phase metadata? See §2.3 — this is both
-      biology and a tool.
-- [ ] **1.3.5** Whatever we find, it needs orthogonal support: known marker genes, an independent
-      dataset, or literature concordance. A finding that exists only inside our own latent will not
-      survive review.
+- [ ] **c_gauss** Gaussian-only, same width, for C6.
+- [ ] **c_best_s7** the best configuration at a second seed, so the headline carries a spread. Add seeds as compute allows.
 
-### 1.4 Interpretability — our unexploited advantage
+**Stop rule.** The campaign stops when an arm beats the inductive scVI on
+cross-donor family and phase with p at the floor, or at the end of week 3,
+whichever is first. If it is the latter, the fallback in §0 applies.
 
-Standard criticism of deep models in this space is that they are black boxes and a reader cannot
-tell which biological features drive the outcome. ELAJ is structurally better placed than almost any
-competing model here, because the 45 groups are named biological pathways, and we have never used
-this.
+### 4.3 Scoring every arm the same way
 
-- [ ] **1.4.1** Attribute latent dimensions to pathway groups. Which groups contribute most to which
-      of the 12 latent dimensions.
-- [ ] **1.4.2** Per-cell pathway activity scores from the group CLS tokens. A biologist-readable
-      output that no PCA or scVI latent can give.
-- [ ] **1.4.3** Attention analysis within groups: which genes dominate their group's CLS.
-- [ ] **1.4.4** Sanity check the attribution against known biology. If the immune groups do not light
-      up in immune cells, the attribution is wrong and we need to know that before a reviewer does.
-- [ ] **1.4.5** Figure: pathway-by-celltype or pathway-by-disease-state heatmap. This is likely to be
-      a main-text figure and possibly the paper's most quotable panel.
+Every arm gets, from its best checkpoint: `validate_latent`, the benchmark
+with `--include-elaj` against the cached baseline rows, and the stage probe
+with `--no-groups`. One command, one directory per arm, so the campaign
+table in §8 fills itself.
 
-### 1.5 Reproducibility and compliance — cheap, do not leave to the end
-
-- [ ] **1.5.1** Public GitHub mirror of the GitLab repo, with a Zenodo DOI.
-- [ ] **1.5.2** Model weights deposited. Decide licence.
-- [ ] **1.5.3** Processed corpus deposition. **Open question: licence audit needed.** Check each of
-      the twelve datasets for redistribution terms. If we cannot redistribute the matrices, we can
-      still publish the harmonisation pipeline, the metadata mapping tables, and the accession list,
-      which is the normal compromise.
-- [ ] **1.5.4** Environment pinning and a one-command reproduction path for every figure.
-- [ ] **1.5.5** Nature reporting summary and data availability statement.
-- [ ] **1.5.6** Consider a preprint (bioRxiv) at submission time.
+- [ ] **B1** A `score_arm.sh` that runs all three and appends the headline row to `outputs/campaign.csv`.
 
 ---
 
-## 2. Lane two: translational value
+## 5. Phase C: ablations (weeks 2 to 4, interleaved with §4)
 
-Animesh's question is the right one and the honest current answer is that no physician or biologist
-could use ELAJ today. The work below is what changes that.
+Each is one training run at the campaign's best configuration, same seed.
+They are the evidence for C2, C3, and C6, and they go in the second GPU slot
+once wave 2 has settled.
 
-### 2.1 Retrain with controls — **the unblocking experiment**
+### 5.1 Required
 
-Controls are roughly forty per cent of the corpus after cleaning and were excluded to halve epoch
-time. That decision removed the García-Alonso deposits, which carry ontology-grade cell-type
-annotation and menstrual phase at five levels: the best labels in the corpus.
+- [ ] **C-1 Random grouping.** 45 groups of the same sizes, gene membership shuffled. Parameter count, attention cost, and effective gene space unchanged; only the pathway meaning of the grouping is removed. The single most important experiment in the paper. Note that flat attention is not the comparison: at this vocabulary it cannot be run (492 GB of attention scores at batch 128).
+- [ ] **C-2 DNS removed.** Unmeasured genes as zero. Tests C3.
+- [ ] **C-3 Gaussian-only.** Tests C6. Shared with c_gauss above.
 
-- [ ] **2.1.1** Retrain on the full corpus including controls.
-- [ ] **2.1.2** Re-run the entire validation suite. Every number in the thesis changes.
-- [ ] **2.1.3** Confirm the García-Alonso labels are recovered, which would strengthen the cell-type
-      results considerably beyond what one study currently supports.
-- [ ] **2.1.4** New tests only possible with controls: disease status (eutopic vs healthy),
-      and phase at five levels rather than three.
+### 5.2 If time allows
 
-> ⚠️ **Compute constraint.** Current runs are ~4,374 s/epoch, 25 epochs, ~30 h, inside a two-day
-> wall. Adding controls is roughly +40% cells, which pushes a 25-epoch run to ~42 h. Still inside
-> two days but with much less margin, and any HPT sweep multiplies it. **Action: check whether a
-> longer wall-time queue or a larger allocation is available before planning the sweep.**
+- [ ] **C-4** Number of groups 15 / 45 / 90 at fixed parameters. Empirical test of the effective-gene-space argument.
+- [ ] **C-5** DSBN removed.
+- [ ] **C-6** Training-set size 25 / 50 / 100%.
 
-### 2.2 Reference mapping — the standard atlas utility
+### 5.3 Reporting
 
-The most conventional way an atlas gets used: a lab sequences new endometriosis tissue, projects it
-onto the reference, and gets labels plus context.
-
-- [ ] **2.2.1** Implement query projection: encode new cells without retraining, handling genes
-      absent from the query (the DNS sentinel already gives us a principled way to do this, which is
-      a genuine advantage).
-- [ ] **2.2.2** Label transfer from reference to query, with a confidence score.
-- [ ] **2.2.3** Benchmark transfer accuracy against scANVI and a simple kNN-on-PCA baseline.
-- [ ] **2.2.4** Package as a documented function with a worked example on a held-out study.
-
-### 2.3 Hormonal state inference — the most under-rated asset
-
-Most published endometriosis datasets lack menstrual phase annotation. If ELAJ can infer hormonal
-state from expression, that retrospectively annotates the field's existing data. That is a tool a
-biologist would actually reach for, and it comes from a result we already have.
-
-- [ ] **2.3.1** Quantify how well progesterone / phase can be predicted from the latent, properly,
-      cross-donor.
-- [ ] **2.3.2** Apply to unannotated samples in the corpus and report inferred phase distributions.
-- [ ] **2.3.3** Validate against the García-Alonso five-level phase labels once controls are in.
-- [ ] **2.3.4** If it holds, this is a standalone contribution and possibly its own figure.
-
-### 2.4 Pathway readout for biologists
-
-- [ ] **2.4.1** Per-sample pathway activity profile as the primary biologist-facing output.
-- [ ] **2.4.2** Differential pathway activity between disease states and tissues.
-- [ ] **2.4.3** Compare against standard GSEA on the same data. If we agree with GSEA we add little;
-      if we disagree we need to explain why we are right.
-
-### 2.5 Deliverable form
-
-- [ ] **2.5.1** Decide: Python package, web browser (CELLxGENE-style), or both.
-- [ ] **2.5.2** Minimum viable: `pip install`, load weights, project query, get labels and pathway
-      scores. Anything more is optional.
-- [ ] **2.5.3** Ask Animesh whether a clinical collaborator would trial it. A named clinician who has
-      used the tool is worth a paragraph in the cover letter.
+- [ ] **C-7** One table: rows are configurations, columns are cross-donor family, cross-donor phase, knn patient, scIB bio, scIB batch, parameters, seconds per epoch. Every row a separate run at the same seed.
 
 ---
 
-## 3. Lane three: ablations
+## 6. Phase D: the benchmark table as it will be published (week 3)
 
-The rule: every architectural claim in the paper needs an experiment, or the claim comes out.
-
-### 3.1 Priority ablations — these are claims we make
-
-- [ ] **3.1.1 Gene grouping, random-permutation control.** Keep 45 groups of identical sizes,
-      shuffle gene membership so grouping carries no pathway information. Parameter count, attention
-      cost and effective gene space all unchanged; only the biology of the grouping is removed. This
-      is the single most important experiment in the paper and it is the one a methods reviewer asks
-      for first. Note that flat attention is *not* the comparison, because at this vocabulary it
-      cannot be run at all (492 GB of attention scores at batch 128).
-- [ ] **3.1.2 Circular branch removed.** Train Gaussian-only. Currently the redundancy claim rests on
-      an inference, not a measurement.
-- [ ] **3.1.3 DNS sentinel removed.** Treat unmeasured genes as zero. Tests the claim that
-      distinguishing the two matters, which we assert repeatedly.
-- [ ] **3.1.4 Number of groups.** 15 / 45 / 90 groups. Tests the effective-gene-space theory
-      empirically rather than only on paper.
-
-### 3.2 Secondary ablations
-
-- [ ] **3.2.1** DSBN removed.
-- [ ] **3.2.2** DAB (adversarial) removed.
-- [ ] **3.2.3** CCE on/off — partially covered by existing runs, needs collecting.
-- [ ] **3.2.4** Bilinear decoder vs plain linear.
-- [ ] **3.2.5** Library-size scaling removed.
-- [ ] **3.2.6** `d_token` sweep at fixed group count.
-
-### 3.3 Scaling and stability
-
-- [ ] **3.3.1** Training-set size curve: 25 / 50 / 75 / 100 % of cells. Answers "would more data
-      help", which reviewers ask and which speaks to whether the corpus is saturated.
-- [ ] **3.3.2** Seed variability across ≥5 seeds for the reported configuration. Partially done;
-      needs to be systematic so every headline number carries a spread.
-- [ ] **3.3.3** Re-run persistent homology per pair of circular dimensions. Two circles at a time is
-      a 2-D problem where 2,000 points is dense rather than sparse, converting the one open question
-      in the results into an answer at no new compute cost.
-
-### 3.4 Ablation reporting
-
-- [ ] **3.4.1** One table: rows are configurations, columns are reconstruction, study mixing,
-      cross-donor cell family, cross-donor phase. Every row a separate training run.
-- [ ] **3.4.2** Each ablation needs the same seed treatment, or the differences are not
-      interpretable.
+- [ ] **D1** Inductive rows for PCA, scVI, scANVI (A3). Transductive rows kept and labelled.
+- [ ] **D2** `--gene-policies hvg2000`: each method's own best case.
+- [ ] **D3** scGPT and Geneformer zero-shot on the same cells. Implemented as `BaselineMethod`s; both need their own environments and the HPC install pattern from `install_baselines.sh`.
+- [ ] **D4** Width-matched rows: Harmony at 16 PCs and Scanorama at `dimred` 16, beside their defaults.
+- [ ] **D5** Chance for `patient_id` in the note, so the 0.24 has a floor.
+- [ ] **D6** One figure: methods on rows, metrics on columns, the scIB-style heatmap with our cross-donor columns added on the left.
 
 ---
 
-## 4. Sequencing and dependencies
+## 7. Phase E: one demonstration (week 3 to 4)
 
-```
-2.1 Controls retrain ──┬─→ 1.3 Biological discovery ──→ paper core
-                       ├─→ 2.3 Hormonal inference
-                       └─→ 2.2 Reference mapping (needs final weights)
+C7. One of, chosen by what the best arm can do:
 
-1.1 Benchmarks ────────── independent, start immediately, mostly CPU/light GPU
+- [ ] **E1 Phase inference on an unlabelled study.** Predict menstrual phase for a study with no phase metadata, cross-donor, and check against whatever orthogonal evidence that study carries (progesterone, histology in the paper, cycle day). Uses a result we already have (progesterone r = 0.33 on the Gaussian branch).
+- [ ] **E2 Held-out study embedded without retraining.** The DNS sentinel handles the panel mismatch. Score it with the same tests.
 
-3.1 Ablations ─────────── needs GPU queue; each row is a full training run
-
-1.4 Interpretability ──── analysis only on existing weights, start immediately
-```
-
-**Critical path:** controls retrain → biology → everything downstream. Start it first.
-
-**Parallelisable now, no retraining needed:** 1.1 benchmarks, 1.4 interpretability, 3.3.3 homology
-rerun, 1.5 reproducibility work.
-
-**GPU-bound and queue-limited:** 2.1, 1.2, all of §3. Rough count: 2 (external validation) + 4
-(priority ablations) + 6 (secondary) + 4 (scaling) + 5 (seeds) ≈ **21 training runs** at ~30–42 h
-each. At one two-day job at a time that is over three months of wall-clock. **This is the binding
-constraint on the whole plan and needs addressing before anything else.**
+The reference-mapping package, the pathway readout for biologists, and the
+disease findings are §9.
 
 ---
 
-## 5. Open questions
+## 8. Reproducibility (runs alongside everything; the Reporting Summary enforces it)
 
-1. **Journal lane.** Biology-first or methods-first? Changes what we build. Needs Animesh.
-2. **Compute.** Is a larger allocation or longer wall time available? If not, §3 must be cut down to
-   the four priority ablations and the plan re-scoped.
-3. **Data redistribution.** Licence audit on all twelve datasets before promising deposition.
-4. **Authorship and scope.** Who does what. Is this one paper or two (corpus + method)?
-5. **Timeline.** Is there a deadline driving this — a grant, a fellowship, a funding application?
-   That changes whether we aim for the full plan or a faster, smaller paper.
-6. **Fallback venues.** If Nature-family does not work: Genome Biology, Cell Reports Methods,
-   Bioinformatics, npj Digital Medicine, eLife. Worth agreeing the ladder in advance so a rejection
-   does not cost three months of re-planning.
+- [ ] **R1** Public GitHub mirror with a version tag at submission and a Zenodo DOI.
+- [ ] **R2** Weights of the reported configuration deposited, licence decided.
+- [ ] **R3** Licence audit of the twelve datasets. Publish what can be published: the pipeline, the accession list, the mapping tables, the de-duplication table, and the processed AnnData where the licence allows.
+- [ ] **R4** One command per figure. Environment pinned (the module stack plus `install_baselines.sh`).
+- [ ] **R5** Nature Reporting Summary, data availability, code availability.
+- [ ] **R6** bioRxiv preprint at submission.
 
 ---
 
-## 6. Immediate next actions
+## 9. Deferred: the Genome Biology lane
 
-Nothing here needs a decision from anyone else and all of it is useful regardless of which lane wins:
+Kept, not abandoned. Everything here becomes the centre if §0's fallback
+applies, and becomes follow-up work if NMI goes ahead.
 
-1. Check HPC allocation and maximum wall time. Everything is downstream of this.
-2. Start the controls retrain, since it is on the critical path and takes the longest.
-3. Start scVI and Harmony baselines in parallel; they are cheap and their absence is the most
-   obvious hole.
-4. Begin pathway attribution on existing weights. No new compute, and it is our best differentiator.
-5. Licence audit on the twelve datasets.
+- Eutopic versus control in the latent, and which pathways drive it (needs the c_ weights).
+- Cross-study replication of a cell state present in three or more studies.
+- Pathway-level disease signature from the 45 group summaries; comparison with GSEA.
+- Leave-one-study-out external validation (duempelmann_2026, then mareckova_2024).
+- Reference mapping as a package: project a query, transfer labels with confidence, benchmark against scANVI.
+- Attention analysis within groups; pathway-by-cell-type heatmap.
+- Persistent homology per pair of circular dimensions.
+- Clinical collaborator trial.
+
+---
+
+## 10. The manuscript
+
+Nature format. Main text about 3,500 words, Methods unlimited, six to eight
+figures, Extended Data for the rest.
+
+| section | content | figure |
+|---|---|---|
+| Introduction | multi-study single-cell data has mismatched panels and donor confounds; existing models encode the donor; transformers have not beaten scVI zero-shot; what ELAJ does differently | |
+| Results 1 | the corpus and the architecture: grouping, DNS, the bifurcated latent; the cost argument | Fig. 1 architecture; Fig. 2 effective gene space and cost |
+| Results 2 | the validation protocol: cross-donor agreement, permutation null, p floor; baselines score on donor identity | Fig. 3 protocol and the donor confound |
+| Results 3 | the benchmark: ELAJ against scVI, scANVI, Harmony, Scanorama, PCA, scGPT, Geneformer, inductive and transductive | Fig. 4 heatmap |
+| Results 4 | the diagnosis and the campaign: where the signal was lost, what fixed it | Fig. 5 stage probe and campaign |
+| Results 5 | ablations: random grouping, DNS, Gaussian-only | Fig. 6 ablation table as figure |
+| Results 6 | the demonstration | Fig. 7 |
+| Discussion | what grouping buys and what it does not; the circular branch honestly; limits: one organ, controls only now in; what transfers | |
+| Methods | corpus, vocabulary, model, losses, training, validation, baselines, ablations, compute | |
+
+---
+
+## 11. Four weeks
+
+| week | training slots | analysis | writing |
+|---|---|---|---|
+| 1 (15 to 21 Sep) | c_ref, c_wide | probe read (A1); KL per dimension (A2); inductive scVI (A3); score_arm (B1) | Methods: corpus, model, validation (unchanged by results) |
+| 2 (22 to 28 Sep) | wave 2, two arms | benchmark D1, D2, D4, D5; scGPT/Geneformer environments (D3) | Results 1, 2; Fig. 1 to 3 |
+| 3 (29 Sep to 5 Oct) | best arm at seed 2; random grouping (C-1) | D3 run; E1 or E2; DNS ablation (C-2) queued | Results 3, 4; Fig. 4, 5 |
+| 4 (6 to 12 Oct) | Gaussian-only (C-3) | ablation table (C-7); R1 to R5 | Results 5, 6; Discussion; Extended Data; internal review |
+
+The table assumes wave 2 lands. If it does not, week 3's slots go to wave 3
+of the campaign and the ablations slip past the deadline, which is the point
+at which §0's fallback is decided with Animesh.
+
+---
+
+## 12. Open questions
+
+1. **Compute.** Twenty arms in four weeks needs both GPUs busy throughout. Is a second allocation or a longer queue available?
+2. **Data redistribution.** The licence audit (R3) decides what the Data Availability statement can say.
+3. **Authorship.** Who is on the paper and in what order. Needs Animesh.
+4. **scGPT and Geneformer.** Both want their own environments and their own tokenisation of the corpus. Budget two days for the install alone.
+5. **The circular branch.** If c_gauss matches the best arm, the paper says so and the branch becomes a Discussion paragraph, not a Results section.

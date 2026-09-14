@@ -40,7 +40,6 @@ defects and fragilities found while writing this.
 | 11 | [Findings](11-findings.md) | The run ledger (waves 0–R8), defects and fragilities, ranked |
 | 12 | [Validating the latent](12-validation.md) | What can honestly be tested, the scoreboard, the donor confound |
 | 13 | [Comparing against other methods](13-baselines.md) | `benchmark_baselines.py` — scVI, scANVI, Harmony, Scanorama, PCA on the same cells with the same scorer |
-| 12 | [Validating the latent](12-validation.md) | Criterion 5: does the latent predict anything that was not an input? Plan and scoreboard |
 
 ## The five entry points
 

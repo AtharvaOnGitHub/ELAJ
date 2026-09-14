@@ -1,0 +1,64 @@
+name: r9_controls
+description: >
+  r8_direction with the control donors back in the corpus. Wave R9, arm 1.
+
+  WHY NOW. The baseline benchmark (outputs/benchmarks/r8_all) put r8_direction
+  below 16-component PCA on every biology metric: 84% same-family neighbours
+  against 98%, 75% on the cross-donor family test against 98%, 12% on
+  cross-donor phase against 29 to 63%. The latent is under-resolved and the
+  work is training. A retrain is the moment to lift the deadline exclusion of
+  controls, because the corpus, the splits, and the reference checkpoint all
+  change anyway, and every later arm should be compared against a model that
+  has seen normal endometrium.
+
+  WHAT CHANGES. One data line: include_disease_statuses gains "control".
+  Nothing else. This arm is the R9 reference; the arms that act on the
+  diagnostic (encoder stage scoring, per-group family information) are
+  compared against it, not against r8_direction.
+
+  EPOCH BUDGET. r8_direction trained on 785,853 cells at 4,374 s/epoch. The
+  corpus with controls holds about 1.2 M training cells, so an epoch should
+  take about 6,800 s. T_max 22 is then 41.6 h inside the two-day wall, with
+  six hours of margin for loading and checkpointing. T_max sets the cosine
+  schedule, not a cap, so it has to fit: CHECK THE FIRST EPOCH TIME IN THE
+  LOG. Above 7,800 s the run will not anneal before the wall; set
+  training.resume_from_checkpoint to the last checkpoint and resubmit.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/r9_controls/
+seed: 24
+
+overrides:
+  # The change this arm exists for.
+  data.include_disease_statuses: [eutopic, ectopic, adenomyosis, control]
+
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- everything below is r8_direction, unchanged ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+
+  model.d_gauss: 8
+  model.n_vMF: 4
+  model.d_platform: 16
+
+  model.group_encoder.grad_checkpointing: true
+  model.kappa_floor: 1.0
+  model.circular_parameterisation: direction

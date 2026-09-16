@@ -28,7 +28,7 @@ from endo_model.evaluation.baselines.scorer import ScoreRow
 logger = logging.getLogger(__name__)
 
 CSV_FIELDS = ["method", "gene_policy", "test", "label", "n_cells", "value",
-              "note", "width", "fit_seconds", "supervised_on"]
+              "note", "width", "fit_seconds", "supervised_on", "fit_on"]
 
 # (test, label) pairs shown in the wide table, in this order. Anything not
 # listed here still lands in the CSV; the wide table is for the argument.
@@ -64,8 +64,9 @@ class BenchmarkReport:
         self._rows.extend(rows)
 
     def record_settings(self, method: str, gene_policy: str,
-                        settings: dict) -> None:
-        self._settings[f"{method}/{gene_policy}"] = dict(settings)
+                        settings: dict, fit_on: str = "") -> None:
+        key = "/".join(p for p in (method, gene_policy, fit_on) if p)
+        self._settings[key] = dict(settings)
 
     def record_skip(self, method: str, reason: str) -> None:
         """A method that could not run. Kept so the table says why it is absent."""
@@ -79,23 +80,20 @@ class BenchmarkReport:
     def methods(self) -> list[str]:
         seen: OrderedDict[str, None] = OrderedDict()
         for r in self._rows:
-            seen.setdefault(f"{r.method}/{r.gene_policy}" if r.gene_policy
-                            else r.method, None)
+            seen.setdefault(r.key, None)
         return list(seen)
 
     # ── lookups ──────────────────────────────────────────────────────────
 
     def value(self, method_key: str, test: str, label: str) -> float:
         for r in self._rows:
-            key = f"{r.method}/{r.gene_policy}" if r.gene_policy else r.method
-            if key == method_key and r.test == test and r.label == label:
+            if r.key == method_key and r.test == test and r.label == label:
                 return float(r.value)
         return float("nan")
 
     def supervised_on(self, method_key: str) -> str:
         for r in self._rows:
-            key = f"{r.method}/{r.gene_policy}" if r.gene_policy else r.method
-            if key == method_key and r.supervised_on:
+            if r.key == method_key and r.supervised_on:
                 return r.supervised_on
         return ""
 

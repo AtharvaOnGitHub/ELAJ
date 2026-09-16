@@ -91,6 +91,14 @@ class ScoreRow:
     width: int = 0
     fit_seconds: float = 0.0
     supervised_on: str = ""
+    fit_on: str = ""
+
+    @property
+    def key(self) -> str:
+        """The row's identity in the wide table: ``method/gene_policy/fit_on``
+        with empty parts dropped, so ``scvi/all`` is transductive and
+        ``scvi/all/train`` was fitted on the training donors."""
+        return "/".join(p for p in (self.method, self.gene_policy, self.fit_on) if p)
 
     def as_dict(self) -> dict:
         d = {"method": self.method, "gene_policy": self.gene_policy,
@@ -99,7 +107,7 @@ class ScoreRow:
                        if np.isfinite(self.value) else float("nan")),
              "note": self.note, "width": self.width,
              "fit_seconds": round(self.fit_seconds, 1),
-             "supervised_on": self.supervised_on}
+             "supervised_on": self.supervised_on, "fit_on": self.fit_on}
         return d
 
 
@@ -160,7 +168,7 @@ class EmbeddingScorer:
         add_harmonised_labels(corpus)
         stamp = dict(method=embedding.method, gene_policy=gene_policy,
                      width=embedding.width, fit_seconds=embedding.fit_seconds,
-                     supervised_on=supervised_on)
+                     supervised_on=supervised_on, fit_on=embedding.fit_on)
         rows: list[ScoreRow] = []
         rows += self._knn(embedding.latent, corpus, stamp)
         rows += self._cross_donor(embedding.latent, corpus, stamp)
@@ -191,7 +199,8 @@ class EmbeddingScorer:
                                       k=self.settings.k, seed=self.settings.seed)
             if res["n_cells"] < self.settings.k + 1:
                 continue
-            note = ("high is BAD: individual identity" if col == "patient_id"
+            note = (f"high is BAD: individual identity; {res['n_labels']} donors; "
+                    f"chance={res['chance']:.3f}" if col == "patient_id"
                     else f"{res['n_labels']} labels; chance={res['chance']:.3f}")
             rows.append(ScoreRow(test="knn-agreement", label=col,
                                  n_cells=res["n_cells"], value=res["excess"],

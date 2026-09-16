@@ -23,6 +23,16 @@ what was compared.
 Dependencies are checked, not assumed. A method whose package is absent
 reports that and is skipped; the run does not die on the fourth method after
 three hours of the first three.
+
+TRANSDUCTIVE AND INDUCTIVE. ``embed(corpus)`` fits a method on the cells it
+is then scored on. That is how integration benchmarks are normally run, and
+it is not what ELAJ is asked to do: ELAJ is trained on one set of donors and
+scored on donors it never saw. ``embed(corpus, fit_corpus=train)`` asks the
+same of a baseline: fit on ``fit_corpus``, embed ``corpus``. PCA, scVI and
+scANVI can do that; Harmony and Scanorama have no out-of-sample map and
+raise ``TransductiveOnly`` so the report can say why the row is absent. The
+``fit_on`` field of the result records which was done, and the two are never
+mixed in one table row.
 """
 
 from __future__ import annotations
@@ -49,14 +59,36 @@ class MissingDependency(RuntimeError):
     """Raised by ``embed`` when a method's package is not installed."""
 
 
+class TransductiveOnly(RuntimeError):
+    """Raised by ``embed`` when a method is given a fit corpus it cannot use.
+
+    Harmony corrects the cells it is given and Scanorama stitches them; neither
+    defines an embedding for a cell it did not see. Asking them to is not an
+    error in the caller, it is a fact about the method, and the report should
+    say so rather than silently scoring the transductive result in an
+    inductive table.
+    """
+
+
+# What ``Embedding.fit_on`` holds when a method was fitted on the cells it
+# embedded, which is the default and what every integration benchmark does.
+FIT_ON_SCORED = ""
+
+
 @dataclass
 class Embedding:
-    """What a method produces, with enough provenance to be reported."""
+    """What a method produces, with enough provenance to be reported.
+
+    ``fit_on`` names the split the method was fitted on when that is not the
+    scored cells themselves: ``"train"`` for a baseline fitted on the training
+    donors and applied to the held-out ones. Empty means transductive.
+    """
 
     method: str
     latent: np.ndarray
     fit_seconds: float
     settings: dict = field(default_factory=dict)
+    fit_on: str = FIT_ON_SCORED
 
     @property
     def width(self) -> int:
@@ -93,7 +125,22 @@ class BaselineMethod(ABC):
 
     @abstractmethod
     def _embed(self, corpus: CorpusMatrix) -> np.ndarray:
-        """``(n_cells, d)`` float array. Rows in corpus order."""
+        """``(n_cells, d)`` float array. Rows in corpus order. Transductive."""
+
+    def _fit_embed(self, fit: CorpusMatrix, corpus: CorpusMatrix) -> np.ndarray:
+        """Fit on ``fit``, embed ``corpus``. Rows in ``corpus`` order.
+
+        The default says the method cannot; a method that can overrides this
+        and sets ``inductive = True``.
+        """
+        raise TransductiveOnly(
+            f"{self.name} has no out-of-sample map: it can only embed the "
+            f"cells it was fitted on"
+        )
+
+    # True for methods that override _fit_embed. Read by the driver to decide
+    # whether to build a fit corpus for them at all.
+    inductive: bool = False
 
     def settings(self) -> dict:
         """Hyperparameters worth recording. Override to add the method's own."""
@@ -105,18 +152,40 @@ class BaselineMethod(ABC):
     def available(self) -> bool:
         return not self.missing()
 
-    def embed(self, corpus: CorpusMatrix) -> Embedding:
-        """The template: check, time, validate. Subclasses never override this."""
+    def embed(self, corpus: CorpusMatrix,
+              fit_corpus: CorpusMatrix | None = None,
+              fit_on: str = "train") -> Embedding:
+        """The template: check, time, validate. Subclasses never override this.
+
+        With ``fit_corpus`` the method is fitted there and applied to
+        ``corpus``; ``fit_on`` is the name recorded for that split.
+        """
         absent = self.missing()
         if absent:
             raise MissingDependency(
                 f"{self.name} needs {', '.join(absent)}; "
                 f"pip install {' '.join(absent)}"
             )
-        logger.info("── %s on %d cells x %d genes", self.name,
-                    corpus.n_cells, corpus.n_genes)
+        if fit_corpus is not None and not self.inductive:
+            raise TransductiveOnly(
+                f"{self.name} has no out-of-sample map: it can only embed the "
+                f"cells it was fitted on"
+            )
+        if fit_corpus is not None and fit_corpus.n_genes != corpus.n_genes:
+            raise ValueError(
+                f"{self.name}: fit corpus has {fit_corpus.n_genes} genes, "
+                f"scored corpus {corpus.n_genes}; apply one gene policy to both"
+            )
+        if fit_corpus is None:
+            logger.info("── %s on %d cells x %d genes", self.name,
+                        corpus.n_cells, corpus.n_genes)
+        else:
+            logger.info("── %s fitted on %d cells (%s), applied to %d cells x "
+                        "%d genes", self.name, fit_corpus.n_cells, fit_on,
+                        corpus.n_cells, corpus.n_genes)
         started = time.perf_counter()
-        latent = self._embed(corpus)
+        latent = (self._embed(corpus) if fit_corpus is None
+                  else self._fit_embed(fit_corpus, corpus))
         elapsed = time.perf_counter() - started
         if latent.shape[0] != corpus.n_cells:
             raise RuntimeError(
@@ -125,7 +194,8 @@ class BaselineMethod(ABC):
             )
         logger.info("   %s: width %d, %.0f s", self.name, latent.shape[1], elapsed)
         return Embedding(method=self.name, latent=latent,
-                         fit_seconds=elapsed, settings=self.settings())
+                         fit_seconds=elapsed, settings=self.settings(),
+                         fit_on=(FIT_ON_SCORED if fit_corpus is None else fit_on))
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +204,20 @@ class BaselineMethod(ABC):
 # ---------------------------------------------------------------------------
 
 
-def to_anndata(corpus: CorpusMatrix, extra_obs: dict[str, np.ndarray] | None = None):
-    """A CorpusMatrix as an AnnData with ``study`` in obs, counts in X."""
+def to_anndata(corpus: CorpusMatrix, extra_obs: dict[str, np.ndarray] | None = None,
+               study_categories: list[str] | None = None):
+    """A CorpusMatrix as an AnnData with ``study`` in obs, counts in X.
+
+    ``study_categories`` fixes the category set of ``study``. scvi-tools
+    registers batch as a categorical and refuses a query whose categories are
+    not the training set's, so a fit corpus and a scored corpus have to be
+    built with the union of their studies, in the same order.
+    """
     import anndata
     import pandas as pd
 
-    obs = {"study": pd.Categorical(corpus.study_id.astype(str))}
+    obs = {"study": pd.Categorical(corpus.study_id.astype(str),
+                                   categories=study_categories)}
     for name, values in (extra_obs or {}).items():
         obs[name] = pd.Categorical(np.asarray(values, dtype=object).astype(str))
     adata = anndata.AnnData(
@@ -148,6 +226,14 @@ def to_anndata(corpus: CorpusMatrix, extra_obs: dict[str, np.ndarray] | None = N
     )
     adata.var_names = corpus.gene_names
     return adata
+
+
+def shared_study_categories(*corpora: CorpusMatrix) -> list[str]:
+    """The union of study ids across corpora, as sorted strings."""
+    ids = set()
+    for c in corpora:
+        ids.update(str(s) for s in np.unique(c.study_id))
+    return sorted(ids, key=lambda s: (len(s), s))
 
 
 def log_normalise(adata, target_sum: float = 1e4) -> None:
@@ -166,6 +252,22 @@ def pca(adata, n_comps: int, seed: int) -> np.ndarray:
     n = min(n_comps, adata.n_obs - 1, adata.n_vars - 1)
     sc.pp.pca(adata, n_comps=n, random_state=seed)
     return np.asarray(adata.obsm["X_pca"], dtype=np.float32)
+
+
+def pca_projection(fitted, query) -> np.ndarray:
+    """Project ``query.X`` onto the components ``pca`` fitted on ``fitted``.
+
+    scanpy centres the fit matrix before decomposing it (implicitly, when it
+    is sparse), so a query cell has to be centred by the FIT mean, not its
+    own: ``(x - m) @ W = x @ W - m @ W``. The second form never densifies
+    the query. Both matrices must be log-normalised the same way and share
+    the gene axis.
+    """
+    components = np.asarray(fitted.varm["PCs"], dtype=np.float32)   # (genes, k)
+    mean = np.asarray(fitted.X.mean(axis=0), dtype=np.float32).ravel()
+    projected = query.X @ components
+    projected = np.asarray(projected, dtype=np.float32)
+    return projected - (mean @ components)[None, :]
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +300,20 @@ class PCABaseline(BaselineMethod):
     def settings(self) -> dict:
         return {**super().settings(), "n_components": self.n_components}
 
+    inductive = True
+
     def _embed(self, corpus: CorpusMatrix) -> np.ndarray:
         adata = to_anndata(corpus)
         log_normalise(adata)
         return pca(adata, self.n_components, self.seed)
+
+    def _fit_embed(self, fit: CorpusMatrix, corpus: CorpusMatrix) -> np.ndarray:
+        fitted = to_anndata(fit)
+        log_normalise(fitted)
+        pca(fitted, self.n_components, self.seed)
+        query = to_anndata(corpus)
+        log_normalise(query)
+        return pca_projection(fitted, query)
 
 
 class HarmonyBaseline(BaselineMethod):
@@ -312,12 +424,14 @@ class ScVIBaseline(BaselineMethod):
         return {**super().settings(), "n_latent": self.n_latent,
                 "max_epochs": self.max_epochs}
 
-    def _train(self, corpus: CorpusMatrix):
+    inductive = True
+
+    def _train(self, corpus: CorpusMatrix, study_categories=None):
         """Fit and return the scvi model; ScANVI builds on this."""
         import scvi
 
         scvi.settings.seed = self.seed
-        adata = to_anndata(corpus)
+        adata = to_anndata(corpus, study_categories=study_categories)
         scvi.model.SCVI.setup_anndata(adata, batch_key="study")
         model = scvi.model.SCVI(adata, n_latent=self.n_latent)
         model.train(max_epochs=self.max_epochs)
@@ -326,6 +440,19 @@ class ScVIBaseline(BaselineMethod):
     def _embed(self, corpus: CorpusMatrix) -> np.ndarray:
         model, _ = self._train(corpus)
         return np.asarray(model.get_latent_representation(), dtype=np.float32)
+
+    def _fit_embed(self, fit: CorpusMatrix, corpus: CorpusMatrix) -> np.ndarray:
+        """Train on ``fit``; encode ``corpus`` with the trained encoder.
+
+        scvi-tools transfers the training registry to a new AnnData when it
+        is handed one, provided the genes match and every batch category was
+        seen in training; ``shared_study_categories`` guarantees the second.
+        The query cells are never trained on.
+        """
+        categories = shared_study_categories(fit, corpus)
+        model, _ = self._train(fit, study_categories=categories)
+        query = to_anndata(corpus, study_categories=categories)
+        return np.asarray(model.get_latent_representation(query), dtype=np.float32)
 
 
 class ScANVIBaseline(ScVIBaseline):
@@ -366,7 +493,8 @@ class ScANVIBaseline(ScVIBaseline):
         return np.array([UNLABELLED if v is None else str(v) for v in raw],
                         dtype=object)
 
-    def _embed(self, corpus: CorpusMatrix) -> np.ndarray:
+    def _train_scanvi(self, corpus: CorpusMatrix, study_categories=None):
+        """scVI on ``corpus``, then the scANVI fine-tune on its labels."""
         import scvi
 
         labels = self._labels_for(corpus, self.label_column)
@@ -378,7 +506,8 @@ class ScANVIBaseline(ScVIBaseline):
             raise ValueError(f"no cell carries a {self.label_column!r} label")
 
         scvi.settings.seed = self.seed
-        adata = to_anndata(corpus, extra_obs={"label": labels})
+        adata = to_anndata(corpus, extra_obs={"label": labels},
+                           study_categories=study_categories)
         scvi.model.SCVI.setup_anndata(adata, batch_key="study")
         base = scvi.model.SCVI(adata, n_latent=self.n_latent)
         base.train(max_epochs=self.max_epochs)
@@ -388,7 +517,27 @@ class ScANVIBaseline(ScVIBaseline):
         # scANVI's own default is a short fine-tune on top of the trained
         # scVI; it is not a second full training.
         model.train(max_epochs=20, n_samples_per_label=100)
+        return model
+
+    def _embed(self, corpus: CorpusMatrix) -> np.ndarray:
+        model = self._train_scanvi(corpus)
         return np.asarray(model.get_latent_representation(), dtype=np.float32)
+
+    def _fit_embed(self, fit: CorpusMatrix, corpus: CorpusMatrix) -> np.ndarray:
+        """Train on ``fit`` with its labels; encode ``corpus`` UNLABELLED.
+
+        The query's labels are withheld on purpose. scANVI's encoder does not
+        read the label at inference, but the registry transfer needs the
+        column to exist, and handing it the true labels would leave a reader
+        unable to tell whether they were used. Every query cell is marked
+        unlabelled, which is a category the training set carries.
+        """
+        categories = shared_study_categories(fit, corpus)
+        model = self._train_scanvi(fit, study_categories=categories)
+        withheld = np.full(corpus.n_cells, UNLABELLED, dtype=object)
+        query = to_anndata(corpus, extra_obs={"label": withheld},
+                           study_categories=categories)
+        return np.asarray(model.get_latent_representation(query), dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------

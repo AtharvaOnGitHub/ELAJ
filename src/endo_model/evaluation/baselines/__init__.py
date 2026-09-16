@@ -35,6 +35,7 @@ from endo_model.evaluation.baselines.methods import (
     ScanoramaBaseline,
     ScANVIBaseline,
     ScVIBaseline,
+    TransductiveOnly,
     build_method,
 )
 from endo_model.evaluation.baselines.report import BenchmarkReport
@@ -50,6 +51,6 @@ __all__ = [
     "Embedding", "EmbeddingScorer", "GenePolicy", "HarmonyBaseline",
     "HighlyVariableGenes", "IntersectionGenes", "METHODS", "MissingDependency",
     "PCABaseline", "ScANVIBaseline", "ScVIBaseline", "ScanoramaBaseline",
-    "ScoreRow", "ScorerSettings", "add_harmonised_labels", "build_method",
-    "extract_corpus_matrix", "policy_from_name",
+    "ScoreRow", "ScorerSettings", "TransductiveOnly", "add_harmonised_labels",
+    "build_method", "extract_corpus_matrix", "policy_from_name",
 ]

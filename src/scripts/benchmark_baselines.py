@@ -26,6 +26,15 @@ THE SUPERVISED ROW. scANVI is trained on `--scanvi-label`. Its score on THAT
 label is not comparable to anyone else's and the table says so; its scores on
 other labels are the fair comparison.
 
+TRANSDUCTIVE OR INDUCTIVE. By default every baseline is fitted on the cells
+it is scored on, which is how integration benchmarks are run and is NOT what
+ELAJ is asked to do: ELAJ is trained on the training donors and scored on
+donors it never saw. `--fit-split train` asks the same of the baselines that
+can do it (PCA, scVI, scANVI): fit on the training split, embed the scored
+split. Harmony and Scanorama have no out-of-sample map and are reported as
+skipped in that mode. The two modes produce separate rows (`scvi/all` and
+`scvi/all/train`) and the table keeps them apart.
+
 Nothing here retrains ELAJ. It reads the checkpoint on disk, if `--include-elaj`
 is set, and embeds the same cells so the model sits in the same table.
 """
@@ -68,6 +77,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scanvi-label", default="cell family",
                    help="Column scANVI is supervised on. Its score on this "
                         "label is flagged in the table.")
+    p.add_argument("--fit-split", default=None, choices=["train"],
+                   help="Fit the baselines on this split and apply them to "
+                        "--splits, as ELAJ is. Methods without an "
+                        "out-of-sample map are skipped and reported.")
+    p.add_argument("--pca-components", type=int, default=None)
+    p.add_argument("--scvi-latent", type=int, default=None)
+    p.add_argument("--harmony-pcs", type=int, default=None,
+                   help="Default 50. Pass 16 for a width-matched row.")
+    p.add_argument("--scanorama-dimred", type=int, default=None,
+                   help="Default 100. Pass 16 for a width-matched row.")
     p.add_argument("--include-elaj", action="store_true",
                    help="Embed the checkpoint on the same cells and score it "
                         "alongside. Needs --runs-dir to find it.")
@@ -83,12 +102,44 @@ def parse_args() -> argparse.Namespace:
 
 
 def _method_kwargs(name: str, args) -> dict:
-    """Per-method construction arguments taken from the command line."""
-    if name == "scvi":
-        return {"max_epochs": args.scvi_epochs}
-    if name == "scanvi":
-        return {"label_column": args.scanvi_label, "max_epochs": args.scvi_epochs}
-    return {}
+    """Per-method construction arguments taken from the command line.
+
+    Only arguments the user set are passed, so a method's own default stays
+    its default and is what the settings file records.
+    """
+    given = {
+        "pca": {"n_components": args.pca_components},
+        "harmony": {"n_pcs": args.harmony_pcs},
+        "scanorama": {"dimred": args.scanorama_dimred},
+        "scvi": {"n_latent": args.scvi_latent, "max_epochs": args.scvi_epochs},
+        "scanvi": {"n_latent": args.scvi_latent, "max_epochs": args.scvi_epochs,
+                   "label_column": args.scanvi_label},
+    }.get(name, {})
+    return {k: v for k, v in given.items() if v is not None}
+
+
+def _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
+                  splits, orders, obs_columns, gene_names, names):
+    """One CorpusMatrix over the sampler order of each split, concatenated."""
+    from endo_model.evaluation.baselines import CorpusMatrix, extract_corpus_matrix
+    from endo_model.evaluation.baselines.scorer import add_harmonised_labels
+    from scripts.report_purity import build_loader
+    from scripts.validate_latent import sampler_order
+
+    parts = []
+    for split in splits:
+        loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
+                              study_configs, extra_obs_columns=obs_columns,
+                              split=split)
+        # Whether or not ELAJ was embedded, use the sampler's order: it is the
+        # set of cells the model CAN embed, so the table is comparable to any
+        # validate_latent run over the same splits.
+        order = orders.get(split) or sampler_order(loader)
+        parts.append(extract_corpus_matrix(loader.dataset, gene_names,
+                                           names, indices=order))
+    corpus = CorpusMatrix.concatenate(parts)
+    add_harmonised_labels(corpus)
+    return corpus
 
 
 def _embed_elaj(root, exp_cfg, model_cfg, train_cfg, data_cfg, vocab,
@@ -101,7 +152,6 @@ def _embed_elaj(root, exp_cfg, model_cfg, train_cfg, data_cfg, vocab,
     re-implementing the embedding pass.
     """
     import numpy as np
-    import torch
 
     from endo_model.evaluation.latent_validation import circular_coordinates
     from endo_model.evaluation.purity_report import best_checkpoint
@@ -132,8 +182,6 @@ def _embed_elaj(root, exp_cfg, model_cfg, train_cfg, data_cfg, vocab,
 
 
 def main() -> None:
-    import numpy as np
-
     args = parse_args()
     root = args.root or str(Path.cwd())
     out = Path(args.out)
@@ -142,15 +190,11 @@ def main() -> None:
     from endo_model.configs import load_experiment
     from endo_model.data.vocabulary import GeneVocabulary
     from endo_model.evaluation.baselines import (
-        BenchmarkReport, CorpusMatrix, Embedding, EmbeddingScorer,
-        MissingDependency, ScorerSettings, build_method, extract_corpus_matrix,
-        policy_from_name,
+        BenchmarkReport, Embedding, EmbeddingScorer, MissingDependency,
+        ScorerSettings, TransductiveOnly, build_method, policy_from_name,
     )
-    from endo_model.evaluation.baselines.scorer import (
-        add_harmonised_labels, required_obs_columns,
-    )
-    from scripts.report_purity import build_loader, resolve_run_dir
-    from scripts.validate_latent import sampler_order
+    from endo_model.evaluation.baselines.scorer import required_obs_columns
+    from scripts.report_purity import resolve_run_dir
 
     config = Path(root) / args.config_dir / f"{args.run}.yaml"
     if not config.exists():
@@ -185,21 +229,21 @@ def main() -> None:
         )
 
     # ── the corpus: one CorpusMatrix over the same cells, in the same order ──
-    parts = []
-    for split in args.splits:
-        loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
-                              study_configs, extra_obs_columns=obs_columns,
-                              split=split)
-        # Whether or not ELAJ was embedded, use the sampler's order: it is the
-        # set of cells the model CAN embed, so the table is comparable to any
-        # validate_latent run over the same splits.
-        order = orders.get(split) or sampler_order(loader)
-        parts.append(extract_corpus_matrix(loader.dataset, gene_names,
-                                           names, indices=order))
-    corpus = CorpusMatrix.concatenate(parts)
-    add_harmonised_labels(corpus)
+    corpus = _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab,
+                           study_configs, args.splits, orders, obs_columns,
+                           gene_names, names)
     logger.info("Corpus: %d cells x %d genes, %d studies, splits %s",
                 corpus.n_cells, corpus.n_genes, corpus.n_studies, corpus.split)
+
+    # ── the fit corpus, if the baselines are to be held out like ELAJ ──────
+    fit_corpus = None
+    if args.fit_split:
+        fit_corpus = _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab,
+                                   study_configs, [args.fit_split], {},
+                                   obs_columns, gene_names, names)
+        logger.info("Fit corpus: %d cells x %d genes, %d studies, split %s",
+                    fit_corpus.n_cells, fit_corpus.n_genes,
+                    fit_corpus.n_studies, fit_corpus.split)
 
     scorer = EmbeddingScorer(ScorerSettings(
         k=args.k, k_cross_donor=args.k_cross_donor,
@@ -213,41 +257,53 @@ def main() -> None:
                          elaj_latent.shape[0], corpus.n_cells)
             sys.exit(1)
         logger.info("── elaj (checkpoint) ──")
+        # ELAJ is always fitted on the training donors; say so in its key so
+        # it lines up with the baselines' inductive rows.
         emb = Embedding(method="elaj", latent=elaj_latent, fit_seconds=0.0,
-                        settings={"checkpoint": str(run_dir)})
+                        settings={"checkpoint": str(run_dir)}, fit_on="train")
         report.add(scorer.score(emb, corpus, gene_policy="native"))
-        report.record_settings("elaj", "native", emb.settings)
+        report.record_settings("elaj", "native", emb.settings, fit_on="train")
 
     # ── every policy x every method ─────────────────────────────────────────
+    fit_tag = args.fit_split or ""
     for policy_name in args.gene_policies:
         policy = policy_from_name(policy_name)
         try:
-            restricted = policy.apply(corpus)
+            # The gene set is chosen on the fit corpus when there is one, so
+            # an HVG list is selected without looking at the scored cells,
+            # then applied to both so their gene axes match.
+            chosen = fit_corpus if fit_corpus is not None else corpus
+            mask = policy.select(chosen)
+            restricted = corpus.restrict_genes(mask)
+            restricted_fit = (fit_corpus.restrict_genes(mask)
+                              if fit_corpus is not None else None)
         except ImportError as exc:
             report.record_skip(f"*/{policy.name}", str(exc))
             continue
+        logger.info("Gene policy %-12s keeps %6d of %d genes",
+                    policy.name, restricted.n_genes, corpus.n_genes)
         for method_name in args.methods:
             method = build_method(method_name, seed=args.seed,
                                   **_method_kwargs(method_name, args))
+            key = "/".join(p for p in (method.name, policy.name, fit_tag) if p)
             if not method.available():
-                report.record_skip(f"{method.name}/{policy.name}",
-                                   f"needs {', '.join(method.missing())}")
+                report.record_skip(key, f"needs {', '.join(method.missing())}")
                 continue
             try:
-                emb = method.embed(restricted)
-            except MissingDependency as exc:
-                report.record_skip(f"{method.name}/{policy.name}", str(exc))
+                emb = method.embed(restricted, fit_corpus=restricted_fit)
+            except (MissingDependency, TransductiveOnly) as exc:
+                report.record_skip(key, str(exc))
                 continue
             except Exception as exc:                      # noqa: BLE001
                 # One method failing must not cost the others their results.
                 logger.exception("%s failed on %s", method.name, policy.name)
-                report.record_skip(f"{method.name}/{policy.name}",
-                                   f"{type(exc).__name__}: {exc}")
+                report.record_skip(key, f"{type(exc).__name__}: {exc}")
                 continue
             supervised = (args.scanvi_label if method_name == "scanvi" else "")
             report.add(scorer.score(emb, restricted, gene_policy=policy.name,
                                     supervised_on=supervised))
-            report.record_settings(method.name, policy.name, emb.settings)
+            report.record_settings(method.name, policy.name, emb.settings,
+                                   fit_on=emb.fit_on)
             # Write after every method so a killed job still leaves a table.
             report.write_csv(out / "benchmark.csv")
             report.write_markdown(out / "benchmark.md")

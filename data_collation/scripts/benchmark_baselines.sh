@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=120G
+#SBATCH --mem=180G
 #SBATCH --job-name=elaj_bench
 #SBATCH --output=logs/bench_%j.log
 
@@ -21,6 +21,13 @@
 #       --runs-dir outputs/r8 --gene-policies hvg2000 \
 #       --out outputs/benchmarks/r8_hvg2000
 #
+#   # the fair comparison: baselines fitted on the training donors and
+#   # applied to the held-out ones, as ELAJ is. Harmony and Scanorama
+#   # cannot and are reported as skipped:
+#   sbatch data_collation/scripts/benchmark_baselines.sh r8_direction \
+#       --runs-dir outputs/r8 --fit-split train --methods pca scvi scanvi \
+#       --out outputs/benchmarks/r8_inductive
+#
 # The first positional argument is the experiment name; everything else is
 # passed through to scripts/benchmark_baselines.py. --include-elaj is on by
 # default here because the point of the table is ELAJ's row; pass
@@ -28,6 +35,8 @@
 # checkpoint exists for).
 #
 # GPU: scVI and scANVI train on it; the rest are CPU. One A100 is plenty.
+# MEMORY: 180 G because --fit-split train holds the ~1.2 M-cell training
+# corpus beside the scored one, plus scVI's own copy.
 # WALLTIME: 12 h is generous. scVI on ~240k cells is under an hour on an
 # A100, scANVI similar, Scanorama the slowest of the CPU methods at tens of
 # minutes, and the 200-permutation cross-donor null is the same cost as in
@@ -46,6 +55,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-elaj) INCLUDE_ELAJ=0; shift ;;
         --k|--k-cross-donor|--permutations|--seed|--scvi-epochs|--scanvi-label|\
+        --fit-split|--pca-components|--scvi-latent|--harmony-pcs|--scanorama-dimred|\
         --out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --splits|--methods|--gene-policies)

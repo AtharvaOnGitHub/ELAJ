@@ -16,7 +16,7 @@ import pytest
 from endo_model.evaluation.baselines.methods import (
     FIT_ON_SCORED, BaselineMethod, HarmonyBaseline, PCABaseline,
     ScANVIBaseline, ScanoramaBaseline, ScVIBaseline, TransductiveOnly,
-    shared_study_categories,
+    require_seen_studies, shared_study_categories,
 )
 from tests.test_evaluation.baselines_fixtures import family_of, make_corpus
 
@@ -121,14 +121,26 @@ class TestScVIInductive:
         e = ScVIBaseline(n_latent=4, max_epochs=2).embed(c, fit_corpus=fit)
         assert e.latent.shape == (c.n_cells, 4) and e.fit_on == "train"
 
-    def test_query_study_absent_from_fit_is_refused_by_scvi(self):
-        """A held-out cell from a study never trained on has no batch row."""
+    def test_unseen_query_study_is_refused_before_scvi_sees_it(self):
+        """A study never trained on would get an untrained batch row. scvi
+        itself does not object once the categories are shared, so the
+        refusal is ours, and the helper is tested without scvi installed."""
+        fit, c = make_corpus(n_per_study=8, seed=1), make_corpus(n_per_study=4)
+        require_seen_studies(fit, c, "scvi")                 # same studies: fine
+        c.study_id = c.study_id + 7
+        with pytest.raises(ValueError, match=r"query studies \[7, 8\]"):
+            require_seen_studies(fit, c, "scvi")
+
+    def test_unseen_query_study_is_refused_through_embed(self):
         pytest.importorskip("scanpy")
         pytest.importorskip("scvi")
-        fit, c = make_corpus(n_per_study=40, seed=1), make_corpus(n_per_study=20)
+        fit, c = make_corpus(n_per_study=8, seed=1), make_corpus(n_per_study=4)
         c.study_id = c.study_id + 7
-        with pytest.raises(Exception):
-            ScVIBaseline(n_latent=4, max_epochs=2).embed(c, fit_corpus=fit)
+        with pytest.raises(ValueError, match="untrained"):
+            ScVIBaseline(n_latent=4, max_epochs=1).embed(c, fit_corpus=fit)
+        with pytest.raises(ValueError, match="untrained"):
+            ScANVIBaseline(label_column="AnnotationMain", n_latent=4,
+                           max_epochs=1).embed(c, fit_corpus=fit)
 
 
 class TestScANVIInductive:

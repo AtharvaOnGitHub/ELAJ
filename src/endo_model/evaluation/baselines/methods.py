@@ -236,6 +236,25 @@ def shared_study_categories(*corpora: CorpusMatrix) -> list[str]:
     return sorted(ids, key=lambda s: (len(s), s))
 
 
+def require_seen_studies(fit: CorpusMatrix, corpus: CorpusMatrix, name: str) -> None:
+    """Refuse a query study the fit corpus never contained.
+
+    A conditional model learns one batch row per study. With the categories
+    shared (which scvi needs), a study absent from the fit corpus still gets
+    a row, an untrained one at its random initialisation, and scvi embeds
+    the query through it without complaint. The result would be a number in
+    the table that means nothing. Every study in the query must have
+    training cells; the split guarantees that for this corpus, and this
+    guarantees it for any other.
+    """
+    unseen = sorted(set(np.unique(corpus.study_id)) - set(np.unique(fit.study_id)))
+    if unseen:
+        raise ValueError(
+            f"{name}: query studies {unseen} have no cells in the fit corpus, "
+            f"so their batch rows would be untrained"
+        )
+
+
 def log_normalise(adata, target_sum: float = 1e4) -> None:
     """In place: counts -> log1p(counts per ``target_sum``). Raw kept in a layer."""
     import scanpy as sc
@@ -445,10 +464,13 @@ class ScVIBaseline(BaselineMethod):
         """Train on ``fit``; encode ``corpus`` with the trained encoder.
 
         scvi-tools transfers the training registry to a new AnnData when it
-        is handed one, provided the genes match and every batch category was
-        seen in training; ``shared_study_categories`` guarantees the second.
+        is handed one, provided the genes match and the batch categories are
+        the training set's; ``shared_study_categories`` gives both AnnDatas
+        the same category list. That alone would let an unseen study through
+        on an untrained row, so ``require_seen_studies`` refuses it first.
         The query cells are never trained on.
         """
+        require_seen_studies(fit, corpus, self.name)
         categories = shared_study_categories(fit, corpus)
         model, _ = self._train(fit, study_categories=categories)
         query = to_anndata(corpus, study_categories=categories)
@@ -532,6 +554,7 @@ class ScANVIBaseline(ScVIBaseline):
         unable to tell whether they were used. Every query cell is marked
         unlabelled, which is a category the training set carries.
         """
+        require_seen_studies(fit, corpus, self.name)
         categories = shared_study_categories(fit, corpus)
         model = self._train_scanvi(fit, study_categories=categories)
         withheld = np.full(corpus.n_cells, UNLABELLED, dtype=object)

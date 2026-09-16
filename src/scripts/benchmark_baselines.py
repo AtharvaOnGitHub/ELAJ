@@ -26,6 +26,13 @@ THE SUPERVISED ROW. scANVI is trained on `--scanvi-label`. Its score on THAT
 label is not comparable to anyone else's and the table says so; its scores on
 other labels are the fair comparison.
 
+REUSING BASELINE ROWS. `--reuse-baselines <benchmark.csv>` copies an earlier
+run's baseline rows into the report and runs only the methods it lacks, so
+scoring a new ELAJ arm against fixed baselines costs the ELAJ embedding and
+its scoring, not another scVI training. The earlier run must be on the same
+corpus (same experiment data config, splits, seed); nothing here checks
+that, so the arm's job passes the file its campaign owns.
+
 TRANSDUCTIVE OR INDUCTIVE. By default every baseline is fitted on the cells
 it is scored on, which is how integration benchmarks are run and is NOT what
 ELAJ is asked to do: ELAJ is trained on the training donors and scored on
@@ -77,6 +84,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scanvi-label", default="cell family",
                    help="Column scANVI is supervised on. Its score on this "
                         "label is flagged in the table.")
+    p.add_argument("--reuse-baselines", default=None,
+                   help="A benchmark.csv from an earlier run on the same corpus. "
+                        "Its baseline rows are copied in and those methods are "
+                        "not run again; only methods absent from it run. The "
+                        "elaj row is never reused.")
     p.add_argument("--fit-split", default=None, choices=["train"],
                    help="Fit the baselines on this split and apply them to "
                         "--splits, as ELAJ is. Methods without an "
@@ -249,7 +261,9 @@ def main() -> None:
         k=args.k, k_cross_donor=args.k_cross_donor,
         permutations=args.permutations, seed=args.seed,
     ))
-    report = BenchmarkReport()
+    report = (BenchmarkReport.read_csv(args.reuse_baselines, exclude_methods=("elaj",))
+              if args.reuse_baselines else BenchmarkReport())
+    already = set(report.methods())
 
     if elaj_latent is not None:
         if elaj_latent.shape[0] != corpus.n_cells:
@@ -286,6 +300,9 @@ def main() -> None:
             method = build_method(method_name, seed=args.seed,
                                   **_method_kwargs(method_name, args))
             key = "/".join(p for p in (method.name, policy.name, fit_tag) if p)
+            if key in already:
+                logger.info("── %s reused from %s", key, args.reuse_baselines)
+                continue
             if not method.available():
                 report.record_skip(key, f"needs {', '.join(method.missing())}")
                 continue

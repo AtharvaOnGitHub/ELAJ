@@ -109,6 +109,38 @@ class BenchmarkReport:
         logger.info("Written %d rows to %s", len(self._rows), path)
         return path
 
+    @classmethod
+    def read_csv(cls, path: Path | str, exclude_methods: tuple[str, ...] = ()
+                 ) -> "BenchmarkReport":
+        """The rows a previous run wrote, as a report to add to.
+
+        The baselines do not change between arms of a campaign: same corpus,
+        same seed, same defaults. Re-training scVI for every arm would cost
+        an hour a time for the same rows, so an arm's job reads them back
+        and adds only its own. ``exclude_methods`` drops rows whose method
+        is listed, so an earlier arm's ELAJ row is not carried into the next.
+        """
+        path = Path(path)
+        report = cls()
+        with open(path, newline="", encoding="utf-8") as f:
+            for raw in csv.DictReader(f):
+                if raw["method"] in exclude_methods:
+                    continue
+                report._rows.append(ScoreRow(
+                    method=raw["method"], gene_policy=raw.get("gene_policy", ""),
+                    test=raw["test"], label=raw["label"],
+                    n_cells=int(float(raw["n_cells"])),
+                    value=float(raw["value"]) if raw["value"] not in ("", "nan")
+                    else float("nan"),
+                    note=raw.get("note", ""), width=int(float(raw.get("width") or 0)),
+                    fit_seconds=float(raw.get("fit_seconds") or 0.0),
+                    supervised_on=raw.get("supervised_on", ""),
+                    fit_on=raw.get("fit_on", ""),
+                ))
+        logger.info("Read %d rows (%d methods) from %s", len(report._rows),
+                    len(report.methods()), path)
+        return report
+
     def write_settings(self, path: Path | str) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)

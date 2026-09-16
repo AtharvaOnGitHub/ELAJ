@@ -133,6 +133,33 @@ since that is what it is.
 split's sampler order (about 1.2 M cells with controls; 14 GB as CSR), which
 is why the job asks for 180 GB.
 
+## Scoring an arm of the campaign
+
+`data_collation/scripts/score_arm.sh <arm>` is the one command a finished
+training arm gets. Four steps, each its own directory:
+
+| step | script | writes |
+|---|---|---|
+| 1 | `validate_latent` on val+test | `<run dir>/validation/` |
+| 2 | `benchmark_baselines --include-elaj --fit-split train --reuse-baselines` | `outputs/benchmarks/<arm>/` |
+| 3 | `probe_stages --no-groups --no-scib` | `outputs/probes/<arm>_stages/` |
+| 4 | `campaign_row` | `outputs/campaign.csv` and `.md` |
+
+**The baselines are computed once per corpus, not once per arm.**
+`BenchmarkReport.read_csv` reads an earlier run's rows back (dropping
+`elaj`), and the driver's `--reuse-baselines` skips every method whose key
+is already present. So the c_ series runs `benchmark_baselines.sh c_ref
+--no-elaj --fit-split train --methods pca scvi scanvi --out
+outputs/benchmarks/c_baselines` once, and every arm's step 2 costs the ELAJ
+embedding and its scoring. Nothing checks that the reused file came from
+the same corpus; the arm's job passes the file its campaign owns.
+
+`CampaignTable` (`evaluation/campaign.py`) keeps one row per arm: the arm's
+headline numbers from `elaj/native/train`, the reference's from
+`scvi/all/train`, and the gap between them. Re-scoring an arm replaces its
+row. The Markdown beside the CSV is the table §4.3 of the publication plan
+refers to.
+
 ## Failure handling
 
 A method whose package is missing raises `MissingDependency` from `embed()`
@@ -152,6 +179,7 @@ is rewritten after every method, so a killed job leaves what it finished.
 | `test_baselines_corpus_matrix.py` | misalignment refused at construction; concatenate keeps order and refuses differing schemas |
 | `test_baselines_gene_policy.py` | intersection keeps exactly the shared genes; missing `scikit-misc` is named with its fix |
 | `test_baselines_methods.py` | the `embed()` template refuses wrong row counts and non-finite output; each method runs where its package exists and skips where not |
+| `test_campaign.py` | `read_csv` round-trips rows, keys, provenance, and NaN; the campaign table carries arm, reference, and gap, persists, replaces an arm on re-score, tolerates a missing reference |
 | `test_baselines_inductive.py` | a fit corpus routes to `_fit_embed` and is recorded in `fit_on`; transductive methods refuse it; gene axes must match; PCA fit-and-project equals scanpy's transductive scores; scVI embeds a query it never trained on and refuses a study it never saw; scANVI never sees a query label |
 | `test_baselines_scorer.py` | a family-only latent scores on family and not patient; a patient-only latent is caught by the cross-donor test |
 | `test_baselines_report.py` | CSV round-trips; supervised rows are flagged; skipped methods appear with reason |

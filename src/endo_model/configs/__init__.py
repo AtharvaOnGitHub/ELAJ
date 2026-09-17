@@ -47,6 +47,46 @@ def apply_override(d: dict, dotpath: str, value: Any) -> None:
         apply_override(d[head], tail, value)
 
 
+_OVERRIDE_ROOTS = {"model": ModelConfig, "training": TrainingConfig, "data": DataConfig}
+
+
+def check_override_path(dotpath: str) -> None:
+    """Refuse an override whose path does not name a config field.
+
+    Every `from_dict` reads with `d.get(key, default)`, so a misspelt key
+    (`model.d_diseas: 16`, `training.batch_sixe: 128`) used to pass the
+    prefix check, be written into the dict, and be read by nothing. The run
+    then trained the default silently, under a YAML that said otherwise.
+    The path is walked against the dataclass fields, nested configs
+    included, and an unknown segment is an error naming the known ones.
+    """
+    import dataclasses
+    import typing
+
+    prefix, _, rest = dotpath.partition(".")
+    if prefix not in _OVERRIDE_ROOTS:
+        raise ValueError(
+            f"Override key '{dotpath}' must start with 'model.', 'training.', or 'data.'."
+        )
+    cls = _OVERRIDE_ROOTS[prefix]
+    walked = prefix
+    for part in rest.split("."):
+        if not dataclasses.is_dataclass(cls):
+            raise ValueError(
+                f"Override key '{dotpath}': '{walked}' is a plain value and "
+                f"has no field '{part}'."
+            )
+        fields = {f.name: f for f in dataclasses.fields(cls)}
+        if part not in fields:
+            raise ValueError(
+                f"Override key '{dotpath}': '{walked}' has no field '{part}'. "
+                f"Known fields: {', '.join(sorted(fields))}."
+            )
+        hints = typing.get_type_hints(cls)
+        cls = hints.get(part, fields[part].type)
+        walked = f"{walked}.{part}"
+
+
 def load_experiment(
     path: str,
     root: str | None = None,
@@ -74,17 +114,10 @@ def load_experiment(
 
     # Overrides use "config.field" dot-paths, e.g. "model.d_gauss: 64"
     for dotpath, value in exp_cfg.overrides.items():
+        check_override_path(dotpath)
         prefix, _, rest = dotpath.partition(".")
-        if prefix == "model":
-            apply_override(model_dict, rest, value)
-        elif prefix == "training":
-            apply_override(train_dict, rest, value)
-        elif prefix == "data":
-            apply_override(data_dict, rest, value)
-        else:
-            raise ValueError(
-                f"Override key '{dotpath}' must start with 'model.', 'training.', or 'data.'."
-            )
+        target = {"model": model_dict, "training": train_dict, "data": data_dict}[prefix]
+        apply_override(target, rest, value)
 
     return (
         exp_cfg,

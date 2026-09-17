@@ -242,6 +242,20 @@ class Trainer:
                     self.reporter.new_collector() if wants else None
                 )
                 val_metrics = self._val_epoch()
+                if "total" not in val_metrics:
+                    # An empty validation loader (every validation donor of
+                    # every study dropped, or a split with no cells) yields
+                    # only timing. Findings A3: this used to be a KeyError
+                    # after a full training epoch. Nothing can be scored, so
+                    # nothing is checkpointed either; say so and go on.
+                    logger.warning(
+                        "Epoch %d: validation produced no batches; skipping "
+                        "checkpoint, early stopping and figures", epoch,
+                    )
+                    self._collector = None
+                    if self.scheduler is not None:
+                        self.scheduler.step()
+                    continue
                 val_loss = val_metrics["total"]
                 history["val_loss"].append(val_loss)
                 _record(history, "val", val_metrics)

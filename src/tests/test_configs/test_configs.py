@@ -397,3 +397,51 @@ def test_default_seed_is_24():
     from endo_model.configs.experiment_config import ExperimentConfig
     assert SplitConfig().seed == 24
     assert ExperimentConfig().seed == 24
+
+
+# ── Override paths are checked against the dataclass fields (findings D4) ──
+
+def test_override_paths_resolve_to_real_fields():
+    from endo_model.configs import check_override_path
+
+    for ok in ("model.d_gauss", "model.group_encoder.n_layers",
+               "model.loss.w_dab", "model.cce.enabled", "model.d_disease",
+               "training.kl_annealing.beta_max", "training.diagnostics.log_every",
+               "training.optimizer.lr", "data.include_disease_statuses"):
+        check_override_path(ok)
+
+
+def test_misspelt_override_is_refused_and_names_the_known_fields():
+    from endo_model.configs import check_override_path
+
+    with pytest.raises(ValueError, match="no field 'd_diseas'"):
+        check_override_path("model.d_diseas")
+    with pytest.raises(ValueError, match="batch_sixe.*Known fields.*batch_size"):
+        check_override_path("training.batch_sixe")
+    with pytest.raises(ValueError, match="plain value"):
+        check_override_path("model.d_gauss.extra")
+    with pytest.raises(ValueError, match="must start with"):
+        check_override_path("mdl.d_gauss")
+
+
+def test_load_experiment_refuses_a_misspelt_override(tmp_path):
+    (tmp_path / "m.yaml").write_text("d_gauss: 8\n")
+    (tmp_path / "t.yaml").write_text("max_epochs: 1\n")
+    (tmp_path / "d.yaml").write_text("vocabulary_path: v.json\n")
+    (tmp_path / "e.yaml").write_text(
+        "name: x\nmodel: m.yaml\ntraining: t.yaml\ndata: d.yaml\n"
+        "overrides:\n  model.d_gauss: 4\n  training.max_epoch: 3\n"
+    )
+    with pytest.raises(ValueError, match="max_epoch"):
+        load_experiment("e.yaml", root=str(tmp_path))
+
+
+def test_every_experiment_yaml_in_the_repo_loads():
+    """The check is strict, so every arm ever written has to pass it."""
+    import glob
+
+    root = Path(__file__).resolve().parents[2]
+    configs = sorted(glob.glob(str(root / "configs" / "experiment" / "*.yaml")))
+    assert configs
+    for path in configs:
+        load_experiment(path, root=str(root))

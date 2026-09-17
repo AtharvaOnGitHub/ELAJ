@@ -37,13 +37,12 @@ description: >
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
-data:     configs/data/corpus.yaml
+data:     configs/data/corpus_c.yaml
 
 output_dir: outputs/c_wide/
 seed: 24
 
 overrides:
-  data.include_disease_statuses: [eutopic, ectopic, adenomyosis, control]
 
   training.max_epochs: 22
   training.batch_size: 256
@@ -63,6 +62,7 @@ overrides:
   model.cce.enabled: true
   model.cce.lambda_cce: 0.025
   model.cce.block_normalise: false
+  model.cce.every: 4
 
   # The change this arm exists for.
   model.d_gauss: 32

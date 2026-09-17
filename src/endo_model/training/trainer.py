@@ -49,6 +49,7 @@ class Trainer:
         checkpoint_dir:  Where to save checkpoints (None = no saving).
         device:          torch.device for training.
         cce_enabled:     Whether to run two forward passes per batch for CCE.
+        cce_every:       Run that second pass on every k-th step only.
         monitor:         TrainingMonitor watching for non-finite values.  None
                          builds a default one, so a Trainer constructed directly
                          (in a test, say) still reports where a NaN came from
@@ -67,6 +68,7 @@ class Trainer:
         checkpoint_dir: str | None = None,
         device: torch.device | None = None,
         cce_enabled: bool = False,
+        cce_every: int = 1,
         monitor: TrainingMonitor | None = None,
         reporter=None,
         extra_val_metrics=None,
@@ -82,6 +84,7 @@ class Trainer:
         self.scheduler = scheduler
         self.config = config
         self.cce_enabled = cce_enabled
+        self.cce_every = max(int(cce_every), 1)
         self.device = device or torch.device("cpu")
         # Called with the history dict after every epoch. train.py uses it to
         # rewrite metrics.csv, so the per-epoch record survives a run that is
@@ -317,6 +320,14 @@ class Trainer:
 
         return history
 
+    def _cce_due(self) -> bool:
+        """Whether this step runs the second encoder pass for CCE.
+
+        Every step when `cce_every` is 1; otherwise every k-th global step,
+        counted from zero, so a resumed run keeps the same phase.
+        """
+        return self.cce_enabled and self.global_step % self.cce_every == 0
+
     def _set_sampler_epoch(self, epoch: int) -> None:
         """Re-seed the training sampler so each epoch gets a fresh shuffle.
 
@@ -345,7 +356,7 @@ class Trainer:
                     # encode, not forward: CCE reads mu_gauss and mu_angle
                     # and nothing downstream of the latent.
                     output2 = (
-                        self.model.encode(batch) if self.cce_enabled else None
+                        self.model.encode(batch) if self._cce_due() else None
                     )
                     losses = self.composite_loss(
                         output1, batch,

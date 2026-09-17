@@ -75,15 +75,26 @@ class CCEConfig:
     # The circular half's length once normalised, against the Gaussian half's
     # 1.0. Read only when block_normalise is set.
     circular_weight: float = 1.0
+    # Run the second encoder pass, and so the CCE term, on every k-th
+    # optimiser step only. The second pass is a full encoder forward (the
+    # decoder is skipped), so at 1 it costs about a third of the epoch for a
+    # term weighted 0.025. At k the term's average pressure over the run is
+    # divided by k and the epoch is shorter by roughly a third of (1 - 1/k);
+    # the logged `cce` is the average over ALL steps, zeros included.
+    every: int = 1
 
     @classmethod
     def from_dict(cls, d: dict) -> "CCEConfig":
+        every = int(d.get("every", 1))
+        if every < 1:
+            raise ValueError(f"cce.every must be >= 1, got {every}")
         return cls(
             enabled=bool(d.get("enabled", False)),
             temperature=float(d.get("temperature", 0.07)),
             lambda_cce=float(d.get("lambda_cce", 0.1)),
             block_normalise=bool(d.get("block_normalise", False)),
             circular_weight=float(d.get("circular_weight", 1.0)),
+            every=every,
         )
 
 

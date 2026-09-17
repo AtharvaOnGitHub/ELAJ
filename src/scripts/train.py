@@ -364,6 +364,7 @@ def main() -> None:
         checkpoint_dir=str(ckpt_dir),
         device=device,
         cce_enabled=model_cfg.cce.enabled,
+        cce_every=model_cfg.cce.every,
         monitor=monitor,
         reporter=reporter,
         extra_val_metrics=hvg_metric,

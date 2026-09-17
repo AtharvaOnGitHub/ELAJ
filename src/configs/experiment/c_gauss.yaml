@@ -28,18 +28,18 @@ description: >
   c_ref on every headline number, the circular branch is a Discussion
   paragraph, not a Results section.
 
-  EPOCH BUDGET. As c_ref: T_max 22 on about 1.2 M training cells. Check the
-  first epoch time; above 7,800 s the run will not anneal before the wall.
+  EPOCH BUDGET. As c_ref: T_max 22 on about 1.2 M training cells, CCE every
+  fourth step. Check the first epoch time; above 7,800 s the run will not
+  anneal before the wall.
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
-data:     configs/data/corpus.yaml
+data:     configs/data/corpus_c.yaml
 
 output_dir: outputs/c_gauss/
 seed: 24
 
 overrides:
-  data.include_disease_statuses: [eutopic, ectopic, adenomyosis, control]
 
   training.max_epochs: 22
   training.batch_size: 256
@@ -59,6 +59,7 @@ overrides:
   model.cce.enabled: true
   model.cce.lambda_cce: 0.025
   model.cce.block_normalise: false
+  model.cce.every: 4
 
   # The two lines this arm exists for.
   model.d_gauss: 16

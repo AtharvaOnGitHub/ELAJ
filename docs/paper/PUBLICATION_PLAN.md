@@ -124,9 +124,13 @@ the probe is read, because the reference arm is needed either way.
 
 ## 4. Phase B: the training campaign (weeks 1 to 3)
 
-The `c_` series: control-included runs. `c_ref` is r8_direction with the
-controls back in (about 1.2 M training cells, T_max 22, one 48 h job). Every
-later arm is compared against it.
+The `c_` series: control-included runs on `configs/data/corpus_c.yaml`
+(controls in, wang_2022 out: adenomyosis myometrium, four donors, not
+endometrial tissue; decided 18 September). `c_ref` is r8_direction on that
+corpus with CCE's second encoder pass every fourth step (about a third off
+the epoch for a term weighted 0.025; T_max 22, one 48 h job). Every later
+arm is compared against it. The first c_ref attempt, with wang and
+every-step CCE, was stopped at epoch 9 when wang was dropped.
 
 ### 4.1 Compute
 
@@ -142,8 +146,10 @@ parent and its YAML says what and why, as the r-series did.
 
 **Wave 1, submitted now, no diagnosis needed:**
 
-- [x] **c_ref** r8_direction + controls. Submitted 14 September.
-- [ ] **c_wide** `d_gauss` 8 to 32, `n_circular` unchanged. The cheapest test of the bottleneck hypothesis. If the probe says the bottleneck is the loss, this arm should recover most of the gap on its own.
+- [ ] **c_ref** r8_direction on corpus_c, CCE every 4. Restarted 18 September.
+- [x] **c_wide** `d_gauss` 8 to 32, `n_circular` unchanged. Stopped at epoch 7 (first corpus): 3 of 4 circles collapsed, as the r4 to r8 history predicted. Not revisited unless the probe points at the bottleneck.
+- [ ] **c_gauss** `n_circular` 0, `d_gauss` 16: Gaussian only at the same width (C6). Next after c_ref.
+- [ ] **c_gauss_dx** c_gauss + `d_disease` 16: disease status to the decoder, encoder still blind. The pair answers where disease status belongs.
 
 **Wave 2, chosen from the probe:**
 

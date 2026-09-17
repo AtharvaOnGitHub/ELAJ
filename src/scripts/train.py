@@ -238,22 +238,16 @@ def main() -> None:
             model_cfg.cce.circular_weight,
         )
 
-    # ── Optimizer ─────────────────────────────────────────────────────────────
-    all_params = list(model.parameters()) + list(composite_loss.parameters())
-    optimizer = torch.optim.AdamW(
-        all_params,
-        lr=train_cfg.optimizer.lr,
-        weight_decay=train_cfg.optimizer.weight_decay,
-        betas=train_cfg.optimizer.betas,
-    )
+    # ── Optimizer and scheduler, by their config names ───────────────────────
+    from endo_model.training.factories import build_optimizer, build_scheduler
 
-    # ── Scheduler ─────────────────────────────────────────────────────────────
-    # Trainer calls scheduler.step() once per EPOCH, so T_max is in epochs.
-    # (Using total optimiser steps here would stretch the cosine period by
-    # len(train_loader) and leave the LR essentially constant for the whole run.)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(train_cfg.max_epochs, 1)
-    )
+    all_params = list(model.parameters()) + list(composite_loss.parameters())
+    optimizer = build_optimizer(all_params, train_cfg.optimizer)
+    scheduler = build_scheduler(train_cfg.scheduler.name, optimizer,
+                                train_cfg.max_epochs)
+    logger.info("Optimizer %s (lr=%.3g), scheduler %s over %d epochs",
+                train_cfg.optimizer.name, train_cfg.optimizer.lr,
+                train_cfg.scheduler.name, train_cfg.max_epochs)
 
     # ── Resume from checkpoint ────────────────────────────────────────────────
     # Weights and optimizer here; everything else (global step, LR schedule,

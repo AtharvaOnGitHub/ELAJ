@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 @dataclass
 class OptimizerConfig:
+    # One of training/factories.OPTIMIZERS; anything else is refused there.
     name: str = "AdamW"
     lr: float = 3e-4
     weight_decay: float = 1e-4
@@ -37,6 +38,7 @@ class SchedulerConfig:
     reads as a bug and is worse than no configuration at all.
     """
 
+    # One of training/factories.SCHEDULERS; "none" holds the LR constant.
     name: str = "CosineAnnealingLR"
 
     @classmethod

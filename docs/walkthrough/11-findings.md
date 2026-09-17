@@ -483,6 +483,10 @@ number alongside each val entry rather than relying on position.
 
 ### B4 — `scheduler` and `optimizer.name` config are inert
 
+**CLOSED (September 2026).** `training/factories.py` builds both from their
+names (AdamW, Adam, SGD; CosineAnnealingLR, none) and refuses anything
+else. `tests/test_training/test_factories.py`.
+
 `grep` confirms nothing reads `scheduler.name`, `scheduler.T_max`, or
 `optimizer.name`. `train.py` hardcodes `CosineAnnealingLR` and `AdamW`. Setting
 `name: SGD` silently gets you AdamW.

@@ -155,10 +155,9 @@ def main() -> None:
     print("────────────────────────────────────────────────")
 
 
-def _collect_disease_labels(dataset) -> "np.ndarray":
-    """Extract integer disease_status labels from dataset records."""
-    import numpy as np
-    return np.array([r.disease_status for r in dataset._records], dtype=np.int64)
+def _collect_disease_labels(dataset):
+    """Integer disease_status codes, one per cell in dataset order."""
+    return dataset.disease_statuses
 
 
 if __name__ == "__main__":

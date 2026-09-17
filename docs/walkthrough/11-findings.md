@@ -558,6 +558,12 @@ grouped matmul), so this is a "if throughput is the problem" item, not a cleanup
 
 ### C3 — `train.py` reads every `.h5ad` twice
 
+**CLOSED (September 2026).** `load_corpus` reads every study once into a
+`LoadedCorpus` (AnnData, donors, coerced covariates, the donor split), and
+`EndometriosisDataset.load_splits` builds every split from it. `train.py`
+uses it for train and val. `TestLoadSplits` checks the result equals
+separate construction cell for cell.
+
 Two `EndometriosisDataset` constructions ([train.py:99](../../src/scripts/train.py:99)),
 each opening and reading all 11 files. Two full I/O passes over ~1.65 M cells
 before the first step.
@@ -565,6 +571,12 @@ before the first step.
 **Fix:** load once, return both splits.
 
 ### C4 — One Python object per cell
+
+**CLOSED (September 2026).** `CellTable`: parallel numpy arrays
+(`panel_index`, `panel_row`, `study_id`, `tissue_levels`, `platform_codes`,
+`age`, `disease_status`, `patient_id`) indexed by position, built per
+study in one vectorised block. `__getitem__` indexes arrays; `counts_csr`
+groups by `panel_index` without a Python loop over cells.
 
 `_CellRecord` is a plain dataclass ([dataset.py:274](../../src/endo_model/data/dataset.py:274)),
 instantiated ~1.65 M times, each holding a numpy slice and four scalars. At

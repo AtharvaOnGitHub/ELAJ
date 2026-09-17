@@ -30,7 +30,6 @@ Genes in the vocabulary but not in this study's var are DNS.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -310,24 +309,169 @@ def _disease_status_codes(obs, study_name: str) -> np.ndarray:
 
 
 @dataclass
-class _CellRecord:
-    """Lightweight in-memory record for one cell.
+class _LoadedStudy:
+    """One study as read from disk, before any split is applied.
 
-    Counts are *not* stored here.  The record points at its study's StudyPanel
-    and the row it occupies there; the dense (vocab_size,) vector is rebuilt in
-    __getitem__.  See panel.py for why.
-
-    tissue_levels is a (4,) int64 view into the study's tissue matrix, and
-    platform_codes the same for its technical covariates.
+    Everything the split and the per-split build need, resolved once: the
+    AnnData, its donors, and its per-cell covariates coerced to arrays.
     """
-    panel: StudyPanel
-    panel_row: int
     study_id: int
-    tissue_levels: np.ndarray
-    platform_codes: np.ndarray
-    age: float
-    disease_status: int
-    patient_id: str
+    name: str
+    adata: object
+    patients: list[str]
+    tissue: np.ndarray        # (n_cells, N_TISSUE_LEVELS) int64
+    platform: np.ndarray      # (n_cells, N_PLATFORM_CODES) int64
+    age: np.ndarray           # (n_cells,) float
+    disease: np.ndarray       # (n_cells,) int64
+
+
+@dataclass
+class LoadedCorpus:
+    """The studies on disk, read once, with the donor split decided.
+
+    `EndometriosisDataset.load_splits` builds every split from one of these,
+    so the h5ads are read once per run rather than once per split (findings
+    C3: two full I/O passes over the corpus before the first step). Holding
+    it costs the AnnData objects' memory for as long as it lives; the
+    datasets built from it keep only their own sparse panels.
+    """
+    studies: list[_LoadedStudy]
+    split_assignments: dict[str, str]
+
+    @property
+    def n_cells(self) -> int:
+        return sum(len(s.patients) for s in self.studies)
+
+
+@dataclass
+class CellTable:
+    """Every per-cell field of a split as parallel arrays, indexed by position.
+
+    One numpy row per cell instead of one Python object per cell (findings
+    C4: ~1.2 M dataclass instances, each with its own numpy views, several
+    hundred MB of interpreter overhead duplicated into every DataLoader
+    worker by copy-on-write refcount writes). The counts stay in the per-study
+    `StudyPanel`; `panel_index` says which panel a cell is in and `panel_row`
+    which row of it.
+    """
+    panels: list[StudyPanel] = field(default_factory=list)
+    panel_index: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    panel_row: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))
+    study_id: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))
+    tissue_levels: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, N_TISSUE_LEVELS), np.int64))
+    platform_codes: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, N_PLATFORM_CODES), np.int64))
+    age: np.ndarray = field(default_factory=lambda: np.zeros(0, np.float64))
+    disease_status: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))
+    patient_id: np.ndarray = field(default_factory=lambda: np.zeros(0, object))
+
+    def __len__(self) -> int:
+        return int(self.study_id.shape[0])
+
+    @classmethod
+    def build(cls, blocks: list[tuple[StudyPanel, dict]]) -> "CellTable":
+        """Concatenate per-study blocks, each a panel and its column arrays."""
+        table = cls()
+        if not blocks:
+            return table
+        table.panels = [panel for panel, _ in blocks]
+        table.panel_index = np.concatenate([
+            np.full(len(cols["study_id"]), i, dtype=np.int32)
+            for i, (_, cols) in enumerate(blocks)])
+        for name in ("panel_row", "study_id", "tissue_levels", "platform_codes",
+                     "age", "disease_status", "patient_id"):
+            setattr(table, name, np.concatenate([cols[name] for _, cols in blocks]))
+        return table
+
+    def cell(self, idx: int) -> dict:
+        """The per-cell dict `__getitem__` returns."""
+        panel = self.panels[self.panel_index[idx]]
+        return {
+            "counts": panel.counts(int(self.panel_row[idx])),
+            "study_id": int(self.study_id[idx]),
+            "tissue_levels": self.tissue_levels[idx],
+            "platform_codes": self.platform_codes[idx],
+            "age": float(self.age[idx]),
+            "disease_status": int(self.disease_status[idx]),
+            "patient_id": str(self.patient_id[idx]),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Loading: once per run, shared by every split
+# ---------------------------------------------------------------------------
+
+
+def load_corpus(
+    study_configs: list[dict],
+    val_fraction: float,
+    test_fraction: float,
+    seed: int,
+    tissue_hierarchy: Optional[TissueHierarchy],
+    tissue_names: dict[int, str],
+    platform: Optional[StudyPlatform],
+) -> LoadedCorpus:
+    """Read every study and decide the donor split. No split is applied here."""
+    try:
+        import anndata
+    except ImportError as exc:
+        raise ImportError(
+            "anndata is required for EndometriosisDataset. "
+            "Install it with: pip install anndata"
+        ) from exc
+
+    studies: list[_LoadedStudy] = []
+    for study_cfg in study_configs:
+        study_id = study_cfg["id"]
+        path = study_cfg["path"]
+        name = study_cfg.get("name", str(study_id))
+
+        logger.info("Loading study '%s' from %s", name, path)
+        adata = anndata.read_h5ad(path)
+
+        if "patient_id" not in adata.obs.columns:
+            raise KeyError(
+                f"Study '{name}' is missing required obs column 'patient_id'. "
+                "See endo_model/data/README.md for required obs schema."
+            )
+        patients = adata.obs["patient_id"].astype(str).tolist()
+        # Resolved here because the split needs it: a patient's stratum is
+        # the tissue holding most of their cells. Carried forward so it is
+        # not built twice.
+        studies.append(_LoadedStudy(
+            study_id=study_id, name=name, adata=adata, patients=patients,
+            tissue=_tissue_level_matrix(adata.obs, name, tissue_hierarchy),
+            platform=_platform_code_matrix(adata.obs, name, platform),
+            age=_age_vector(adata.obs),
+            disease=_disease_status_codes(adata.obs, name),
+        ))
+
+    # Build patient -> split assignment, stratified by study AND by tissue.
+    # Column 2 of the level matrix is tissue_type: the level where
+    # endometrium and myometrium separate, and the finest one with enough
+    # donors behind each value to divide.
+    split_assignments, coverage = assign_splits(
+        [
+            StudyPatients(
+                study_id=s.study_id, name=s.name, patients=s.patients,
+                tissue_codes=s.tissue[:, _TISSUE_STRATIFY_LEVEL],
+            )
+            for s in studies
+        ],
+        val_fraction,
+        test_fraction,
+        seed,
+    )
+    log_coverage(coverage, tissue_names)
+    logger.info(
+        "Patient split (seed=%d): train=%d, val=%d, test=%d",
+        seed,
+        sum(1 for v in split_assignments.values() if v == "train"),
+        sum(1 for v in split_assignments.values() if v == "val"),
+        sum(1 for v in split_assignments.values() if v == "test"),
+    )
+    return LoadedCorpus(studies=studies, split_assignments=split_assignments)
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +488,10 @@ class EndometriosisDataset:
 
     Patient-held-out splits are applied at construction time.  The split is
     deterministic given the same seed and study list.
+
+    Building several splits: `EndometriosisDataset.load_splits(("train", "val"),
+    ...)` reads the corpus once and returns one dataset per split. Constructing
+    each split separately reads every h5ad again.
 
     Args:
         study_configs:  List of dicts with keys: id, path, name.
@@ -371,6 +519,7 @@ class EndometriosisDataset:
         study_platform_path: Optional[str] = None,
         sample_platform_path: Optional[str] = None,
         extra_obs_columns: Optional[list[str]] = None,
+        loaded: Optional[LoadedCorpus] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'")
@@ -394,94 +543,67 @@ class EndometriosisDataset:
 
         self._vocab = vocab
         self._split = split
-        self._records: list[_CellRecord] = []
-        # Per-cell obs values carried alongside the records for evaluation only.
+        # Per-cell obs values carried alongside the cells for evaluation only.
         # NOT part of the Batch: nothing here reaches the model, the collate
-        # function or the schema, so the training path is untouched. Appended in
-        # the same loop as the records, which is what guarantees alignment --
-        # rebuilding the selection outside the Dataset would risk diverging from
-        # its split and disease filtering. Studies lacking a column get None,
-        # because the corpus has no shared metadata schema; see
+        # function or the schema, so the training path is untouched. Built in
+        # the same pass as the cell table, which is what guarantees alignment;
+        # rebuilding the selection outside the Dataset would risk diverging
+        # from its split and disease filtering. Studies lacking a column get
+        # None, because the corpus has no shared metadata schema; see
         # docs/walkthrough/12-validation.md.
         self._extra_obs_columns = list(extra_obs_columns or [])
         self._extra_obs: dict[str, list] = {c: [] for c in self._extra_obs_columns}
 
-        # Collect all patient IDs across all studies first (needed for split)
-        all_patient_ids: list[str] = []
-        # (study_id, study_name, adata, patient_ids)
-        raw_study_data: list[tuple[int, str, object, list[str]]] = []
-
-        try:
-            import anndata
-        except ImportError as exc:
-            raise ImportError(
-                "anndata is required for EndometriosisDataset. "
-                "Install it with: pip install anndata"
-            ) from exc
-
-        for study_cfg in study_configs:
-            study_id = study_cfg["id"]
-            path = study_cfg["path"]
-            name = study_cfg.get("name", str(study_id))
-
-            logger.info("Loading study '%s' from %s", name, path)
-            adata = anndata.read_h5ad(path)
-
-            if "patient_id" not in adata.obs.columns:
-                raise KeyError(
-                    f"Study '{name}' is missing required obs column 'patient_id'. "
-                    "See endo_model/data/README.md for required obs schema."
-                )
-
-            study_patients = adata.obs["patient_id"].astype(str).tolist()
-            all_patient_ids.extend(study_patients)
-            # Resolved here rather than in the per-study loop below because the
-            # split needs it: a patient's stratum is the tissue holding most of
-            # their cells. Carried forward so it is not built twice.
-            tissue_matrix = _tissue_level_matrix(
-                adata.obs, name, self._tissue_hierarchy
+        if loaded is None:
+            loaded = load_corpus(
+                study_configs, val_fraction, test_fraction, seed,
+                self._tissue_hierarchy, self._tissue_names, self._platform,
             )
-            platform_matrix = _platform_code_matrix(adata.obs, name, self._platform)
-            raw_study_data.append(
-                (study_id, name, adata, study_patients, tissue_matrix,
-                 platform_matrix)
-            )
-
-        # Build patient → split assignment, stratified by study AND by tissue.
-        # Column 2 of the level matrix is tissue_type — the level where
-        # endometrium and myometrium separate, and the finest one with enough
-        # donors behind each value to divide.
-        split_assignments, coverage = assign_splits(
-            [
-                StudyPatients(
-                    study_id=study_id,
-                    name=name,
-                    patients=patients,
-                    tissue_codes=tissue[:, _TISSUE_STRATIFY_LEVEL],
-                )
-                for study_id, name, _adata, patients, tissue, _plat
-                in raw_study_data
-            ],
-            val_fraction,
-            test_fraction,
-            seed,
-        )
-        log_coverage(coverage, self._tissue_names)
-
+        self._cells = self._build_split(loaded, split, keep_codes,
+                                        max_cells_per_study, seed)
         logger.info(
-            "Patient split (seed=%d): train=%d, val=%d, test=%d",
-            seed,
-            sum(1 for s in split_assignments.values() if s == "train"),
-            sum(1 for s in split_assignments.values() if s == "val"),
-            sum(1 for s in split_assignments.values() if s == "test"),
+            "EndometriosisDataset split='%s': %d total cells", split, len(self._cells)
         )
 
-        # Build records for the requested split
-        rng_subsample = np.random.default_rng(seed + 1)
+    @classmethod
+    def load_splits(cls, splits: tuple[str, ...], study_configs: list[dict],
+                    vocab: GeneVocabulary, **kwargs) -> dict[str, "EndometriosisDataset"]:
+        """One dataset per split from ONE read of the corpus.
 
-        for (study_id, name, adata, study_patients, tissue_matrix,
-             platform_matrix) in raw_study_data:
-            # Map study genes → global vocabulary indices
+        The keyword arguments are the constructor's. The tissue hierarchy,
+        level names, and platform tables are resolved once here so the
+        loader sees the same ones every split's dataset will hold.
+        """
+        tissue_hierarchy = (
+            TissueHierarchy(kwargs["tissue_hierarchy_path"])
+            if kwargs.get("tissue_hierarchy_path") else None
+        )
+        tissue_names = _load_tissue_names(kwargs.get("tissue_level_names_path"))
+        platform = (
+            StudyPlatform(kwargs.get("study_platform_path"),
+                          kwargs.get("sample_platform_path"))
+            if kwargs.get("study_platform_path") else None
+        )
+        loaded = load_corpus(
+            study_configs,
+            kwargs.get("val_fraction", 0.15), kwargs.get("test_fraction", 0.15),
+            kwargs.get("seed", 24), tissue_hierarchy, tissue_names, platform,
+        )
+        return {
+            split: cls(study_configs, vocab, split=split, loaded=loaded, **kwargs)
+            for split in splits
+        }
+
+    def _build_split(self, loaded: LoadedCorpus, split: str, keep_codes,
+                     max_cells_per_study: Optional[int], seed: int) -> CellTable:
+        """This split's cells from every study, as one CellTable."""
+        vocab = self._vocab
+        rng_subsample = np.random.default_rng(seed + 1)
+        blocks: list[tuple[StudyPanel, dict]] = []
+
+        for study in loaded.studies:
+            adata, name, study_id = study.adata, study.name, study.study_id
+            # Map study genes -> global vocabulary indices
             study_gene_names = list(adata.var_names)
             global_idxs: list[int] = []      # global idx for each study gene
             study_local_idxs: list[int] = [] # which local positions are in vocab
@@ -490,38 +612,24 @@ class EndometriosisDataset:
                     global_idxs.append(vocab.gene_to_index(gene))
                     study_local_idxs.append(local_i)
 
-            n_in_vocab = len(global_idxs)
             logger.info(
                 "Study %d: %d / %d genes in vocabulary",
-                study_id, n_in_vocab, len(study_gene_names),
+                study_id, len(global_idxs), len(study_gene_names),
             )
-
-            # As arrays, so the per-cell scatter below is a single vectorised
-            # numpy assignment rather than a Python loop over ~n_in_vocab genes.
             global_idx_arr = np.asarray(global_idxs, dtype=np.int64)
             local_idx_arr = np.asarray(study_local_idxs, dtype=np.int64)
 
-            # Coerce all obs-derived metadata once per study (vectorised), so
-            # the per-cell loop below does array indexing rather than pandas
-            # .iloc row access.
-            # tissue_matrix already resolved in the loading loop above.
-            age_arr = _age_vector(adata.obs)
-            disease_arr = _disease_status_codes(adata.obs, name)
-
             # Select cells belonging to the requested split
-            cell_mask = [
-                split_assignments.get(pid, "train") == split
-                for pid in study_patients
+            cell_indices = [
+                i for i, pid in enumerate(study.patients)
+                if loaded.split_assignments.get(pid, "train") == split
             ]
-            cell_indices = [i for i, m in enumerate(cell_mask) if m]
-
             # Disease filter before the subsample cap, so the cap applies to
-            # the cells actually being kept rather than to a pool the filter is
-            # about to shrink.
+            # the cells actually being kept rather than to a pool the filter
+            # is about to shrink.
             cell_indices = _select_disease_cells(
-                cell_indices, disease_arr, keep_codes, name, split
+                cell_indices, study.disease, keep_codes, name, split
             )
-
             if max_cells_per_study is not None and len(cell_indices) > max_cells_per_study:
                 cell_indices = rng_subsample.choice(
                     cell_indices, size=max_cells_per_study, replace=False
@@ -533,13 +641,12 @@ class EndometriosisDataset:
 
             # Slice once, to this split's cells and this study's in-vocabulary
             # genes, and keep the result sparse.  Densification happens per
-            # cell in __getitem__ — see panel.py.
+            # cell in __getitem__ -- see panel.py.
             cell_idx_arr = np.asarray(cell_indices, dtype=np.int64)
             x_matrix = adata.X
             if not scipy.sparse.issparse(x_matrix):
                 x_matrix = scipy.sparse.csr_matrix(x_matrix)
             panel_matrix = x_matrix.tocsr()[cell_idx_arr][:, local_idx_arr]
-
             panel = StudyPanel(
                 matrix=panel_matrix,
                 global_idx=global_idx_arr,
@@ -561,57 +668,48 @@ class EndometriosisDataset:
             missing = [c for c, v in extra_cols.items() if v is None]
             if missing:
                 logger.info(
-                    "Study '%s': no obs column(s) %s — those cells read as "
+                    "Study '%s': no obs column(s) %s -- those cells read as "
                     "unlabelled for evaluation", name, ", ".join(missing),
                 )
-
-            for panel_row, local_cell_idx in enumerate(cell_indices):
-                for c, arr in extra_cols.items():
-                    self._extra_obs[c].append(
-                        arr[local_cell_idx] if arr is not None else None
-                    )
-                self._records.append(
-                    _CellRecord(
-                        panel=panel,
-                        panel_row=panel_row,
-                        study_id=study_id,
-                        # (4,) slice of the per-study coerced tissue matrix
-                        tissue_levels=tissue_matrix[local_cell_idx],
-                        platform_codes=platform_matrix[local_cell_idx],
-                        age=float(age_arr[local_cell_idx]),
-                        disease_status=int(disease_arr[local_cell_idx]),
-                        patient_id=str(study_patients[local_cell_idx]),
-                    )
+            for c, arr in extra_cols.items():
+                self._extra_obs[c].extend(
+                    arr[cell_idx_arr].tolist() if arr is not None
+                    else [None] * len(cell_indices)
                 )
 
-        logger.info(
-            "EndometriosisDataset split='%s': %d total cells", split, len(self._records)
-        )
+            n = len(cell_indices)
+            blocks.append((panel, {
+                "panel_row": np.arange(n, dtype=np.int64),
+                "study_id": np.full(n, study_id, dtype=np.int64),
+                "tissue_levels": np.asarray(study.tissue[cell_idx_arr], dtype=np.int64),
+                "platform_codes": np.asarray(study.platform[cell_idx_arr], dtype=np.int64),
+                "age": np.asarray(study.age[cell_idx_arr], dtype=np.float64),
+                "disease_status": np.asarray(study.disease[cell_idx_arr], dtype=np.int64),
+                "patient_id": np.asarray(
+                    [study.patients[i] for i in cell_indices], dtype=object),
+            }))
+        return CellTable.build(blocks)
 
     def __len__(self) -> int:
-        return len(self._records)
+        return len(self._cells)
 
     def __getitem__(self, idx: int) -> dict:
-        rec = self._records[idx]
-        return {
-            "counts": rec.panel.counts(rec.panel_row),
-            "study_id": rec.study_id,
-            "tissue_levels": rec.tissue_levels,
-            "platform_codes": rec.platform_codes,
-            "age": rec.age,
-            "disease_status": rec.disease_status,
-            "patient_id": rec.patient_id,
-        }
+        return self._cells.cell(idx)
 
     @property
     def study_ids(self) -> list[int]:
-        """Study ID for each cell in dataset order — passed to PerStudyBatchSampler."""
-        return [r.study_id for r in self._records]
+        """Study ID for each cell in dataset order -- passed to PerStudyBatchSampler."""
+        return self._cells.study_id.tolist()
 
     @property
     def patient_ids(self) -> list[str]:
         """Patient ID for each cell in dataset order, aligned with `study_ids`."""
-        return [r.patient_id for r in self._records]
+        return self._cells.patient_id.tolist()
+
+    @property
+    def disease_statuses(self) -> np.ndarray:
+        """Disease status code for each cell in dataset order."""
+        return self._cells.disease_status.copy()
 
     def counts_csr(self, indices=None):
         """Counts for the requested cells as one CSR matrix, in the order asked.
@@ -631,29 +729,24 @@ class EndometriosisDataset:
         """
         import scipy.sparse as _sp
 
-        wanted = (np.arange(len(self._records)) if indices is None
+        wanted = (np.arange(len(self._cells)) if indices is None
                   else np.asarray(indices, dtype=np.int64))
         if wanted.size == 0:
-            width = self._records[0].panel.vocab_size if self._records else 0
+            width = self._cells.panels[0].vocab_size if self._cells.panels else 0
             return _sp.csr_matrix((0, width), dtype=np.float32)
 
-        # Output position -> (panel, panel_row), grouped by panel identity so
-        # each panel is converted to CSR exactly once.
-        by_panel: dict[int, tuple[StudyPanel, list[int], list[int]]] = {}
-        for out_pos, idx in enumerate(wanted):
-            rec = self._records[int(idx)]
-            entry = by_panel.setdefault(id(rec.panel), (rec.panel, [], []))
-            entry[1].append(rec.panel_row)
-            entry[2].append(out_pos)
-
+        panel_of = self._cells.panel_index[wanted]
+        row_of = self._cells.panel_row[wanted]
         blocks, positions = [], []
-        for panel, rows, out_pos in by_panel.values():
-            blocks.append(panel.as_csr()[np.asarray(rows)])
-            positions.extend(out_pos)
+        for i in np.unique(panel_of):
+            here = np.flatnonzero(panel_of == i)
+            blocks.append(self._cells.panels[i].as_csr()[row_of[here]])
+            positions.append(here)
         stacked = _sp.vstack(blocks, format="csr")
         # `positions[i]` is where block row i belongs; invert to gather.
+        positions = np.concatenate(positions)
         order = np.empty(len(positions), dtype=np.int64)
-        order[np.asarray(positions)] = np.arange(len(positions))
+        order[positions] = np.arange(len(positions))
         return stacked[order]
 
     def measured_by_study(self) -> dict[int, np.ndarray]:
@@ -663,9 +756,10 @@ class EndometriosisDataset:
         carry, kept alongside it so the two can be used together.
         """
         seen: dict[int, np.ndarray] = {}
-        for rec in self._records:
-            if rec.study_id not in seen:
-                seen[rec.study_id] = rec.panel.measured_mask
+        for i, panel in enumerate(self._cells.panels):
+            rows = np.flatnonzero(self._cells.panel_index == i)
+            if rows.size and int(self._cells.study_id[rows[0]]) not in seen:
+                seen[int(self._cells.study_id[rows[0]])] = panel.measured_mask
         return seen
 
     @property
@@ -679,8 +773,7 @@ class EndometriosisDataset:
         Aligned with `study_ids` and with `__getitem__` by index, because both
         are built in the same pass.
         """
-        import numpy as _np
-        return {c: _np.asarray(v, dtype=object) for c, v in self._extra_obs.items()}
+        return {c: np.asarray(v, dtype=object) for c, v in self._extra_obs.items()}
 
     @property
     def split(self) -> str:

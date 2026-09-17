@@ -139,8 +139,11 @@ def main() -> None:
             if data_cfg.sample_platform_csv else None
         ),
     )
-    train_dataset = EndometriosisDataset(split="train", **split_kwargs)
-    val_dataset = EndometriosisDataset(split="val", **split_kwargs)
+    # One read of the corpus for both splits (findings C3: it used to be
+    # read once per split, two full passes before the first step).
+    datasets = EndometriosisDataset.load_splits(("train", "val"), **split_kwargs)
+    train_dataset, val_dataset = datasets["train"], datasets["val"]
+    del datasets
     logger.info(
         "Dataset: %d train cells, %d val cells",
         len(train_dataset), len(val_dataset),

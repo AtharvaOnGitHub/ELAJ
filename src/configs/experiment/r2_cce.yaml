@@ -13,7 +13,7 @@ description: >
 
   Three settings are shared by every arm and are the wave's premises:
 
-  * w_kl_vmf 0.1. The circular penalty stays at s1_circ_low's level. That run
+  * w_kl_circ 0.1. The circular penalty stays at s1_circ_low's level. That run
     is the one that reached +8.0% and the only one whose circular branch both
     survived and filled, so the penalty is held fixed while other things move.
   * lambda_dab non-zero everywhere. DSBN already removes a per-study affine
@@ -49,7 +49,7 @@ overrides:
   # cosine similarity, so it is entirely a statement about embedding geometry,
   # and it was being computed on a coordinate with a seam in it.
   #
-  # Watch kl_vmf. s1_cce drove it to 3.75e-10 -- the circular branch died
+  # Watch kl_circ. s1_cce drove it to 3.75e-10 -- the circular branch died
   # outright while kl_gauss rose, so CCE moved information into the Gaussian
   # half rather than adding any. Whether that was the loss or the broken
   # encoding is the second question this arm asks.
@@ -79,7 +79,7 @@ overrides:
 
   # ---- the variables ----
   training.optimizer.lr: 1.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.1
 

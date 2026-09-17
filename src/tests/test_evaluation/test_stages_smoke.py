@@ -43,7 +43,7 @@ from tests.test_evaluation.test_baselines_smoke import (  # noqa: E402, F401
 
 def _model(vocab):
     config = ModelConfig(
-        d_token=8, d_agg=16, d_gauss=4, n_vMF=2, d_dec=12,
+        d_token=8, d_agg=16, d_gauss=4, n_circular=2, d_dec=12,
         n_groups=len(vocab.group_names), n_studies=2,
         group_encoder=GroupEncoderConfig(n_layers=1, n_heads=2, dropout=0.0),
         aggregation_encoder=AggregationEncoderConfig(n_layers=1, n_heads=2,

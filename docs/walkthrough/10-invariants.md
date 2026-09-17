@@ -20,9 +20,14 @@ latent dimensions and divided by `G_meas`; `nb` is a mean over genes. *Broken
 by:* averaging KL over dimensions — which makes `beta_kl = 1.0` an effective β
 of several hundred. *Pinned by:* `test_objectives.py::TestKLIsOnThePerGeneScale`.
 
-**`CompositeLoss.vmf_kl` must be `PowerSphericalKLLoss`.** `VonMisesKLLoss` is
-dead code with a confusable name. *Pinned by:*
-`test_composite_uses_the_power_spherical_kl`.
+**`CompositeLoss.circ_kl` must be `PowerSphericalKLLoss`.** A von Mises KL
+class with a confusable name used to sit beside it and was removed in
+September 2026 along with the `vonmises` naming; the branch is
+`CircularBranch` in `latent/circular_vae.py`, the config field is
+`n_circular`, and checkpoints written under the old submodule name load
+through `checkpointing._renamed_keys`. *Pinned by:*
+`test_composite_uses_the_power_spherical_kl`,
+`test_checkpoint_with_vonmises_keys_loads`.
 
 **Every optimised parameter must be inside the gradient clip.** The DAB
 classifier lives on `CompositeLoss`, not on the model, so
@@ -232,17 +237,17 @@ encoder carries no study information. DAB becomes a slow no-op.
 ([adversarial.py:64](../../src/endo_model/model/objectives/adversarial.py:64)),
 `CompositeLoss._embedding` for CCE
 ([composite.py:91](../../src/endo_model/model/objectives/composite.py:91)), and
-`EpochReporter._draw_circular_umap`. `d_in = d_gauss + 2·n_vMF` in
+`EpochReporter._draw_circular_umap`. `d_in = d_gauss + 2·n_circular` in
 `CompositeLoss.__init__`.
 
 **Why:** `mu_angle` is an angle θ out of an unbounded `nn.Linear`. Anything that
 treats it as a *coordinate* — a linear layer, a cosine similarity, a Euclidean
 neighbour graph — is wrong at the wrap point, because θ = −π and θ = +π are one
 direction sitting 2π apart on the number line. The decoder is exempt:
-`VonMisesBranch` already hands it `z_vmf` as cos/sin pairs.
+`CircularBranch` already hands it `z_circ` as cos/sin pairs.
 
-**If violated:** *loud* if the width is wrong — a `(B, d_gauss + n_vMF)` input
-into a `Linear(d_gauss + 2·n_vMF, …)`. *Silent* if a new consumer simply reads
+**If violated:** *loud* if the width is wrong — a `(B, d_gauss + n_circular)` input
+into a `Linear(d_gauss + 2·n_circular, …)`. *Silent* if a new consumer simply reads
 `mu_angle` directly, which is how this went unnoticed through waves s0, s1 and
 r1: the classifier, the contrastive loss and every circular UMAP carried a seam
 that is in the encoding and not in the cells.
@@ -253,7 +258,7 @@ that is in the encoding and not in the cells.
 
 **Enforced by** `if self.training` in both `GaussianBranch`
 ([gaussian_vae.py:41](../../src/endo_model/model/latent/gaussian_vae.py:41)) and
-`VonMisesBranch` ([vonmises_vae.py:63](../../src/endo_model/model/latent/vonmises_vae.py:63)).
+`CircularBranch` ([circular_vae.py:63](../../src/endo_model/model/latent/circular_vae.py:63)).
 **Relied on by** `infer.py` reproducibility and `Evaluator` metric stability.
 
 **If violated:** *silent* — metrics acquire sampling noise; embeddings differ
@@ -265,7 +270,7 @@ between runs of the same checkpoint.
 
 **Enforced by** the renormalisation at
 [power_spherical.py:99](../../src/endo_model/model/latent/power_spherical.py:99).
-**Relied on by** `z_vmf`'s components being used directly as `cos θ`, `sin θ`.
+**Relied on by** `z_circ`'s components being used directly as `cos θ`, `sin θ`.
 
 **If violated:** *silent.* The Householder reflection divides by `(1 − loc₀)`,
 small exactly when `loc` is near `e₁` — a common case — and float32 drift is

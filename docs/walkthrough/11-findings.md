@@ -31,7 +31,7 @@ invalidation note below.
 | Wave | Arms | What it settled |
 |---|---|---|
 | s0 | `s0_ref`, `s0_ref_seed7`, `s0_lr_low`, `s0_lr_high`, `s0_dab` | LR wants to be high; the surviving circular dimension was near-Gaussian; the seed floor (§A9) |
-| s1 | `s1_freebits`, `s1_circ_low`, `s1_cce` | `w_kl_vmf` 0.1 is the setting that keeps the circular branch alive; `s1_cce` drove `kl_vmf` to 3.75e-10, killing it outright |
+| s1 | `s1_freebits`, `s1_circ_low`, `s1_cce` | `w_kl_circ` 0.1 is the setting that keeps the circular branch alive; `s1_cce` drove `kl_circ` to 3.75e-10, killing it outright |
 | r1 | `r1_ref`, `r1_cce` | `r1_ref` reproduced `s1_circ_low` on the corrected corpus; `r1_cce` was cancelled mid-flight |
 
 `r1_ref` in full, since it is the best measurement the project has:
@@ -41,7 +41,7 @@ invalidation note below.
 | all measured genes | 18 | 0.3778 | 0.41235 | **+8.4%** |
 | highly variable genes | 18 | 1.0652 | 1.18626 | **+10.2%** |
 
-`kl_vmf` rose monotonically 1.89e-4 → 1.43e-3 and was still climbing at epoch 19
+`kl_circ` rose monotonically 1.89e-4 → 1.43e-3 and was still climbing at epoch 19
 — the circular branch was filling, not collapsing. `val_dab` ended at 0.444
 against a chance of `ln(9) = 2.197`, which is the classifier naming the study
 almost perfectly; `lambda_dab` was 0 in that arm, so nothing opposed it.
@@ -223,14 +223,14 @@ never compared.
 
 ### A8 — ✅ FIXED (`3e82da2`) — the KL fix went to the wrong class
 
-`CompositeLoss` binds `self.vmf_kl` to `PowerSphericalKLLoss`. The mean→sum
+`CompositeLoss` binds `self.circ_kl` to `PowerSphericalKLLoss`. The mean→sum
 change went to `GaussianKLLoss` and `VonMisesKLLoss` — and the latter is dead
 code nothing constructs. The circular branch stayed averaged, now an 8×
 *under*-penalty, and κ ran to 8–15 against a 1e-2 collapse threshold. Runs 4 and
 5 void.
 
 Two names close enough to confuse (`VonMisesKLLoss`, `PowerSphericalKLLoss`), one
-attribute called `vmf_kl`, and dead code sitting where the live class should be.
+attribute called `circ_kl`, and dead code sitting where the live class should be.
 `test_composite_uses_the_power_spherical_kl` now pins the binding.
 
 **Lesson:** dead code that shares a name shape with live code is not neutral. It
@@ -445,7 +445,7 @@ missing feature — it looks configured.
 ### B2 — ✅ FIXED — Four of seven loss weights could not be set from YAML
 
 `train.py` passed only `w_cce`, `lambda_dab_max`, `cce_temperature`,
-`dab_hidden_dim`; `w_nb`, `w_kl_gauss`, `w_kl_vmf` and `w_dab` stayed at their
+`dab_hidden_dim`; `w_nb`, `w_kl_gauss`, `w_kl_circ` and `w_dab` stayed at their
 constructor defaults of 1.0, so the reconstruction/KL balance — the main thing
 you would tune in a VAE — required editing `composite.py`.
 
@@ -464,7 +464,7 @@ value was chosen.
 ### B3 — ✅ FIXED (`99345e9`) — `metrics.csv` dropped the per-term loss breakdown
 
 `Trainer.fit` recorded only `train_loss` / `val_loss`; `nb`, `kl_gauss`,
-`kl_vmf`, `beta_kl`, `dab`, `cce` were computed, averaged, and discarded —
+`kl_circ`, `beta_kl`, `dab`, `cce` were computed, averaged, and discarded —
 surviving only in console logs and the checkpoint `extra` dict. You could not
 plot "did KL collapse the posterior" or "did the adversary hold", which are the
 first-run questions.
@@ -741,7 +741,7 @@ and **a small Gaussian branch**. Neither has been combined with CCE.
 ### E2 — ❌ WRONG — the CCE embedding layout was not crowding the circular block out
 
 The claim: CCE L2-normalises `concat[mu_gauss, (cos,sin)…]`, the circular
-block's norm is pinned at `sqrt(n_vMF)` = 2.0 while `mu_gauss` is unbounded, so
+block's norm is pinned at `sqrt(n_circular)` = 2.0 while `mu_gauss` is unbounded, so
 the encoder shrinks the circular block's share to nothing by growing
 `||mu_gauss||`.
 
@@ -761,7 +761,7 @@ Two general lessons, both earned twice:
   this and the batch-size attribution (§E3) were plausible mechanisms with
   supporting algebra and no measurement.
 - Compare at **matched epochs**. The first read of R6 used end-of-run
-  `val_kl_vmf` from runs that stopped at different epochs and concluded the fix
+  `val_kl_circ` from runs that stopped at different epochs and concluded the fix
   had worked. At matched best epochs the three CCE arms agree to within 15%.
 
 ### E3 — ❌ WRONG — batch size did not explain CCE's reconstruction cost
@@ -783,12 +783,12 @@ with the collapsed dimensions measuring κ = 1.1e-3 to 2.2e-3, sitting on it.
 
 R7 raised it to 0.5. **0 of 4 collapsed in both arms**, against 3 of 4 in every
 earlier CCE run. But median κ came out at 0.51–0.57 against a floor of 0.50,
-with the mass piled against the wall, and `val_kl_vmf` at 6.7e-5 was *below*
+with the mass piled against the wall, and `val_kl_circ` at 6.7e-5 was *below*
 `r5_cce`'s 7.6e-5 and 14× below `r5_lambda_low`'s 9.6e-4.
 
 ⚠ **"N/4 collapsed" is now uninformative.** The collapse threshold is κ ≈ 0.2
 and the floor is above it, so the readout reports 0 of N by construction in
-every arm with a raised floor. Read `val_kl_vmf` and the per-dimension κ panel.
+every arm with a raised floor. Read `val_kl_circ` and the per-dimension κ panel.
 The threshold should be made relative to the configured floor.
 
 The reference hyperspherical-VAE implementation has used `softplus(x) + 1`
@@ -797,7 +797,7 @@ since 2018 — R7's 0.5 was reasoned from the gradient arithmetic and landed
 
 ### E5 — The circular mean was parameterised as an angle, and it wraps
 
-`mu_head` was `Linear(d_agg, n_vMF)` — one unbounded number per dimension, fed
+`mu_head` was `Linear(d_agg, n_circular)` — one unbounded number per dimension, fed
 to `cos`/`sin`. Two consequences:
 
 - cos and sin repeat every 2π, so θ and θ+2π are the same point and the head

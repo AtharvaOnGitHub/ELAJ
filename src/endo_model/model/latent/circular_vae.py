@@ -1,7 +1,7 @@
-"""VonMisesBranch: maps CELL_CLS to directional latent variables.
+"""CircularBranch: maps CELL_CLS to directional latent variables.
 
-Each of the n_vMF directional variables is a unit-circle angle represented as
-(cos θ, sin θ) for a total of 2*n_vMF stored dimensions.
+Each of the n_circular directional variables is a unit-circle angle represented as
+(cos θ, sin θ) for a total of 2*n_circular stored dimensions.
 
 Sampling uses the Power Spherical distribution (De Cao & Aziz, 2020) on the
 circle (S¹, i.e. ambient dimension d = 2) rather than torch's von Mises.  The
@@ -12,7 +12,7 @@ the uniform prior, so reconstruction-loss gradients reach both the mean and the
 concentration heads.  See power_spherical.py and PowerSphericalKLLoss.
 
 The public interface is unchanged: forward() still returns (mu_angle, kappa,
-z_vmf).  kappa is fed to PowerSphericalKLLoss (with dim=2) for regularisation.
+z_circ).  kappa is fed to PowerSphericalKLLoss (with dim=2) for regularisation.
 """
 
 import torch
@@ -25,16 +25,16 @@ from endo_model.model.latent.power_spherical import PowerSpherical
 _CIRCLE_DIM = 2
 
 # Guards the origin in the "direction" parameterisation, where the mean
-# direction is genuinely undefined. See VonMisesBranch._mean_angle.
+# direction is genuinely undefined. See CircularBranch._mean_angle.
 _EPS = 1e-6
 
 
-class VonMisesBranch(nn.Module):
-    """Directional variational branch over n_vMF independent circular dimensions.
+class CircularBranch(nn.Module):
+    """Directional variational branch over n_circular independent circular dimensions.
 
     Args:
         d_agg:  Input dimension (CELL_CLS from AggregationEncoder).
-        n_vMF:  Number of circular latent dimensions.
+        n_circular:  Number of circular latent dimensions.
         kappa_floor: Smallest concentration any dimension may take.
 
     WHY kappa_floor EXISTS, and why it is not a small number.
@@ -65,7 +65,7 @@ class VonMisesBranch(nn.Module):
     def __init__(
         self,
         d_agg: int,
-        n_vMF: int,
+        n_circular: int,
         kappa_floor: float = 1e-4,
         parameterisation: str = "angle",
     ) -> None:
@@ -75,17 +75,17 @@ class VonMisesBranch(nn.Module):
                 f"parameterisation must be 'angle' or 'direction', "
                 f"got {parameterisation!r}"
             )
-        if n_vMF < 0:
-            raise ValueError(f"n_vMF must be >= 0, got {n_vMF}")
-        self.n_vMF = n_vMF
+        if n_circular < 0:
+            raise ValueError(f"n_circular must be >= 0, got {n_circular}")
+        self.n_circular = n_circular
         self.kappa_floor = kappa_floor
         self.parameterisation = parameterisation
         # "angle" predicts one number per circular dimension; "direction"
         # predicts two and reads the angle off them. See _mean_angle.
         self.mu_head = nn.Linear(
-            d_agg, n_vMF if parameterisation == "angle" else 2 * n_vMF
+            d_agg, n_circular if parameterisation == "angle" else 2 * n_circular
         )
-        self.kappa_head = nn.Linear(d_agg, n_vMF)      # concentration
+        self.kappa_head = nn.Linear(d_agg, n_circular)      # concentration
 
     def _mean_angle(self, cell_cls: Tensor) -> Tensor:
         """The posterior mean angle, in radians.
@@ -120,7 +120,7 @@ class VonMisesBranch(nn.Module):
         if self.parameterisation == "angle":
             return raw
 
-        pairs = raw.view(*raw.shape[:-1], self.n_vMF, 2)
+        pairs = raw.view(*raw.shape[:-1], self.n_circular, 2)
         x, y = pairs[..., 0], pairs[..., 1]
 
         # Normalise before atan2, not after: on unit-length inputs the atan2
@@ -150,13 +150,13 @@ class VonMisesBranch(nn.Module):
             cell_cls: (B, d_agg).
 
         Returns:
-            (mu_angle, kappa, z_vmf):
-                mu_angle: (B, n_vMF) — mean angles in [-π, π].
-                kappa:    (B, n_vMF) — concentration, strictly > 0.
-                z_vmf:    (B, 2*n_vMF) — sampled angles as (cos, sin) pairs.
+            (mu_angle, kappa, z_circ):
+                mu_angle: (B, n_circular) — mean angles in [-π, π].
+                kappa:    (B, n_circular) — concentration, strictly > 0.
+                z_circ:    (B, 2*n_circular) — sampled angles as (cos, sin) pairs.
                           Layout: [cos_0, cos_1, ..., cos_{n-1}, sin_0, ..., sin_{n-1}].
         """
-        if self.n_vMF == 0:
+        if self.n_circular == 0:
             # Gaussian-only model. Empty tensors of the documented shapes, so
             # every consumer (concatenation, KL, CCE, DAB, figures) sees a
             # branch of width zero rather than a missing key. The heads exist
@@ -165,23 +165,23 @@ class VonMisesBranch(nn.Module):
             empty = cell_cls.new_zeros(cell_cls.shape[0], 0)
             return empty, empty, cell_cls.new_zeros(cell_cls.shape[0], 0)
 
-        mu_angle = self._mean_angle(cell_cls)          # (B, n_vMF)
+        mu_angle = self._mean_angle(cell_cls)          # (B, n_circular)
         kappa = torch.nn.functional.softplus(
             self.kappa_head(cell_cls)
-        ) + self.kappa_floor                           # (B, n_vMF) > 0
+        ) + self.kappa_floor                           # (B, n_circular) > 0
 
-        # Mean direction as unit vectors on the circle: (B, n_vMF, 2).
+        # Mean direction as unit vectors on the circle: (B, n_circular, 2).
         loc = torch.stack([torch.cos(mu_angle), torch.sin(mu_angle)], dim=-1)
 
         if self.training:
-            # Exact reparameterised Power Spherical sample → (B, n_vMF, 2).
+            # Exact reparameterised Power Spherical sample → (B, n_circular, 2).
             sample = PowerSpherical(loc=loc, scale=kappa).rsample()
         else:
             # Deterministic mean direction at eval time.
             sample = loc
 
-        cos_theta = sample[..., 0]                     # (B, n_vMF)
-        sin_theta = sample[..., 1]                     # (B, n_vMF)
-        z_vmf = torch.cat([cos_theta, sin_theta], dim=-1)  # (B, 2*n_vMF)
+        cos_theta = sample[..., 0]                     # (B, n_circular)
+        sin_theta = sample[..., 1]                     # (B, n_circular)
+        z_circ = torch.cat([cos_theta, sin_theta], dim=-1)  # (B, 2*n_circular)
 
-        return mu_angle, kappa, z_vmf
+        return mu_angle, kappa, z_circ

@@ -40,7 +40,7 @@ overrides:
   # 5e-4 was never tested even before the fix — the old sweep bottomed out at
   # 1e-4, which was clearly too low, and 3e-4.
   training.optimizer.lr: 5.0e-4
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.0
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

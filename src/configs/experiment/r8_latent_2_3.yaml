@@ -19,7 +19,7 @@ description: >
   THE LATENT, counting stored dimensions -- each circular variable is
   (cos, sin), so two:
 
-    d_gauss  n_vMF   gauss  circ   d_z   circ share
+    d_gauss  n_circular   gauss  circ   d_z   circ share
          48     12      48    24    72      33%   r3_capacity, worst mixing
          32      8      32    16    48      33%   waves R1-R3
           8      4       8     8    16      50%   waves R4-R7, r8_direction
@@ -38,13 +38,13 @@ description: >
   this is the configuration that forces it.
 
   NOTE ON READING IT. This differs from r8_direction in two numbers, not one:
-  d_gauss 8 -> 2 and n_vMF 4 -> 3. So it is not single-variable against that
+  d_gauss 8 -> 2 and n_circular 4 -> 3. So it is not single-variable against that
   arm -- it is a joint change of size and allocation, and the comparison that
   isolates size is against r5_latent_4_2 at the same d_z.
 
   And ignore the "N/4 collapsed" headline. With kappa floored at 1.0 and the
   collapse threshold at 0.2, it reports 0 of N by construction in every arm of
-  this wave. Read val_kl_vmf, and whether the per-dimension kappa mass sits on
+  this wave. Read val_kl_circ, and whether the per-dimension kappa mass sits on
   the floor as it did in R7 -- median 0.51 against a floor of 0.50 -- or spreads
   above it.
 
@@ -85,7 +85,7 @@ overrides:
   # ---- shared base, unchanged since wave R4 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
@@ -101,10 +101,10 @@ overrides:
   model.cce.block_normalise: false
 
   # ---- the latent: the two lines that make this arm what it is ----
-  # d_z = d_gauss + 2*n_vMF = 2 + 6 = 8, the same total as r5_latent_4_2, with
+  # d_z = d_gauss + 2*n_circular = 2 + 6 = 8, the same total as r5_latent_4_2, with
   # the circular half holding six of the eight rather than four.
   model.d_gauss: 2
-  model.n_vMF: 3
+  model.n_circular: 3
   model.d_platform: 16
 
   # The two lines that make batch 256 reachable and the circular branch

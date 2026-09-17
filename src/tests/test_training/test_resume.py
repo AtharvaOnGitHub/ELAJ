@@ -20,7 +20,7 @@ from endo_model.training.callbacks import EarlyStopping  # noqa: E402
 from endo_model.training.checkpointing import CheckpointManager  # noqa: E402
 from endo_model.training.trainer import Trainer  # noqa: E402
 from tests.test_training.test_trainer import (  # noqa: E402
-    D_GAUSS, N_STUDIES, N_VMF, _BatchList, make_batch, make_config, make_vocab,
+    D_GAUSS, N_STUDIES, N_CIRC, _BatchList, make_batch, make_config, make_vocab,
 )
 
 
@@ -28,8 +28,8 @@ def _setup(seed: int, max_epochs: int, ckpt_dir):
     torch.manual_seed(seed)
     vocab = make_vocab()
     model = EndoFoundationModel(vocab, make_config())
-    loss = CompositeLoss(n_studies=N_STUDIES, d_gauss=D_GAUSS, n_vMF=N_VMF,
-                         w_kl_gauss=0.01, w_kl_vmf=0.01, w_dab=0.01, w_cce=0.0)
+    loss = CompositeLoss(n_studies=N_STUDIES, d_gauss=D_GAUSS, n_circular=N_CIRC,
+                         w_kl_gauss=0.01, w_kl_circ=0.01, w_dab=0.01, w_cce=0.0)
     optimizer = torch.optim.Adam(list(model.parameters()) + list(loss.parameters()),
                                  lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
@@ -126,3 +126,21 @@ class TestResolveResume:
         (tmp_path / "run" / "checkpoints").mkdir(parents=True)
         with pytest.raises(FileNotFoundError):
             resolve_resume(str(tmp_path), tmp_path / "run", "latest")
+
+
+class TestRetiredModuleNames:
+    def test_checkpoint_with_vonmises_keys_loads(self, tmp_path):
+        """Every checkpoint before September 2026 names the circular branch
+        `latent_space.vonmises`; the loader translates it."""
+        trainer, model, optimizer = _setup(3, 2, tmp_path)
+        state = {("latent_space.vonmises." + k[len("latent_space.circular."):]
+                  if k.startswith("latent_space.circular.") else k): v
+                 for k, v in model.state_dict().items()}
+        assert any(k.startswith("latent_space.vonmises.") for k in state)
+        path = tmp_path / "old.pt"
+        torch.save({"epoch": 0, "step": 0, "val_loss": 1.0, "model_state": state,
+                    "optimizer_state": optimizer.state_dict()}, path)
+        fresh, model2, optimizer2 = _setup(4, 2, tmp_path / "fresh")
+        CheckpointManager.load(str(path), model2, optimizer2)
+        for k, v in model.state_dict().items():
+            assert torch.equal(model2.state_dict()[k], v), k

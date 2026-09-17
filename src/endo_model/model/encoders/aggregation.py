@@ -11,7 +11,7 @@ The updated group CLS tokens at positions 1..K used to be returned as well and
 fed to the decoder.  That was the defect behind run 49817807: they are per-cell
 summaries of the very genes the decoder is asked to predict, so the model
 reconstructed from them and ignored the latent entirely.  Both latent branches
-collapsed — kl_vmf reached 5e-7, meaning zero information.
+collapsed — kl_circ reached 5e-7, meaning zero information.
 
 They are not returned now, so nothing downstream can reach them.  Keeping them
 as an unused return value would be an invitation to wire them back in; the

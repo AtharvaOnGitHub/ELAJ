@@ -152,7 +152,7 @@ def test_alternating_studies_keep_their_own_gene_counts():
     """A stale layout would give a study the wrong number of measured genes."""
     vocab = make_vocab()
     config = ModelConfig(
-        d_token=8, d_agg=16, d_gauss=8, n_vMF=2, d_dec=8,
+        d_token=8, d_agg=16, d_gauss=8, n_circular=2, d_dec=8,
         n_groups=len(vocab.group_names), n_studies=2,
         group_encoder=GroupEncoderConfig(n_layers=1, n_heads=2, dropout=0.0),
         aggregation_encoder=AggregationEncoderConfig(n_layers=1, n_heads=2, dropout=0.0),

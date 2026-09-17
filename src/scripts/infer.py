@@ -10,8 +10,8 @@ Usage:
                             --split test --out outputs/embeddings/
 
 Outputs:
-    embeddings.npz    mu_gauss (N, d_gauss), z (N, d_z), mu_angle (N, n_vMF),
-                      kappa (N, n_vMF), study_ids (N,), disease_status (N,)
+    embeddings.npz    mu_gauss (N, d_gauss), z (N, d_z), mu_angle (N, n_circular),
+                      kappa (N, n_circular), study_ids (N,), disease_status (N,)
 """
 
 import argparse

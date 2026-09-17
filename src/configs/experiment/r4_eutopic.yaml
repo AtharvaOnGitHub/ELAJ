@@ -43,7 +43,7 @@ overrides:
   # ---- shared base, carried from the best of wave R3 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.02
@@ -58,7 +58,7 @@ overrides:
 
   # ---- the tiny latent ----
   model.d_gauss: 8
-  model.n_vMF: 4
+  model.n_circular: 4
   # ---- the smaller encoder ----
   # Note: the group encoders are 2 layers deep, not 8. Halving the only thing
   # that can be halved takes them to 1, so the width is cut as well to make the

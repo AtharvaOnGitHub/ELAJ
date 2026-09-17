@@ -49,6 +49,13 @@ def apply_override(d: dict, dotpath: str, value: Any) -> None:
 
 _OVERRIDE_ROOTS = {"model": ModelConfig, "training": TrainingConfig, "data": DataConfig}
 
+# Field names retired in September 2026, still accepted so a YAML written
+# against the old names loads and lands on the right field.
+_OVERRIDE_ALIASES = {
+    "model.n_vMF": "model.n_circular",
+    "model.loss.w_kl_vmf": "model.loss.w_kl_circ",
+}
+
 
 def check_override_path(dotpath: str) -> None:
     """Refuse an override whose path does not name a config field.
@@ -114,6 +121,7 @@ def load_experiment(
 
     # Overrides use "config.field" dot-paths, e.g. "model.d_gauss: 64"
     for dotpath, value in exp_cfg.overrides.items():
+        dotpath = _OVERRIDE_ALIASES.get(dotpath, dotpath)
         check_override_path(dotpath)
         prefix, _, rest = dotpath.partition(".")
         target = {"model": model_dict, "training": train_dict, "data": data_dict}[prefix]

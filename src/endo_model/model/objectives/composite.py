@@ -29,10 +29,10 @@ class CompositeLoss(nn.Module):
     Args:
         n_studies:      Number of studies (DAB classifier output dimension).
         d_gauss:        Gaussian branch dimension.
-        n_vMF:          Number of circular latent dimensions.
+        n_circular:          Number of circular latent dimensions.
         w_nb:           Weight on NB reconstruction loss.
         w_kl_gauss:     Weight on Gaussian KL loss.
-        w_kl_vmf:       Weight on vMF KL loss.
+        w_kl_circ:       Weight on the circular KL loss.
         w_dab:          Final weight for DAB adversarial loss.
         w_cce:          Weight on CCE InfoNCE loss (0 = disabled).
         lambda_dab_max: Maximum gradient reversal lambda for DAB.
@@ -43,10 +43,10 @@ class CompositeLoss(nn.Module):
         self,
         n_studies: int,
         d_gauss: int,
-        n_vMF: int,
+        n_circular: int,
         w_nb: float = 1.0,
         w_kl_gauss: float = 1.0,
-        w_kl_vmf: float = 1.0,
+        w_kl_circ: float = 1.0,
         w_dab: float = 1.0,
         w_cce: float = 0.0,
         lambda_dab_max: float = 1.0,
@@ -69,19 +69,19 @@ class CompositeLoss(nn.Module):
         self.free_bits = free_bits
         self.w_nb = w_nb
         self.w_kl_gauss = w_kl_gauss
-        self.w_kl_vmf = w_kl_vmf
+        self.w_kl_circ = w_kl_circ
         self.w_dab = w_dab
         self.w_cce = w_cce
         self.lambda_dab_max = lambda_dab_max
 
         self.nb_loss = NegativeBinomialLoss()
         self.gauss_kl = GaussianKLLoss()
-        self.vmf_kl = PowerSphericalKLLoss()
-        # d_gauss + 2*n_vMF: the classifier receives each circular latent as a
+        self.circ_kl = PowerSphericalKLLoss()
+        # d_gauss + 2*n_circular: the classifier receives each circular latent as a
         # (cos, sin) pair rather than as a raw angle. See
         # endo_model/model/latent/circular.py.
         self.dab = DABClassifier(
-            d_in=d_gauss + 2 * n_vMF,
+            d_in=d_gauss + 2 * n_circular,
             n_studies=n_studies,
             hidden_dim=dab_hidden_dim,
             dropout=dab_dropout,
@@ -94,7 +94,7 @@ class CompositeLoss(nn.Module):
         """One cell's deterministic latent, laid out for a distance-based loss.
 
         See cce_embedding.py for why the layout is not merely a concatenation:
-        the circular block's norm is fixed at sqrt(n_vMF), so without
+        the circular block's norm is fixed at sqrt(n_circular), so without
         block normalisation the encoder can crowd it out of the cosine
         similarity by growing the Gaussian block instead.
         """
@@ -123,7 +123,7 @@ class CompositeLoss(nn.Module):
             model_output2: Second forward pass for CCE (optional).
 
         Returns:
-            dict with keys: 'elbo', 'nb', 'kl_gauss', 'kl_vmf', 'beta_kl',
+            dict with keys: 'elbo', 'nb', 'kl_gauss', 'kl_circ', 'beta_kl',
             'dab', 'cce', 'total'.
 
             'elbo' is the model's objective — reconstruction plus the KL price.
@@ -163,8 +163,8 @@ class CompositeLoss(nn.Module):
             )
             / n_measured
         )
-        kl_vmf = (
-            self.vmf_kl(model_output["kappa"], self.free_bits) / n_measured
+        kl_circ = (
+            self.circ_kl(model_output["kappa"], self.free_bits) / n_measured
         )
 
         # DAB with linearly ramped lambda (0 → max over first 50 % of steps)
@@ -207,7 +207,7 @@ class CompositeLoss(nn.Module):
         elbo = (
             self.w_nb * nb
             + beta_kl * self.w_kl_gauss * kl_gauss
-            + beta_kl * self.w_kl_vmf * kl_vmf
+            + beta_kl * self.w_kl_circ * kl_circ
             + self.w_cce * cce_loss
         )
 
@@ -220,7 +220,7 @@ class CompositeLoss(nn.Module):
             "elbo": elbo,
             "nb": nb,
             "kl_gauss": kl_gauss,
-            "kl_vmf": kl_vmf,
+            "kl_circ": kl_circ,
             "beta_kl": torch.tensor(beta_kl),
             "dab": dab_loss,
             "cce": cce_loss,

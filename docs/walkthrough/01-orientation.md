@@ -110,13 +110,13 @@ and `StudyPanel`, and never escapes to the model.
 | `d_token` | gene token width | 32 | `model.d_token` |
 | `d_agg` | aggregation/cell width | 64 | `model.d_agg` |
 | `d_gauss` | Gaussian latent dims | 32 | `model.d_gauss` |
-| `n_vMF` | circular latent dims | 8 | `model.n_vMF` |
-| `d_z` | joint latent = `d_gauss + 2·n_vMF` | 48 | derived, [model_config.py:107](../../src/endo_model/configs/model_config.py:107) |
+| `n_circular` | circular latent dims | 8 | `model.n_circular` |
+| `d_z` | joint latent = `d_gauss + 2·n_circular` | 48 | derived, [model_config.py:107](../../src/endo_model/configs/model_config.py:107) |
 | `d_tissue` | decoder tissue embedding | 16 | [model_config.py](../../src/endo_model/configs/model_config.py) |
 | `d_dec` | decoder inner width | 64 | `model.d_dec` |
 | `n_studies` | studies in corpus | 11 | runtime, from `studies.csv` minus exclusions |
 
-`d_z` is `d_gauss + 2·n_vMF`, not `d_gauss + n_vMF`, because each circular
+`d_z` is `d_gauss + 2·n_circular`, not `d_gauss + n_circular`, because each circular
 latent is stored as a `(cos θ, sin θ)` pair. That is not redundancy — it is what
 makes the circle behave like a circle under Euclidean operations downstream.
 Angles 0.01 and 6.27 rad are adjacent on the circle but 6.26 apart as scalars;

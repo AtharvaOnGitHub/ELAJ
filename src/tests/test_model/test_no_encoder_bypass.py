@@ -3,7 +3,7 @@
 Run 49817807 trained for 11 epochs and learned nothing after the first, because
 `gene_reps` was built from the encoder's per-cell group summaries. The decoder
 reconstructed from those and ignored the latent, so both latent branches
-collapsed — `kl_vmf` reached 5.2e-7, meaning zero information.
+collapsed — `kl_circ` reached 5.2e-7, meaning zero information.
 
 Nothing in that failure raised an error, and the reconstruction loss looked
 plausible throughout. It was only visible by reading the KL terms. So these
@@ -38,7 +38,7 @@ def make_model():
         generate_synthetic_vocabulary(n_genes=N_GENES, n_groups=N_GROUPS, seed=7)
     )
     config = ModelConfig(
-        d_token=D_TOKEN, d_agg=D_AGG, d_gauss=8, n_vMF=2, d_dec=D_DEC,
+        d_token=D_TOKEN, d_agg=D_AGG, d_gauss=8, n_circular=2, d_dec=D_DEC,
         n_groups=len(vocab.group_names), n_studies=2,
         group_encoder=GroupEncoderConfig(n_layers=1, n_heads=2, dropout=0.0),
         aggregation_encoder=AggregationEncoderConfig(

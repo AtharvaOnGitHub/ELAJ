@@ -87,7 +87,7 @@ def _kl_panel(ax, history: dict) -> None:
 
     Combined because they are the same quantity — nats per gene held in the
     latent — so one axis compares them honestly, and because the question
-    asked of them is always about both at once. In s1_cce kl_vmf fell to
+    asked of them is always about both at once. In s1_cce kl_circ fell to
     3.75e-10 while kl_gauss rose, which is CCE moving information between
     branches rather than adding any; on separate panels that trade is two
     observations a reader has to join up.
@@ -95,7 +95,7 @@ def _kl_panel(ax, history: dict) -> None:
     Log scale, because these collapse across orders of magnitude and a linear
     axis renders 5e-7 and 5e-3 as the same flat line on the floor.
     """
-    branches = [("kl_gauss", "Gaussian", 0), ("kl_vmf", "Power Spherical", 2)]
+    branches = [("kl_gauss", "Gaussian", 0), ("kl_circ", "Power Spherical", 2)]
     everything = []
     for key, label, colour in branches:
         for split, style in (("train", "-"), ("val", "--")):
@@ -131,7 +131,7 @@ def loss_curves(history: dict) -> plt.Figure:
     The per-term panels are the rest of the point. A single curve that stops
     falling cannot distinguish a reconstruction plateau from a posterior
     collapse, and in run 49817807 it was both — `nb` flat while `kl_gauss` and
-    `kl_vmf` fell to zero. Read alone, that looked like ordinary convergence.
+    `kl_circ` fell to zero. Read alone, that looked like ordinary convergence.
     """
     fig, axes = plt.subplots(1, 5, figsize=(20, 3.4))
 
@@ -225,12 +225,12 @@ def adversarial_panel(history: dict, n_studies: int) -> plt.Figure:
     ax = axes[1]
     for key, label, colour in [
         ("val_kl_gauss", "KL Gaussian", PALETTE.categorical[0]),
-        ("val_kl_vmf", "KL Power Spherical", PALETTE.categorical[2]),
+        ("val_kl_circ", "KL Power Spherical", PALETTE.categorical[2]),
     ]:
         values = history.get(key, [])
         if values:
             ax.plot(range(len(values)), values, label=label, color=colour)
-    if any(history.get(k) for k in ("val_kl_gauss", "val_kl_vmf")):
+    if any(history.get(k) for k in ("val_kl_gauss", "val_kl_circ")):
         ax.set_yscale("log")
     ax.set_title("Information in the latent (val)")
     ax.set_xlabel("epoch")

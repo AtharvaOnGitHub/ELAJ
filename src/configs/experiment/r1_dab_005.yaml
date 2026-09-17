@@ -44,7 +44,7 @@ overrides:
   # At 0.05 in s1_freebits val_dab landed at 2.550 against a chance of 2.079 —
   # the closest any run has come. Chance is now 2.197.
   training.optimizer.lr: 1.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.05
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

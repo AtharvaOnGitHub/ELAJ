@@ -17,7 +17,7 @@ def test_width_doubles():
 
 
 def test_layout_is_all_cosines_then_all_sines():
-    """Same convention as VonMisesBranch's z_vmf, so the two are comparable."""
+    """Same convention as CircularBranch's z_circ, so the two are comparable."""
     angles = torch.randn(B, N)
     out = angles_to_cartesian(angles)
     assert torch.allclose(out[:, :N], torch.cos(angles))

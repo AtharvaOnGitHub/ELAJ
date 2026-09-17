@@ -3,7 +3,7 @@ description: >
   beta_max 1.0 -> 0.5. Halves the charge on BOTH latent branches.
 
   Stage 3 hyperparameter sweep. Every arm sits on the s1_circ_low base — lr
-  2e-3, w_kl_vmf 0.1, no adversary — which is the best configuration measured so
+  2e-3, w_kl_circ 0.1, no adversary — which is the best configuration measured so
   far (val_nb 0.3605, 6 of 8 circular dimensions alive). Each arm moves ONE
   thing off that base, listed under "the variable".
 
@@ -29,15 +29,15 @@ overrides:
 
   # ---- the base (held fixed across the sweep) ----
   training.optimizer.lr: 2.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.0
 
   # ---- the variable ----
   # s1_cce ran with beta_max 0.5 and did well, but had CCE on at the same
   # time so the two could not be separated. This is the clean version.
   #
-  # Note this is not the same lever as w_kl_vmf: beta_max scales both
-  # branches, w_kl_vmf only the circular one.
+  # Note this is not the same lever as w_kl_circ: beta_max scales both
+  # branches, w_kl_circ only the circular one.
   training.kl_annealing.beta_max: 0.5
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

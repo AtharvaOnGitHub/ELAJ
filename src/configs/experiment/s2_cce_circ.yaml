@@ -36,7 +36,7 @@ overrides:
   model.cce.lambda_cce: 0.1
 
   # Half of s1_circ_low's 0.1.
-  model.loss.w_kl_vmf: 0.05
+  model.loss.w_kl_circ: 0.05
 
   model.dab.lambda_dab: 0.0
 

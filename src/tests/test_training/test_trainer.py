@@ -26,7 +26,7 @@ B = 2
 D_TOKEN = 8
 D_AGG = 16
 D_GAUSS = 8
-N_VMF = 2
+N_CIRC = 2
 
 
 def make_vocab():
@@ -36,7 +36,7 @@ def make_vocab():
 
 def make_config() -> ModelConfig:
     return ModelConfig(
-        d_token=D_TOKEN, d_agg=D_AGG, d_gauss=D_GAUSS, n_vMF=N_VMF,
+        d_token=D_TOKEN, d_agg=D_AGG, d_gauss=D_GAUSS, n_circular=N_CIRC,
         d_dec=8, n_studies=N_STUDIES,
         group_encoder=GroupEncoderConfig(n_layers=1, n_heads=2, dropout=0.0),
         aggregation_encoder=AggregationEncoderConfig(n_layers=1, n_heads=2, dropout=0.0),
@@ -89,8 +89,8 @@ class TestTrainer:
         self.config = make_config()
         self.model = EndoFoundationModel(self.vocab, self.config)
         self.comp_loss = CompositeLoss(
-            n_studies=N_STUDIES, d_gauss=D_GAUSS, n_vMF=N_VMF,
-            w_kl_gauss=0.01, w_kl_vmf=0.01, w_dab=0.01, w_cce=0.0,
+            n_studies=N_STUDIES, d_gauss=D_GAUSS, n_circular=N_CIRC,
+            w_kl_gauss=0.01, w_kl_circ=0.01, w_dab=0.01, w_cce=0.0,
         )
         self.optimizer = torch.optim.Adam(
             list(self.model.parameters()) + list(self.comp_loss.parameters()),
@@ -250,7 +250,7 @@ class TestHistoryBreakdown:
         assert len(history["train_loss"]) == 2
         assert len(history["val_loss"]) == 2
         # ... and every CompositeLoss term is now recorded too.
-        for term in ("nb", "kl_gauss", "kl_vmf", "beta_kl", "dab"):
+        for term in ("nb", "kl_gauss", "kl_circ", "beta_kl", "dab"):
             assert f"train_{term}" in history, term
             assert f"val_{term}" in history, term
             assert len(history[f"train_{term}"]) == 2

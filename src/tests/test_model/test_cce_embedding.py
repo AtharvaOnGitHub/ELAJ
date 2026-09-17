@@ -1,7 +1,7 @@
 """The embedding layout CCE compares cells in.
 
 The arithmetic these tests pin down is the reason r5_cce's circular branch
-collapsed: a (cos, sin) block has norm sqrt(n_vMF) no matter what it holds, so
+collapsed: a (cos, sin) block has norm sqrt(n_circular) no matter what it holds, so
 under a plain concatenation the Gaussian block can crowd it out of the cosine
 similarity simply by growing.
 """
@@ -15,23 +15,23 @@ torch = pytest.importorskip("torch")
 from endo_model.model.objectives.cce_embedding import cce_embedding, unit_circular
 from endo_model.model.latent.circular import angles_to_cartesian
 
-B, D_GAUSS, N_VMF = 4, 8, 4
+B, D_GAUSS, N_CIRC = 4, 8, 4
 
 
 def angles(scale: float = 1.0) -> torch.Tensor:
     torch.manual_seed(24)
-    return (torch.rand(B, N_VMF) * 2 - 1) * math.pi * scale
+    return (torch.rand(B, N_CIRC) * 2 - 1) * math.pi * scale
 
 
 # ── the fixed norm that causes the problem ───────────────────────────────────
 
-def test_circular_block_norm_is_sqrt_n_vmf_whatever_the_angles():
+def test_circular_block_norm_is_sqrt_n_circular_whatever_the_angles():
     """The premise of the whole fix. If this were data-dependent, the Gaussian
     block could not reliably crowd the circular one out."""
     for scale in (0.01, 0.5, 1.0):
         block = angles_to_cartesian(angles(scale))
         assert torch.allclose(
-            block.norm(dim=-1), torch.full((B,), math.sqrt(N_VMF)), atol=1e-5
+            block.norm(dim=-1), torch.full((B,), math.sqrt(N_CIRC)), atol=1e-5
         )
 
 
@@ -48,10 +48,10 @@ def test_unit_circular_tolerates_a_model_with_no_circular_dimensions():
 # ── shape is unchanged either way ────────────────────────────────────────────
 
 @pytest.mark.parametrize("block_normalise", [False, True])
-def test_width_is_d_gauss_plus_two_n_vmf(block_normalise):
+def test_width_is_d_gauss_plus_two_n_circular(block_normalise):
     out = cce_embedding(torch.randn(B, D_GAUSS), angles(),
                         block_normalise=block_normalise)
-    assert out.shape == (B, D_GAUSS + 2 * N_VMF)
+    assert out.shape == (B, D_GAUSS + 2 * N_CIRC)
 
 
 def test_default_reproduces_the_plain_concatenation():

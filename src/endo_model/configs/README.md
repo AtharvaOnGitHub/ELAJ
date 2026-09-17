@@ -36,8 +36,8 @@ configs/experiment/full_model.yaml
 ## Class responsibilities
 
 ### `ModelConfig`
-Holds all architectural dimensions: `d_token`, `d_agg`, `d_gauss`, `n_vMF`, `d_dec`.  Two derived read-only properties:
-- `d_z = d_gauss + 2 * n_vMF` — total latent dimension. The `2 *` is because each vMF dim is stored as `(cos θ, sin θ)` — two Cartesian coordinates. See [`model_config.py`](model_config.py) for the full explanation.
+Holds all architectural dimensions: `d_token`, `d_agg`, `d_gauss`, `n_circular`, `d_dec`.  Two derived read-only properties:
+- `d_z = d_gauss + 2 * n_circular` — total latent dimension. The `2 *` is because each circular dim is stored as `(cos θ, sin θ)` — two Cartesian coordinates. See [`model_config.py`](model_config.py) for the full explanation.
 - `d_gene_rep = d_token + d_agg` — gene representation fed to the decoder.
 
 `n_groups` and `n_studies` are `None` until the data pipeline sets them at runtime.
@@ -123,7 +123,7 @@ The personal watermark seed is **24**.  It appears only in dataclass defaults (`
 ## Unit tests
 
 `tests/test_configs/test_configs.py` covers:
-- All config defaults and derived properties (including `d_z = d_gauss + 2 * n_vMF` verified at multiple values)
+- All config defaults and derived properties (including `d_z = d_gauss + 2 * n_circular` verified at multiple values)
 - `from_dict` for all classes, partial and full inputs
 - `CCEConfig` and `DABConfig` defaults and from_dict
 - `TrainingConfig` does not contain CCE fields (assertion that ownership moved to ModelConfig)

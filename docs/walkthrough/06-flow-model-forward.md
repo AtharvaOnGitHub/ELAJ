@@ -276,21 +276,21 @@ logvar)` overflows without it.
 Reparameterisation only when `self.training`; at eval `z = mu` exactly, so
 inference is deterministic.
 
-### `VonMisesBranch` — [`vonmises_vae.py:28`](../../src/endo_model/model/latent/vonmises_vae.py:28)
+### `CircularBranch` — [`circular_vae.py:28`](../../src/endo_model/model/latent/circular_vae.py:28)
 
-`n_vMF = 0` is a Gaussian-only model. `forward` returns width-zero tensors
+`n_circular = 0` is a Gaussian-only model. `forward` returns width-zero tensors
 without touching the heads or the sampler (the Beta draw is not defined on
-an empty batch), `d_z` is `d_gauss`, `kl_vmf` is zero, CCE and DAB read the
+an empty batch), `d_z` is `d_gauss`, `kl_circ` is zero, CCE and DAB read the
 Gaussian embedding alone, and the circular figures are skipped.
 `tests/test_model/test_gaussian_only.py` runs forward, loss, and backward
 at zero. `c_gauss` is the arm.
 
 ```python
-mu_angle = self._mean_angle(cell_cls)                        # (B, n_vMF)
+mu_angle = self._mean_angle(cell_cls)                        # (B, n_circular)
 kappa    = softplus(self.kappa_head(cell_cls)) + kappa_floor # strictly > 0
-loc      = stack([cos(mu_angle), sin(mu_angle)], -1)         # (B, n_vMF, 2)
+loc      = stack([cos(mu_angle), sin(mu_angle)], -1)         # (B, n_circular, 2)
 sample   = PowerSpherical(loc, kappa).rsample() if training else loc
-z_vmf    = cat([sample[...,0], sample[...,1]], -1)           # (B, 2*n_vMF)
+z_circ    = cat([sample[...,0], sample[...,1]], -1)           # (B, 2*n_circular)
 ```
 
 Two of those lines are configurable, and both because this branch has spent
@@ -321,7 +321,7 @@ of 0.50. The reference hyperspherical-VAE implementation has used
 #### `circular_parameterisation` — angle or direction
 
 `_mean_angle` has two modes. `"angle"` (default, every run to R7) is
-`Linear(d_agg, n_vMF)` straight into `cos`/`sin`. `"direction"` predicts **two**
+`Linear(d_agg, n_circular)` straight into `cos`/`sin`. `"direction"` predicts **two**
 numbers per dimension, divides by their length, and reads the angle with
 `atan2`.
 
@@ -350,7 +350,7 @@ singularity below — finite forward, NaN backward.
 > vMF-like directional distribution with an exact reparameterised sampler and a
 > closed-form KL. This was a run-blocking crash, fixed in `5edd503`.
 
-Layout of `z_vmf` is `[cos_0…cos_{n-1}, sin_0…sin_{n-1}]`, not interleaved.
+Layout of `z_circ` is `[cos_0…cos_{n-1}, sin_0…sin_{n-1}]`, not interleaved.
 
 ### `PowerSpherical` — [`power_spherical.py:56`](../../src/endo_model/model/latent/power_spherical.py:56)
 
@@ -365,7 +365,7 @@ Density `p(x; μ, κ) ∝ (1 + μ·x)^κ` on `S^{d-1}`.
 3. Build `y = (t, √((1−t)(1+t))·v)`, centred on `e₁`.
 4. `_reflect_e1_to_loc` — a Householder reflection mapping `e₁` onto `loc`, so
    gradients reach `loc`.
-5. **Renormalise** — float32 drift off the sphere is ~1e-3, and `z_vmf`'s
+5. **Renormalise** — float32 drift off the sphere is ~1e-3, and `z_circ`'s
    components are used directly as `cos θ` and `sin θ`.
 
 The `1` in `√(1 − t²)` is **not a free parameter**. `|y|² = t² + (1−t²) = 1` is
@@ -382,7 +382,7 @@ different distribution, not a safer one.
 
 At `d = 2` the Beta is `Beta(½+κ, ½)`, which has a **pole at each endpoint**, so
 float32 draws land exactly on `0` or `1` at a low but non-zero rate. The model
-takes `batch × n_vMF = 1024` draws per step. Three hazards followed, and all
+takes `batch × n_circular = 1024` draws per step. Three hazards followed, and all
 three produce a **NaN gradient from a completely finite forward pass** — the
 value at the boundary is well defined, only its derivative is not:
 
@@ -428,7 +428,7 @@ and `_log_normalizer` were cross-checked against Monte-Carlo at d=2 and d=3
 ### Combination — [`latent_space.py:52`](../../src/endo_model/model/latent/latent_space.py:52)
 
 ```python
-z      = cat([z_gauss, z_vmf], -1)   # (B, d_z) = (B, 48)
+z      = cat([z_gauss, z_circ], -1)   # (B, d_z) = (B, 48)
 z_proj = self.z_proj(z)              # (B, d_agg)
 ```
 
@@ -551,7 +551,7 @@ the same per-gene scale as `nb` — see [07](07-flow-losses.md).
 | Mode | Difference |
 |---|---|
 | `model.train()` | Gaussian reparameterises; Power Spherical samples; dropout active; DSBN uses batch stats |
-| `model.eval()` | `z_gauss = mu`; `z_vmf = loc`; no dropout; DSBN uses running stats |
+| `model.eval()` | `z_gauss = mu`; `z_circ = loc`; no dropout; DSBN uses running stats |
 | CCE enabled | `Trainer` calls `forward` **twice** on the same batch; different dropout masks give the two views |
 | CCE disabled | one forward; `model_output2 = None` |
 | Different studies | `G_meas` changes → `mu_hat`, `theta`, `gene_queries` all change width |

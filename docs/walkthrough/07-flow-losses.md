@@ -16,7 +16,7 @@ mechanism inert.
 ```
 elbo  = w_nb·NB
       + β(t)·w_kl_gauss·KL_gauss / G_meas
-      + β(t)·w_kl_vmf·KL_vmf     / G_meas
+      + β(t)·w_kl_circ·KL_vmf     / G_meas
       + w_cce·InfoNCE
 
 total = elbo
@@ -112,7 +112,7 @@ the KL weight that actually applied comes out as:
 
 β-VAE papers report posterior collapse in the **1–20** range. The model was
 being charged several hundred nats of loss per nat of information stored, so it
-correctly stored none — 8/8 circular dimensions collapsed by epoch 0, `kl_vmf`
+correctly stored none — 8/8 circular dimensions collapsed by epoch 0, `kl_circ`
 pinned at its floor from epoch 1, and eleven epochs of training finished 1.1%
 better than predicting each study's mean profile.
 
@@ -142,7 +142,7 @@ averaging makes a 32-dimensional latent look eight times cheaper than an
 ```python
 n_measured = max(int(model_output["measured_global_idxs"].numel()), 1)
 kl_gauss = self.gauss_kl(...) / n_measured
-kl_vmf   = self.vmf_kl(...)  / n_measured
+kl_circ   = self.circ_kl(...)  / n_measured
 ```
 
 which puts them on `nb`'s per-gene scale, so `beta_kl = 1.0` is a genuine β=1
@@ -156,7 +156,7 @@ fix, not a regression. Read the shape of the curve, not the value.
 ### The class that got missed
 
 The fix landed in two passes, and the first one missed. `CompositeLoss` binds
-`self.vmf_kl` to **`PowerSphericalKLLoss`**; the change went to `GaussianKLLoss`
+`self.circ_kl` to **`PowerSphericalKLLoss`**; the change went to `GaussianKLLoss`
 and `VonMisesKLLoss`, and the latter is dead code that nothing constructs. The
 circular branch stayed averaged — an 8× *under*-penalty this time — and κ shot
 to 8–15 against a collapse threshold of 1e-2, four orders of magnitude past it
@@ -164,7 +164,7 @@ in three epochs. Two more runs void.
 
 `tests/test_model/test_objectives.py::test_composite_uses_the_power_spherical_kl`
 now pins which class the loss is bound to. Two distributions with similar names,
-one attribute called `vmf_kl`, and a change applied to the wrong one looks
+one attribute called `circ_kl`, and a change applied to the wrong one looks
 correct in review and does nothing at runtime.
 
 ### `VonMisesKLLoss` — [`kl_divergence.py`](../../src/endo_model/model/objectives/kl_divergence.py)
@@ -213,8 +213,8 @@ gradient and therefore **ascends** — it is pushed to make study id unpredictab
 ### `DABClassifier` — [`adversarial.py:18`](../../src/endo_model/model/objectives/adversarial.py:18)
 
 ```python
-circular  = angles_to_cartesian(mu_angle)        # (B, 2·n_vMF)
-dab_input = cat([mu_gauss, circular], -1)        # (B, d_gauss + 2·n_vMF)
+circular  = angles_to_cartesian(mu_angle)        # (B, 2·n_circular)
+dab_input = cat([mu_gauss, circular], -1)        # (B, d_gauss + 2·n_circular)
 reversed  = GradientReversalFunction.apply(dab_input, lambda_dab)
 return self.classifier(reversed)                 # (B, n_studies)
 ```
@@ -258,11 +258,11 @@ same pair. **Metric-preserving**, because for two angles α and β:
 
 The distance depends on `α − β` and nothing else: 0 when the angles agree, 2
 when they are opposite, and continuous across the wrap point. Cost is one extra
-dimension per circular latent, hence `d_in = d_gauss + 2·n_vMF`.
+dimension per circular latent, hence `d_in = d_gauss + 2·n_circular`.
 
 The same helper — [`circular.py`](../../src/endo_model/model/latent/circular.py)
 — is used by CCE (§5) and by the circular UMAP panel. `BilinearDecoder` never
-needed it: `VonMisesBranch` already hands it `z_vmf` as cos/sin pairs.
+needed it: `CircularBranch` already hands it `z_circ` as cos/sin pairs.
 
 > **Every run up to and including `r1_ref` and `r1_cce` predates this.** Their
 > DAB numbers, CCE numbers and circular UMAPs all carry the seam.
@@ -378,7 +378,7 @@ reachable; see [08](08-flow-training.md).
 |---|---|---|
 | `w_nb` | 1.0 | `model.loss.w_nb` |
 | `w_kl_gauss` | 1.0 | `model.loss.w_kl_gauss` |
-| `w_kl_vmf` | 1.0 | `model.loss.w_kl_vmf` |
+| `w_kl_circ` | 1.0 | `model.loss.w_kl_circ` |
 | `w_dab` | 1.0 | `model.loss.w_dab` |
 | `w_cce` | 0.0 | `model.cce.lambda_cce if enabled` |
 | `lambda_dab_max` | 1.0 | `model.dab.lambda_dab` |
@@ -431,7 +431,7 @@ Also note the config default for `cce.temperature` is 0.07 while
 ## 7. Return value — [`composite.py:213`](../../src/endo_model/model/objectives/composite.py:213)
 
 ```python
-{"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl", "dab", "cce",
+{"elbo", "nb", "kl_gauss", "kl_circ", "beta_kl", "dab", "cce",
  "mu_gauss_norm", "total"}
 ```
 

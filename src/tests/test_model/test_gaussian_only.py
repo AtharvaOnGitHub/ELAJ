@@ -1,4 +1,4 @@
-"""n_vMF = 0 is a Gaussian-only model, and every consumer has to cope.
+"""n_circular = 0 is a Gaussian-only model, and every consumer has to cope.
 
 The circular branch returns width-zero tensors, the joint latent is the
 Gaussian one, the losses that read the circular outputs contribute zero,
@@ -12,7 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace  # noqa: E402
-from endo_model.model.latent.vonmises_vae import VonMisesBranch  # noqa: E402
+from endo_model.model.latent.circular_vae import CircularBranch  # noqa: E402
 from endo_model.model.objectives.composite import CompositeLoss  # noqa: E402
 from tests.test_model.test_endo_model import (  # noqa: E402
     B, N_STUDIES, make_batch, make_config, make_vocab,
@@ -20,24 +20,24 @@ from tests.test_model.test_endo_model import (  # noqa: E402
 from endo_model.model.endo_model import EndoFoundationModel  # noqa: E402
 
 
-class TestVonMisesBranchAtZero:
+class TestCircularBranchAtZero:
     def test_returns_width_zero_tensors_in_both_modes(self):
-        branch = VonMisesBranch(d_agg=16, n_vMF=0, kappa_floor=1.0,
+        branch = CircularBranch(d_agg=16, n_circular=0, kappa_floor=1.0,
                                 parameterisation="direction")
         x = torch.randn(5, 16)
         for training in (True, False):
             branch.train(training)
-            mu_angle, kappa, z_vmf = branch(x)
+            mu_angle, kappa, z_circ = branch(x)
             assert mu_angle.shape == (5, 0)
             assert kappa.shape == (5, 0)
-            assert z_vmf.shape == (5, 0)
+            assert z_circ.shape == (5, 0)
 
     def test_negative_is_refused(self):
         with pytest.raises(ValueError):
-            VonMisesBranch(d_agg=16, n_vMF=-1)
+            CircularBranch(d_agg=16, n_circular=-1)
 
     def test_joint_latent_is_the_gaussian_one(self):
-        space = BifurcatedLatentSpace(d_agg=16, d_gauss=6, n_vMF=0)
+        space = BifurcatedLatentSpace(d_agg=16, d_gauss=6, n_circular=0)
         out = space(torch.randn(4, 16))
         assert out["z"].shape == (4, 6)
         assert torch.equal(out["z"], out["z_gauss"])
@@ -48,7 +48,7 @@ class TestGaussianOnlyModel:
     def setup_method(self):
         self.vocab = make_vocab()
         self.config = make_config(self.vocab)
-        self.config.n_vMF = 0
+        self.config.n_circular = 0
         self.config.d_gauss = 12
         self.model = EndoFoundationModel(self.vocab, self.config)
         self.batch = make_batch(self.vocab)
@@ -65,18 +65,18 @@ class TestGaussianOnlyModel:
     def test_loss_is_finite_and_circular_kl_is_zero(self):
         self.model.train()
         out = self.model(self.batch)
-        loss = CompositeLoss(N_STUDIES, d_gauss=12, n_vMF=0, w_cce=0.5, w_dab=0.5)
+        loss = CompositeLoss(N_STUDIES, d_gauss=12, n_circular=0, w_cce=0.5, w_dab=0.5)
         parts = loss(out, self.batch, current_step=10, total_steps=100,
                      model_output2=self.model(self.batch))
         assert torch.isfinite(parts["total"])
-        assert parts["kl_vmf"].item() == 0.0
+        assert parts["kl_circ"].item() == 0.0
         assert parts["kl_gauss"].item() > 0.0
         assert torch.isfinite(parts["cce"]) and torch.isfinite(parts["dab"])
 
     def test_backward_reaches_the_encoder(self):
         self.model.train()
         out = self.model(self.batch)
-        loss = CompositeLoss(N_STUDIES, d_gauss=12, n_vMF=0, w_cce=0.0)
+        loss = CompositeLoss(N_STUDIES, d_gauss=12, n_circular=0, w_cce=0.0)
         loss(out, self.batch, current_step=10, total_steps=100)["total"].backward()
         grads = [p.grad for p in self.model.hierarchical_encoder.parameters()
                  if p.grad is not None]

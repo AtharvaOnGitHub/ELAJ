@@ -43,13 +43,13 @@ overrides:
   # ---- shared base, carried from the best of wave R3 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.1
 
   # A combination, and the one with a real question behind it. lambda 0.1
-  # collapsed the latent in wave R2 -- kl_vmf fell from 1.4e-4 to 2.8e-7 by
+  # collapsed the latent in wave R2 -- kl_circ fell from 1.4e-4 to 2.8e-7 by
   # epoch 3 -- but that latent had 48 dimensions to empty. With 12, there is
   # much less to give away, and the reconstruction term has to fight harder for
   # every one.
@@ -60,7 +60,7 @@ overrides:
 
   # ---- the tiny latent ----
   model.d_gauss: 8
-  model.n_vMF: 4
+  model.n_circular: 4
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
   # gained d_platform 16 in wave R5; without this line every pre-R5 config

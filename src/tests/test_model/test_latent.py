@@ -7,12 +7,12 @@ torch = pytest.importorskip("torch")
 from endo_model.model.latent.gaussian_vae import GaussianBranch
 from endo_model.model.latent.grad_reversal import GradientReversalFunction
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace
-from endo_model.model.latent.vonmises_vae import VonMisesBranch
+from endo_model.model.latent.circular_vae import CircularBranch
 
 B = 4
 D_AGG = 32
 D_GAUSS = 16
-N_VMF = 4
+N_CIRC = 4
 
 
 # ── GaussianBranch ──────────────────────────────────────────────────────────
@@ -44,32 +44,32 @@ class TestGaussianBranch:
         assert not torch.allclose(z, mu)
 
 
-# ── VonMisesBranch ───────────────────────────────────────────────────────────
+# ── CircularBranch ───────────────────────────────────────────────────────────
 
-class TestVonMisesBranch:
+class TestCircularBranch:
     def test_shapes_train(self):
-        branch = VonMisesBranch(D_AGG, N_VMF)
+        branch = CircularBranch(D_AGG, N_CIRC)
         branch.train()
         cell_cls = torch.randn(B, D_AGG)
-        mu_angle, kappa, z_vmf = branch(cell_cls)
-        assert mu_angle.shape == (B, N_VMF)
-        assert kappa.shape == (B, N_VMF)
-        assert z_vmf.shape == (B, 2 * N_VMF)
+        mu_angle, kappa, z_circ = branch(cell_cls)
+        assert mu_angle.shape == (B, N_CIRC)
+        assert kappa.shape == (B, N_CIRC)
+        assert z_circ.shape == (B, 2 * N_CIRC)
 
     def test_kappa_positive(self):
-        branch = VonMisesBranch(D_AGG, N_VMF)
+        branch = CircularBranch(D_AGG, N_CIRC)
         branch.train()
         cell_cls = torch.randn(B, D_AGG)
         _, kappa, _ = branch(cell_cls)
         assert (kappa > 0).all()
 
-    def test_z_vmf_has_cos_sin_structure(self):
-        branch = VonMisesBranch(D_AGG, N_VMF)
+    def test_z_circ_has_cos_sin_structure(self):
+        branch = CircularBranch(D_AGG, N_CIRC)
         branch.eval()
         cell_cls = torch.randn(B, D_AGG)
-        mu_angle, _, z_vmf = branch(cell_cls)
-        cos_part = z_vmf[:, :N_VMF]
-        sin_part = z_vmf[:, N_VMF:]
+        mu_angle, _, z_circ = branch(cell_cls)
+        cos_part = z_circ[:, :N_CIRC]
+        sin_part = z_circ[:, N_CIRC:]
         assert torch.allclose(cos_part, torch.cos(mu_angle), atol=1e-5)
         assert torch.allclose(sin_part, torch.sin(mu_angle), atol=1e-5)
 
@@ -78,21 +78,21 @@ class TestVonMisesBranch:
 
 class TestBifurcatedLatentSpace:
     def _make(self):
-        return BifurcatedLatentSpace(D_AGG, D_GAUSS, N_VMF)
+        return BifurcatedLatentSpace(D_AGG, D_GAUSS, N_CIRC)
 
     def test_output_keys(self):
         ls = self._make()
         ls.train()
         out = ls(torch.randn(B, D_AGG))
         expected_keys = {"mu_gauss", "logvar", "z_gauss", "mu_angle", "kappa",
-                         "z_vmf", "z", "z_proj"}
+                         "z_circ", "z", "z_proj"}
         assert expected_keys.issubset(set(out.keys()))
 
     def test_z_shape(self):
         ls = self._make()
         ls.train()
         out = ls(torch.randn(B, D_AGG))
-        d_z = D_GAUSS + 2 * N_VMF
+        d_z = D_GAUSS + 2 * N_CIRC
         assert out["z"].shape == (B, d_z)
 
     def test_z_proj_shape(self):

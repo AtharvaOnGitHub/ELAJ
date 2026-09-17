@@ -1,7 +1,7 @@
-"""BifurcatedLatentSpace: combines Gaussian and vMF branches.
+"""BifurcatedLatentSpace: combines the Gaussian and circular branches.
 
 The joint latent code is:
-    z = concat(z_gauss, z_vmf)     shape (B, d_gauss + 2*n_vMF) = (B, d_z)
+    z = concat(z_gauss, z_circ)     shape (B, d_gauss + 2*n_circular) = (B, d_z)
 
 A linear projection z_proj: d_z → d_agg maps the joint code to the
 aggregation dimension for the BilinearDecoder.
@@ -12,32 +12,32 @@ import torch.nn as nn
 from torch import Tensor
 
 from .gaussian_vae import GaussianBranch
-from .vonmises_vae import VonMisesBranch
+from .circular_vae import CircularBranch
 
 
 class BifurcatedLatentSpace(nn.Module):
-    """Joint Gaussian + vMF latent space with a projection head.
+    """Joint Gaussian + circular latent space with a projection head.
 
     Args:
         d_agg:   Input/output aggregation dimension.
         d_gauss: Gaussian branch latent dimension.
-        n_vMF:   Number of von Mises-Fisher circular dimensions.
+        n_circular:   Number of circular (Power Spherical) dimensions.
         kappa_floor: Smallest concentration a circular dimension may take.
-                     See VonMisesBranch for why zero is an absorbing state.
+                     See CircularBranch for why zero is an absorbing state.
     """
 
     def __init__(
-        self, d_agg: int, d_gauss: int, n_vMF: int, kappa_floor: float = 1e-4,
+        self, d_agg: int, d_gauss: int, n_circular: int, kappa_floor: float = 1e-4,
         circular_parameterisation: str = "angle",
     ) -> None:
         super().__init__()
         self.gaussian = GaussianBranch(d_agg, d_gauss)
-        self.vonmises = VonMisesBranch(
-            d_agg, n_vMF, kappa_floor=kappa_floor,
+        self.circular = CircularBranch(
+            d_agg, n_circular, kappa_floor=kappa_floor,
             parameterisation=circular_parameterisation,
         )
 
-        d_z = d_gauss + 2 * n_vMF
+        d_z = d_gauss + 2 * n_circular
         self.z_proj = nn.Linear(d_z, d_agg, bias=False)
 
     def forward(self, cell_cls: Tensor) -> dict[str, Tensor]:
@@ -51,16 +51,16 @@ class BifurcatedLatentSpace(nn.Module):
                 mu_gauss:  (B, d_gauss)
                 logvar:    (B, d_gauss)
                 z_gauss:   (B, d_gauss)
-                mu_angle:  (B, n_vMF)
-                kappa:     (B, n_vMF)
-                z_vmf:     (B, 2*n_vMF)
+                mu_angle:  (B, n_circular)
+                kappa:     (B, n_circular)
+                z_circ:     (B, 2*n_circular)
                 z:         (B, d_z) — full joint code
                 z_proj:    (B, d_agg) — decoder input
         """
         mu_gauss, logvar, z_gauss = self.gaussian(cell_cls)
-        mu_angle, kappa, z_vmf = self.vonmises(cell_cls)
+        mu_angle, kappa, z_circ = self.circular(cell_cls)
 
-        z = torch.cat([z_gauss, z_vmf], dim=-1)   # (B, d_z)
+        z = torch.cat([z_gauss, z_circ], dim=-1)   # (B, d_z)
         z_proj = self.z_proj(z)                    # (B, d_agg)
 
         return {
@@ -69,7 +69,7 @@ class BifurcatedLatentSpace(nn.Module):
             "z_gauss": z_gauss,
             "mu_angle": mu_angle,
             "kappa": kappa,
-            "z_vmf": z_vmf,
+            "z_circ": z_circ,
             "z": z,
             "z_proj": z_proj,
         }

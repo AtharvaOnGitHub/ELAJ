@@ -22,7 +22,7 @@ model/
 │   └── aggregation.py        — AggregationEncoder: cross-module attention → CELL_CLS
 ├── latent/
 │   ├── gaussian_vae.py       — GaussianBranch: mu, logvar, reparameterised z
-│   ├── vonmises_vae.py       — VonMisesBranch: mu_angle, kappa, (cos θ, sin θ) pairs
+│   ├── circular_vae.py       — CircularBranch: mu_angle, kappa, (cos θ, sin θ) pairs
 │   ├── power_spherical.py    — PowerSpherical: exact reparameterised directional sampler + KL
 │   ├── circular.py           — angles_to_cartesian: θ ↦ (cos θ, sin θ) for every consumer
 │   ├── latent_space.py       — BifurcatedLatentSpace: joins Gaussian + directional
@@ -32,7 +32,7 @@ model/
 │   └── dispersion.py         — PerGeneDispersion: per-gene θ for NB distribution
 ├── objectives/
 │   ├── reconstruction.py     — NegativeBinomialLoss
-│   ├── kl_divergence.py      — GaussianKLLoss, PowerSphericalKLLoss (VonMisesKLLoss kept, unused)
+│   ├── kl_divergence.py      — GaussianKLLoss, PowerSphericalKLLoss
 │   ├── adversarial.py        — DABClassifier (gradient-reversal study classifier)
 │   ├── contrastive.py        — InfoNCELoss (CCE: two forward-pass consistency)
 │   └── composite.py          — CompositeLoss: weighted sum of all objectives
@@ -67,7 +67,7 @@ batch
 
 ## Circular coordinates (`latent/circular.py`)
 
-`VonMisesBranch.forward` returns `mu_angle`, the mean angle θ of each circular
+`CircularBranch.forward` returns `mu_angle`, the mean angle θ of each circular
 latent dimension, straight out of an unbounded `nn.Linear`.  An angle is a
 perfectly good *parameter*.  It is not a coordinate, and anything that treats it
 as one is wrong at the wrap point:
@@ -105,7 +105,7 @@ using `cos²x + sin²x = 1` and the cosine difference identity
 so distance in the embedding is a function of the angle between the two
 directions and of nothing else.  It runs from 0 at α = β to 2 at α − β = π.
 
-Cost is one extra dimension per circular latent: `n_vMF` angles become `2*n_vMF`
+Cost is one extra dimension per circular latent: `n_circular` angles become `2*n_circular`
 coordinates.
 
 **Who must use it.** Every consumer that reads `mu_angle` as a position:
@@ -116,8 +116,8 @@ coordinates.
 | `InfoNCELoss` (CCE) | cosine similarity between two embeddings |
 | Circular UMAP panel | Euclidean nearest neighbours |
 
-`BilinearDecoder` never needed the helper: `VonMisesBranch` already gives it
-`z_vmf` as `(cos θ, sin θ)` pairs, which is the same embedding computed inside
+`BilinearDecoder` never needed the helper: `CircularBranch` already gives it
+`z_circ` as `(cos θ, sin θ)` pairs, which is the same embedding computed inside
 the branch.
 
 **What this was before.** All three consumers above received the raw angle. The

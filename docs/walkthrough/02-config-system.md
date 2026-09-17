@@ -101,7 +101,7 @@ model_cfg.n_groups  = len(vocab.group_names)  # train.py:87
 
 Two derived properties, both computed rather than stored so they cannot drift:
 
-- `d_z` — [`:107`](../../src/endo_model/configs/model_config.py:107) — `d_gauss + 2*n_vMF`
+- `d_z` — [`:107`](../../src/endo_model/configs/model_config.py:107) — `d_gauss + 2*n_circular`
 - `d_tissue` — width of the decoder's tissue embedding (`0` disables conditioning)
 
 The `d_gene_rep` property this note used to warn about is gone with the

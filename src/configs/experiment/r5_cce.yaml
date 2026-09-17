@@ -60,7 +60,7 @@ overrides:
   # ---- shared base, unchanged since wave R4 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.02
@@ -68,8 +68,8 @@ overrides:
   # The lines that make this arm what it is. 0.1 rather than 0.5 -- at 0.5 the
   # contrastive term overwhelmed the reconstruction in wave R1.
   #
-  # Watch kl_vmf in the log. s1_cce drove it to 3.75e-10, which is the circular
-  # branch dying: kappa runs away, the von Mises posterior collapses onto a
+  # Watch kl_circ in the log. s1_cce drove it to 3.75e-10, which is the circular
+  # branch dying: kappa runs away, the circular posterior collapses onto a
   # point, and the circular half of the latent stops carrying anything. If that
   # number falls through about 1e-6, the arm is no longer testing what it says.
   model.cce.enabled: true
@@ -77,6 +77,6 @@ overrides:
 
   # ---- the tiny latent, exactly r4_tiny_latent ----
   model.d_gauss: 8
-  model.n_vMF: 4
+  model.n_circular: 4
 
   model.d_platform: 16

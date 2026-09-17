@@ -15,6 +15,24 @@ import torch
 logger = logging.getLogger(__name__)
 
 
+# Submodule names retired in September 2026 -> their current names. Every
+# checkpoint from r1 to c_ref carries the old ones; renaming the attribute
+# without this would make all of them unloadable.
+_RENAMED_MODULES = {"latent_space.vonmises.": "latent_space.circular."}
+
+
+def _renamed_keys(state: dict) -> dict:
+    """A state_dict with retired submodule prefixes translated."""
+    out = {}
+    for key, value in state.items():
+        for old, new in _RENAMED_MODULES.items():
+            if key.startswith(old):
+                key = new + key[len(old):]
+                break
+        out[key] = value
+    return out
+
+
 class CheckpointManager:
     """Saves model checkpoints and retains only the best few.
 
@@ -117,7 +135,7 @@ class CheckpointManager:
             The full checkpoint payload dict.
         """
         payload = torch.load(path, map_location=map_location, weights_only=False)
-        model.load_state_dict(payload["model_state"])
+        model.load_state_dict(_renamed_keys(payload["model_state"]))
         if optimizer is not None and "optimizer_state" in payload:
             optimizer.load_state_dict(payload["optimizer_state"])
         return payload

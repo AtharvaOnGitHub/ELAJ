@@ -15,15 +15,15 @@ from endo_model.model.endo_model import EndoFoundationModel  # noqa: E402
 from endo_model.model.objectives.composite import CompositeLoss  # noqa: E402
 from endo_model.training.trainer import Trainer  # noqa: E402
 from tests.test_training.test_trainer import (  # noqa: E402
-    D_GAUSS, N_STUDIES, N_VMF, _BatchList, make_batch, make_config, make_vocab,
+    D_GAUSS, N_STUDIES, N_CIRC, _BatchList, make_batch, make_config, make_vocab,
 )
 
 
 def test_empty_validation_loader_warns_and_continues(tmp_path, caplog):
     vocab = make_vocab()
     model = EndoFoundationModel(vocab, make_config())
-    loss = CompositeLoss(n_studies=N_STUDIES, d_gauss=D_GAUSS, n_vMF=N_VMF,
-                         w_kl_gauss=0.01, w_kl_vmf=0.01, w_dab=0.01, w_cce=0.0)
+    loss = CompositeLoss(n_studies=N_STUDIES, d_gauss=D_GAUSS, n_circular=N_CIRC,
+                         w_kl_gauss=0.01, w_kl_circ=0.01, w_dab=0.01, w_cce=0.0)
     optimizer = torch.optim.Adam(list(model.parameters()) + list(loss.parameters()),
                                  lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=2)

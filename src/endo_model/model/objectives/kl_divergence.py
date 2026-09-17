@@ -1,13 +1,7 @@
-"""KL divergence losses for the Gaussian and von Mises-Fisher branches.
+"""KL divergence losses for the Gaussian and circular (Power Spherical) branches.
 
 GaussianKLLoss:
     KL(N(mu, sigma^2) || N(0, I)) = 0.5 * sum(mu^2 + sigma^2 - log(sigma^2) - 1)
-
-VonMisesKLLoss:
-    KL(vMF(mu, kappa) || Uniform) = kappa * A(kappa) - log(I_0(kappa))
-    where A(kappa) = I_1(kappa) / I_0(kappa) is the mean resultant length.
-    This is always ≥ 0; minimising it pushes kappa → 0 (towards uniform prior).
-    (Retained for reference; the directional branch now uses Power Spherical.)
 
 PowerSphericalKLLoss:
     KL(PowerSpherical(mu, kappa) || Uniform(S^1)) — the analytic KL of the
@@ -15,7 +9,7 @@ PowerSphericalKLLoss:
     power_spherical.py, cross-checked against Monte-Carlo.
 """
 
-import torch
+
 import torch.nn as nn
 from torch import Tensor
 
@@ -54,47 +48,18 @@ class GaussianKLLoss(nn.Module):
         return _reduce(kl, free_bits)
 
 
-class VonMisesKLLoss(nn.Module):
-    """Mean KL divergence from uniform prior for vMF variational branch.
-
-    KL is computed per-cell per-dimension and averaged.
-    """
-
-    def forward(self, kappa: Tensor) -> Tensor:
-        """Compute mean KL from uniform circular prior.
-
-        Args:
-            kappa: (B, n_vMF) — concentration parameters (> 0).
-
-        Returns:
-            Scalar — KL summed over circular dimensions, averaged over cells.
-
-        Summed over dimensions for the same reason as GaussianKLLoss, and this
-        branch is where the old averaging did its worst damage: with n_vMF = 8
-        against ~15,000 genes the effective beta was ~1,875, four times the
-        Gaussian branch's. Run 50132670 duly killed the circular latent first
-        and hardest — 8/8 dimensions collapsed by epoch 0 and kl_vmf pinned at
-        its 1.2e-7 floor from epoch 1 onward, while the Gaussian branch limped
-        on at 0.06-0.3 nats.
-        """
-        eps = 1e-8
-        i0 = torch.special.i0(kappa)                  # (B, n_vMF)
-        i1 = torch.special.i1(kappa)                  # (B, n_vMF)
-        A = i1 / (i0 + eps)                            # mean resultant length
-        kl = kappa * A - torch.log(i0 + eps)          # (B, n_vMF) ≥ 0
-        return kl.sum(dim=-1).mean()
-
-
 class PowerSphericalKLLoss(nn.Module):
     """KL from the uniform circular prior, summed over the circular dimensions.
 
-    This is the class CompositeLoss actually uses; VonMisesKLLoss above is the
-    von Mises formula and is referenced only by tests. When the mean/sum fix
-    landed it was applied to the two classes whose names matched what the loss
-    was called (`vmf_kl`) and missed this one, which is what the attribute is
-    bound to. The circular branch was therefore still averaged over its 8
-    dimensions while the Gaussian branch was summed over its 32 — leaving the
-    circular penalty 8x too weak rather than, as before, far too strong.
+    History: a von Mises KL class (Bessel-function formula) used to sit
+    beside this one, referenced only by tests. When the mean/sum fix landed
+    it was applied to the two classes whose names matched what the loss was
+    called and missed this one, which is what the attribute is bound to. The
+    circular branch was therefore still averaged over its 8 dimensions while
+    the Gaussian branch was summed over its 32, leaving the circular penalty
+    8x too weak rather than, as before, far too strong. The von Mises class
+    was removed in September 2026; the branch has sampled Power Spherical
+    since commit 5edd503 and nothing else was ever trained.
 
     Run kl_check_no_dab shows what that looks like from the other side: every
     circular dimension alive at median kappa 8-15, against a collapse threshold
@@ -106,7 +71,7 @@ class PowerSphericalKLLoss(nn.Module):
         """Compute KL( PowerSpherical(mu, kappa) ‖ Uniform(S^1) ).
 
         Args:
-            kappa: (B, n_vMF) — concentration parameters (> 0).
+            kappa: (B, n_circular) — concentration parameters (> 0).
 
         Returns:
             Scalar — KL summed over circular dimensions, averaged over cells.

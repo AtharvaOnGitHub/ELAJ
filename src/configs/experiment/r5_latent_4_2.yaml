@@ -49,12 +49,12 @@ overrides:
   # ---- shared base, unchanged since wave R4 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.02
 
-  # The two lines that make this arm what it is. d_z = d_gauss + 2*n_vMF, so
+  # The two lines that make this arm what it is. d_z = d_gauss + 2*n_circular, so
   # 8 here against 16 in the reference arm and 60 in wave R3's largest.
   #
   # free_bits is left at 0.25 deliberately. It is a floor PER latent dimension,
@@ -62,6 +62,6 @@ overrides:
   # the per-dimension pressure is unchanged -- which is what keeps this arm a
   # test of capacity rather than a test of capacity and regularisation at once.
   model.d_gauss: 4
-  model.n_vMF: 2
+  model.n_circular: 2
 
   model.d_platform: 16

@@ -63,12 +63,12 @@ def kappa_histogram(
     loader: DataLoader,
     device: torch.device | None = None,
 ) -> np.ndarray:
-    """Collect vMF concentration values (kappa) across the dataset.
+    """Collect circular concentration values (kappa) across the dataset.
 
     High kappa → confident directional code; near-zero kappa → uninformative.
 
     Returns:
-        (N, n_vMF) numpy array of kappa values.
+        (N, n_circular) numpy array of kappa values.
     """
     if device is None:
         device = next(model.parameters()).device

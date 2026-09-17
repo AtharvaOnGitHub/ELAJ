@@ -43,7 +43,7 @@ overrides:
   # ---- shared base, carried from the best of wave R3 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.02
@@ -55,7 +55,7 @@ overrides:
 
   # ---- the tiny latent ----
   model.d_gauss: 8
-  model.n_vMF: 4
+  model.n_circular: 4
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small
   # gained d_platform 16 in wave R5; without this line every pre-R5 config

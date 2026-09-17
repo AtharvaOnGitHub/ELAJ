@@ -15,7 +15,7 @@ from endo_model.model.latent.power_spherical import (  # noqa: E402
     _log_uniform_surface,
     power_spherical_kl_uniform,
 )
-from endo_model.model.latent.vonmises_vae import VonMisesBranch  # noqa: E402
+from endo_model.model.latent.circular_vae import CircularBranch  # noqa: E402
 
 
 def _unit(v):
@@ -86,12 +86,12 @@ def test_branch_training_mode_backprops_to_both_heads():
     mean and concentration heads receive gradients (torch VonMises.rsample
     raised NotImplementedError here)."""
     torch.manual_seed(0)
-    branch = VonMisesBranch(d_agg=16, n_vMF=4)
+    branch = CircularBranch(d_agg=16, n_circular=4)
     branch.train()
 
     cell_cls = torch.randn(8, 16)
-    _, _, z_vmf = branch(cell_cls)
-    z_vmf.pow(2).sum().backward()
+    _, _, z_circ = branch(cell_cls)
+    z_circ.pow(2).sum().backward()
 
     for name, head in [("mu_head", branch.mu_head), ("kappa_head", branch.kappa_head)]:
         grad = head.weight.grad
@@ -166,13 +166,13 @@ def test_rsample_gradient_finite_when_loc_approaches_e1():
 def test_branch_gradients_finite_over_many_steps():
     """End-to-end: the branch as training uses it, at training's draw volume."""
     torch.manual_seed(2)
-    branch = VonMisesBranch(d_agg=32, n_vMF=8)
+    branch = CircularBranch(d_agg=32, n_circular=8)
     branch.train()
 
     for step in range(200):
         branch.zero_grad(set_to_none=True)
-        _, _, z_vmf = branch(torch.randn(128, 32))
-        z_vmf.pow(2).sum().backward()
+        _, _, z_circ = branch(torch.randn(128, 32))
+        z_circ.pow(2).sum().backward()
         for name, param in branch.named_parameters():
             assert torch.isfinite(param.grad).all(), (
                 f"non-finite gradient in {name} at step {step}"

@@ -35,7 +35,7 @@ def make_config(vocab: GeneVocabulary) -> ModelConfig:
         d_token=8,
         d_agg=16,
         d_gauss=8,
-        n_vMF=2,
+        n_circular=2,
         d_dec=8,
         n_studies=N_STUDIES,
         n_groups=len(vocab.group_names),
@@ -98,7 +98,7 @@ class TestEndoFoundationModel:
         out = self.model(batch)
         expected = {
             "mu_hat", "theta", "mu_gauss", "logvar", "z_gauss",
-            "mu_angle", "kappa", "z_vmf", "z", "z_proj",
+            "mu_angle", "kappa", "z_circ", "z", "z_proj",
             "measured_global_idxs",
         }
         assert expected.issubset(set(out.keys()))
@@ -136,7 +136,7 @@ class TestEndoFoundationModel:
     def test_z_shape(self):
         batch = make_batch(self.vocab)
         out = self.model(batch)
-        d_z = self.config.d_gauss + 2 * self.config.n_vMF
+        d_z = self.config.d_gauss + 2 * self.config.n_circular
         assert out["z"].shape == (B, d_z)
 
     def test_kappa_positive(self):

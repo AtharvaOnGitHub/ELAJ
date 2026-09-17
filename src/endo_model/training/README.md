@@ -18,7 +18,7 @@ from endo_model.training.trainer import Trainer
 from endo_model.configs.training_config import TrainingConfig
 
 model = EndoFoundationModel(vocab, model_config)
-composite_loss = CompositeLoss(n_studies=n_studies, d_gauss=32, n_vMF=8)
+composite_loss = CompositeLoss(n_studies=n_studies, d_gauss=32, n_circular=8)
 optimizer = torch.optim.AdamW(
     list(model.parameters()) + list(composite_loss.parameters()),
     lr=3e-4,

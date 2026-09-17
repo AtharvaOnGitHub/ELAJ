@@ -28,7 +28,7 @@ class DABClassifier(nn.Module):
     """Two-layer study ID classifier with gradient reversal.
 
     Args:
-        d_in:       Input dimension = d_gauss + 2*n_vMF — two per circular
+        d_in:       Input dimension = d_gauss + 2*n_circular — two per circular
                     dimension, because each angle enters as a (cos, sin) pair.
         n_studies:  Number of distinct studies (output classes).
         hidden_dim: Hidden layer width.
@@ -55,13 +55,13 @@ class DABClassifier(nn.Module):
 
         Args:
             mu_gauss:   (B, d_gauss) — Gaussian branch deterministic mean.
-            mu_angle:   (B, n_vMF) — vMF branch mean angles, in radians.
+            mu_angle:   (B, n_circular) — circular branch mean angles, in radians.
             lambda_dab: Gradient reversal scale (0.0 = disabled, 1.0 = full).
 
         Returns:
             (B, n_studies) logits (no softmax).
         """
-        circular = angles_to_cartesian(mu_angle)             # (B, 2*n_vMF)
-        dab_input = torch.cat([mu_gauss, circular], dim=-1)  # (B, d_gauss+2*n_vMF)
+        circular = angles_to_cartesian(mu_angle)             # (B, 2*n_circular)
+        dab_input = torch.cat([mu_gauss, circular], dim=-1)  # (B, d_gauss+2*n_circular)
         reversed_input = GradientReversalFunction.apply(dab_input, lambda_dab)
         return self.classifier(reversed_input)

@@ -49,7 +49,7 @@ overrides:
   # minutes against ~37, and 20 would run past the 24 h walltime. s1_cce
   # converged by epoch 16 of 18, so this should not truncate anything.
   #
-  # Watch kl_vmf. s1_cce drove it to 3.75e-10 — the circular branch died
+  # Watch kl_circ. s1_cce drove it to 3.75e-10 — the circular branch died
   # outright while kl_gauss rose, so CCE moved the information into the Gaussian
   # half rather than adding any. Whether a circular penalty of 0.1 rather than
   # s1_cce's 0.05 changes that is the second question this arm answers.
@@ -57,7 +57,7 @@ overrides:
   model.cce.lambda_cce: 0.1
 
   training.optimizer.lr: 1.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.0
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

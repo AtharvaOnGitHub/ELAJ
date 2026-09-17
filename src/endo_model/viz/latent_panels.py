@@ -81,7 +81,7 @@ def collapse_verdict(column: np.ndarray, floor: float) -> tuple[bool, str]:
     return False, ""
 
 # Circular latents live on S^1, embedded in a 2-D ambient space. Matches
-# vonmises_vae._CIRCLE_DIM.
+# circular_vae._CIRCLE_DIM.
 _CIRCLE_DIM = 2
 
 

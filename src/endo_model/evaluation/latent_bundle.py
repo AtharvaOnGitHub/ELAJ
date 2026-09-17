@@ -27,8 +27,8 @@ class LatentBundle:
 
     Attributes:
         mu_gauss:  (n, d_gauss) the Gaussian branch's means.
-        mu_angle:  (n, n_vMF) the circular branch's mean angles, in radians.
-        kappa:     (n, n_vMF) per-cell concentration.
+        mu_angle:  (n, n_circular) the circular branch's mean angles, in radians.
+        kappa:     (n, n_circular) per-cell concentration.
         study_id:  (n,) integer study index.
         split:     (n,) which split each cell came from.
         meta:      column name -> (n,) object array of per-cell metadata.

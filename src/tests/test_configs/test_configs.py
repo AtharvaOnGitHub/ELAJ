@@ -45,15 +45,15 @@ def test_model_config_defaults():
     assert cfg.d_token == 32
     assert cfg.d_agg == 64
     assert cfg.d_gauss == 32
-    assert cfg.n_vMF == 8
+    assert cfg.n_circular == 8
     assert cfg.d_dec == 64
     assert cfg.n_groups is None
     assert cfg.n_studies is None
 
 
 def test_model_config_derived_d_z():
-    cfg = ModelConfig(d_gauss=32, n_vMF=8)
-    # Each vMF dim → (cos θ, sin θ) pair → 2 components
+    cfg = ModelConfig(d_gauss=32, n_circular=8)
+    # Each circular dim → (cos θ, sin θ) pair → 2 components
     assert cfg.d_z == 32 + 2 * 8   # 48
 
 
@@ -63,8 +63,8 @@ def test_model_config_derived_d_gene_rep():
     assert cfg.d_gene_rep == 32
 
 
-def test_model_config_d_z_with_different_n_vmf():
-    cfg = ModelConfig(d_gauss=16, n_vMF=4)
+def test_model_config_d_z_with_different_n_circular():
+    cfg = ModelConfig(d_gauss=16, n_circular=4)
     assert cfg.d_z == 16 + 2 * 4   # 24  (not 16 + 4 = 20)
 
 
@@ -445,3 +445,32 @@ def test_every_experiment_yaml_in_the_repo_loads():
     assert configs
     for path in configs:
         load_experiment(path, root=str(root))
+
+
+# The retired spellings are built by concatenation so a repo-wide rename
+# cannot rewrite the test into asserting nothing.
+OLD_N = "n_" + "vMF"
+OLD_W = "w_kl_" + "vmf"
+
+
+def test_retired_names_still_load():
+    """The circular branch's config keys were renamed in September 2026; old
+    snapshots and YAMLs written against the old names must land on the new
+    fields."""
+    from endo_model.configs.model_config import LossConfig
+
+    assert ModelConfig.from_dict({OLD_N: 3}).n_circular == 3
+    assert ModelConfig.from_dict({"n_circular": 2, OLD_N: 3}).n_circular == 2
+    assert LossConfig.from_dict({OLD_W: 0.3}).w_kl_circ == 0.3
+
+
+def test_retired_override_names_are_translated(tmp_path):
+    (tmp_path / "m.yaml").write_text("d_gauss: 8\n")
+    (tmp_path / "t.yaml").write_text("max_epochs: 1\n")
+    (tmp_path / "d.yaml").write_text("vocabulary_path: v.json\n")
+    (tmp_path / "e.yaml").write_text(
+        "name: x\nmodel: m.yaml\ntraining: t.yaml\ndata: d.yaml\n"
+        f"overrides:\n  model.{OLD_N}: 3\n  model.loss.{OLD_W}: 0.2\n"
+    )
+    _, model_cfg, _, _ = load_experiment("e.yaml", root=str(tmp_path))
+    assert model_cfg.n_circular == 3 and model_cfg.loss.w_kl_circ == 0.2

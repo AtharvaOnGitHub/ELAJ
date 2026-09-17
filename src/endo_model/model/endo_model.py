@@ -15,7 +15,7 @@ Forward pass (one call):
 
 model_output keys:
     mu_hat, theta, mu_gauss, logvar, z_gauss, mu_angle, kappa,
-    z_vmf, z, z_proj, measured_global_idxs
+    z_circ, z, z_proj, measured_global_idxs
 """
 
 import torch
@@ -48,7 +48,7 @@ class EndoFoundationModel(nn.Module):
 
     Args:
         vocabulary:  GeneVocabulary instance (defines groups and indices).
-        config:      ModelConfig dataclass (d_token, d_agg, d_gauss, n_vMF, …).
+        config:      ModelConfig dataclass (d_token, d_agg, d_gauss, n_circular, …).
     """
 
     def __init__(self, vocabulary: GeneVocabulary, config: ModelConfig) -> None:
@@ -89,7 +89,7 @@ class EndoFoundationModel(nn.Module):
 
         # ── Latent space ─────────────────────────────────────────────────────
         self.latent_space = BifurcatedLatentSpace(
-            config.d_agg, config.d_gauss, config.n_vMF,
+            config.d_agg, config.d_gauss, config.n_circular,
             kappa_floor=config.kappa_floor,
             circular_parameterisation=config.circular_parameterisation,
         )

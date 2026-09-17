@@ -143,7 +143,7 @@ parent and its YAML says what and why, as the r-series did.
 **Wave 1, submitted now, no diagnosis needed:**
 
 - [x] **c_ref** r8_direction + controls. Submitted 14 September.
-- [ ] **c_wide** `d_gauss` 8 to 32, `n_vMF` unchanged. The cheapest test of the bottleneck hypothesis. If the probe says the bottleneck is the loss, this arm should recover most of the gap on its own.
+- [ ] **c_wide** `d_gauss` 8 to 32, `n_circular` unchanged. The cheapest test of the bottleneck hypothesis. If the probe says the bottleneck is the loss, this arm should recover most of the gap on its own.
 
 **Wave 2, chosen from the probe:**
 

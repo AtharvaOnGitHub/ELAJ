@@ -31,7 +31,7 @@ overrides:
 
   # A tenth of the charge on the circular branch only. The Gaussian branch is
   # untouched, so any change in the circular dimensions is attributable.
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
 
   model.dab.lambda_dab: 0.0
 

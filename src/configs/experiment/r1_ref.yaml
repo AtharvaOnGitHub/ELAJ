@@ -37,7 +37,7 @@ overrides:
 
   # ---- the variable ----
   training.optimizer.lr: 2.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.0
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

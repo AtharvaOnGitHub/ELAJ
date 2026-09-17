@@ -51,7 +51,7 @@ folds into `StreamingPearson`, and accumulates `kappa`.
 > exactly one forward per batch under `no_grad`. There is no path by which a
 > cell is counted twice.
 
-`all_kappa` is the one thing still materialised: `(N, n_vMF)` is a few tens of
+`all_kappa` is the one thing still materialised: `(N, n_circular)` is a few tens of
 MB and an exact median needs every value.
 
 Returns `nb_loss` (mean over batches), `pearson_r` (`np.nanmean` over genes),

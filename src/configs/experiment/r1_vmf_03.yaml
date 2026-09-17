@@ -39,7 +39,7 @@ overrides:
   # The other side of 0.1, which has only ever been approached from below.
   # 1.0 killed the branch and 0.1 revived it; nobody has looked in between.
   training.optimizer.lr: 1.0e-3
-  model.loss.w_kl_vmf: 0.3
+  model.loss.w_kl_circ: 0.3
   model.dab.lambda_dab: 0.0
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

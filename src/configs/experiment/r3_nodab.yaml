@@ -14,11 +14,11 @@ description: >
   Two facts about the collapse that shape every arm here:
 
   * A quiet circular dimension sits at kappa ~ 3e-4, where KL ~ kappa^2/4 and
-    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_vmf cannot rescue it -- the
+    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_circ cannot rescue it -- the
     penalty down there is already almost zero. free_bits can: clamp_min on the
     per-dimension mean makes the KL term CONSTANT below the floor, so its
     gradient is zero and reconstruction can pull the dimension back up without
-    paying. That is why free_bits appears in four of five arms and w_kl_vmf
+    paying. That is why free_bits appears in four of five arms and w_kl_circ
     barely moves.
   * The model has little reason to use the latent at all. Its best val_nb
     (0.37996) is 0.78% from a baseline that knows only the study (0.38293), so
@@ -57,11 +57,11 @@ overrides:
   # absence not explaining it OR the halved KL ceiling, and the arm no longer
   # isolates the code-and-split question it was built for. Kept because the
   # cost is small -- KL was 0.53% of r1_ref's objective (kl_gauss 5.79e-4 +
-  # kl_vmf 1.44e-3 against nb 0.3778), so halving its weight moves very little
+  # kl_circ 1.44e-3 against nb 0.3778), so halving its weight moves very little
   # either way. Set it back to 1.0 to restore the control.
   training.optimizer.lr: 2.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.w_dab: 1.0
   model.dab.lambda_dab: 0.0
 

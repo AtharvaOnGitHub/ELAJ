@@ -9,13 +9,13 @@ torch = pytest.importorskip("torch")
 from endo_model.model.objectives.adversarial import DABClassifier
 from endo_model.model.objectives.composite import CompositeLoss
 from endo_model.model.objectives.contrastive import InfoNCELoss
-from endo_model.model.objectives.kl_divergence import GaussianKLLoss, VonMisesKLLoss
+from endo_model.model.objectives.kl_divergence import GaussianKLLoss
 from endo_model.model.objectives.reconstruction import NegativeBinomialLoss
 
 B = 4
 G_MEAS = 20
 D_GAUSS = 16
-N_VMF = 4
+N_CIRC = 4
 N_STUDIES = 3
 
 
@@ -83,45 +83,22 @@ class TestGaussianKL:
         assert out.item() >= 0
 
 
-# ── VonMisesKLLoss ───────────────────────────────────────────────────────────
-
-class TestVonMisesKL:
-    def test_scalar_output(self):
-        kl = VonMisesKLLoss()
-        kappa = torch.rand(B, N_VMF) + 0.1
-        out = kl(kappa)
-        assert out.shape == ()
-
-    def test_finite(self):
-        kl = VonMisesKLLoss()
-        kappa = torch.rand(B, N_VMF) + 0.1
-        out = kl(kappa)
-        assert torch.isfinite(out)
-
-    def test_near_zero_kappa_near_zero_kl(self):
-        kl = VonMisesKLLoss()
-        # kappa → 0: i0 ≈ 1, i1 ≈ 0, A ≈ 0, KL ≈ log(1) - 0 = 0
-        kappa = torch.full((B, N_VMF), 1e-3)
-        out = kl(kappa)
-        assert abs(out.item()) < 0.1
-
-
 # ── DABClassifier ─────────────────────────────────────────────────────────────
 
 class TestDABClassifier:
-    # d_in is D_GAUSS + 2*N_VMF: each circular latent enters as a (cos, sin)
+    # d_in is D_GAUSS + 2*N_CIRC: each circular latent enters as a (cos, sin)
     # pair, not as a raw angle.
     def test_output_shape(self):
-        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES)
+        dab = DABClassifier(D_GAUSS + 2 * N_CIRC, N_STUDIES)
         mu_gauss = torch.randn(B, D_GAUSS)
-        mu_angle = torch.randn(B, N_VMF)
+        mu_angle = torch.randn(B, N_CIRC)
         out = dab(mu_gauss, mu_angle, lambda_dab=1.0)
         assert out.shape == (B, N_STUDIES)
 
     def test_gradient_reversal_in_backward(self):
-        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES)
+        dab = DABClassifier(D_GAUSS + 2 * N_CIRC, N_STUDIES)
         mu_gauss = torch.randn(B, D_GAUSS, requires_grad=True)
-        mu_angle = torch.randn(B, N_VMF, requires_grad=True)
+        mu_angle = torch.randn(B, N_CIRC, requires_grad=True)
         out = dab(mu_gauss, mu_angle, lambda_dab=1.0)
         out.sum().backward()
         # With reversal, gradient at mu_gauss is negated
@@ -134,9 +111,9 @@ class TestDABClassifier:
         to nn.Linear made -pi and +pi the two most distant points in the range
         while they name the same place on the circle.
         """
-        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES).eval()
+        dab = DABClassifier(D_GAUSS + 2 * N_CIRC, N_STUDIES).eval()
         mu_gauss = torch.randn(B, D_GAUSS)
-        mu_angle = torch.rand(B, N_VMF) * 2 * math.pi - math.pi
+        mu_angle = torch.rand(B, N_CIRC) * 2 * math.pi - math.pi
 
         out = dab(mu_gauss, mu_angle, lambda_dab=0.0)
         wrapped = dab(mu_gauss, mu_angle + 2 * math.pi, lambda_dab=0.0)
@@ -144,9 +121,9 @@ class TestDABClassifier:
 
     def test_gradient_reaches_the_angle_head(self):
         """d/dtheta of cos and sin is not identically zero at generic angles."""
-        dab = DABClassifier(D_GAUSS + 2 * N_VMF, N_STUDIES)
+        dab = DABClassifier(D_GAUSS + 2 * N_CIRC, N_STUDIES)
         mu_gauss = torch.randn(B, D_GAUSS)
-        mu_angle = torch.randn(B, N_VMF, requires_grad=True)
+        mu_angle = torch.randn(B, N_CIRC, requires_grad=True)
         dab(mu_gauss, mu_angle, lambda_dab=1.0).sum().backward()
         assert mu_angle.grad is not None
         assert torch.isfinite(mu_angle.grad).all()
@@ -189,8 +166,8 @@ def _make_model_output(measured_idxs):
         "theta": torch.ones(len(measured_idxs)),
         "mu_gauss": torch.randn(B, D_GAUSS),
         "logvar": torch.zeros(B, D_GAUSS),
-        "mu_angle": torch.randn(B, N_VMF),
-        "kappa": torch.rand(B, N_VMF) + 0.1,
+        "mu_angle": torch.randn(B, N_CIRC),
+        "kappa": torch.rand(B, N_CIRC) + 0.1,
         "measured_global_idxs": measured_idxs,
     }
 
@@ -206,7 +183,7 @@ def _make_fake_batch(vocab_size=50):
 
 class TestCompositeLoss:
     def test_output_keys(self):
-        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0)
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0)
         idxs = torch.arange(G_MEAS)
         out = comp(
             _make_model_output(idxs),
@@ -220,14 +197,14 @@ class TestCompositeLoss:
         # mu_gauss_norm is reported, not optimised. Trainer._record copies every
         # key here into metrics.csv, which is the only reason a diagnostic can
         # ride along in this dict at all.
-        expected = {"elbo", "nb", "kl_gauss", "kl_vmf", "beta_kl",
+        expected = {"elbo", "nb", "kl_gauss", "kl_circ", "beta_kl",
                     "dab", "cce", "mu_gauss_norm", "total"}
         assert expected == set(out.keys())
 
     def test_mu_gauss_norm_is_reported_but_carries_no_gradient(self):
         """It rides in the loss dict to reach metrics.csv. If it kept a graph,
         that graph would be held for the whole epoch by the metric logger."""
-        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0)
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0)
         out = comp(
             _make_model_output(torch.arange(G_MEAS)),
             _make_fake_batch(),
@@ -245,7 +222,7 @@ class TestCompositeLoss:
         the second drowns the first — in r1_ref val_dab's epoch-to-epoch range
         was fourteen times val_nb's, so the total curve was the dab curve.
         """
-        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0, w_dab=0.7)
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_dab=0.7)
         out = comp(
             _make_model_output(torch.arange(G_MEAS)),
             _make_fake_batch(),
@@ -269,7 +246,7 @@ class TestCompositeLoss:
         elbos, totals = [], []
         for w_dab in (0.0, 50.0):
             torch.manual_seed(0)
-            comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0, w_dab=w_dab)
+            comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_dab=w_dab)
             out = comp(output, batch, current_step=0, total_steps=100)
             elbos.append(float(out["elbo"]))
             totals.append(float(out["total"]))
@@ -278,7 +255,7 @@ class TestCompositeLoss:
         assert totals[1] > totals[0] + 1.0
 
     def test_total_is_scalar_finite(self):
-        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0)
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0)
         idxs = torch.arange(G_MEAS)
         out = comp(
             _make_model_output(idxs),
@@ -289,7 +266,7 @@ class TestCompositeLoss:
         assert torch.isfinite(out["total"])
 
     def test_backward_through_total(self):
-        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_VMF, w_cce=0.0)
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0)
         idxs = torch.arange(G_MEAS)
         batch = _make_fake_batch()
         mo = _make_model_output(idxs)
@@ -334,7 +311,7 @@ class TestKLIsOnThePerGeneScale:
 
     def test_circular_kl_sums_over_dimensions(self):
         """PowerSphericalKLLoss, not VonMisesKLLoss — the former is what
-        CompositeLoss binds to `vmf_kl`, and testing the other one is how the
+        CompositeLoss binds to `circ_kl`, and testing the other one is how the
         sum/mean fix missed it the first time."""
         from endo_model.model.objectives.kl_divergence import PowerSphericalKLLoss
 
@@ -348,14 +325,14 @@ def test_composite_uses_the_power_spherical_kl():
     """Pins which class the circular penalty actually comes from.
 
     VonMisesKLLoss and PowerSphericalKLLoss are different distributions with
-    similar names, and the attribute they can be bound to is called `vmf_kl`.
+    similar names, and the attribute they can be bound to is called `circ_kl`.
     A change applied to the wrong one looks correct in review and does nothing
     at runtime.
     """
     from endo_model.model.objectives.kl_divergence import PowerSphericalKLLoss
 
-    loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2)
-    assert isinstance(loss.vmf_kl, PowerSphericalKLLoss)
+    loss = CompositeLoss(n_studies=3, d_gauss=4, n_circular=2)
+    assert isinstance(loss.circ_kl, PowerSphericalKLLoss)
 
 
 # ── Free bits and the newly-wired weights ────────────────────────────────────
@@ -405,17 +382,17 @@ class TestWiredWeights:
     """beta_max and the per-term weights were unreachable from YAML until now."""
 
     def test_beta_max_scales_the_kl_terms(self):
-        half = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, beta_max=0.5)
-        full = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, beta_max=1.0)
+        half = CompositeLoss(n_studies=3, d_gauss=4, n_circular=2, beta_max=0.5)
+        full = CompositeLoss(n_studies=3, d_gauss=4, n_circular=2, beta_max=1.0)
         assert half.beta_max == 0.5 and full.beta_max == 1.0
 
     def test_warmup_fraction_is_read_not_hardcoded(self):
-        loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, warmup_fraction=0.5)
+        loss = CompositeLoss(n_studies=3, d_gauss=4, n_circular=2, warmup_fraction=0.5)
         assert loss.warmup_fraction == 0.5
 
     def test_w_kl_vmf_is_independent_of_w_kl_gauss(self):
         """s1_circ_low lowers one and not the other; if they were tied the run
         would answer a different question from the one it was built for."""
-        loss = CompositeLoss(n_studies=3, d_gauss=4, n_vMF=2, w_kl_vmf=0.1)
-        assert loss.w_kl_vmf == 0.1
+        loss = CompositeLoss(n_studies=3, d_gauss=4, n_circular=2, w_kl_circ=0.1)
+        assert loss.w_kl_circ == 0.1
         assert loss.w_kl_gauss == 1.0

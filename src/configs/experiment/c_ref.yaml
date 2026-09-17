@@ -49,7 +49,7 @@ overrides:
   # ---- everything below is r8_direction, unchanged ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
@@ -59,7 +59,7 @@ overrides:
   model.cce.block_normalise: false
 
   model.d_gauss: 8
-  model.n_vMF: 4
+  model.n_circular: 4
   model.d_platform: 16
 
   model.group_encoder.grad_checkpointing: true

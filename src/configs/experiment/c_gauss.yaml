@@ -13,12 +13,12 @@ description: >
   models hold the same 16 numbers per cell and differ only in whether four
   of them are circles.
 
-  WHAT CHANGES. n_vMF 4 to 0; d_gauss 8 to 16. The combined latent stays 16
+  WHAT CHANGES. n_circular 4 to 0; d_gauss 8 to 16. The combined latent stays 16
   wide, so PCA-16 and scVI-16 remain the width-matched baselines and the
-  c_ref row is comparable number for number. With n_vMF at 0 the branch
-  returns width-zero tensors: kl_vmf is zero, CCE and DAB read the Gaussian
+  c_ref row is comparable number for number. With n_circular at 0 the branch
+  returns width-zero tensors: kl_circ is zero, CCE and DAB read the Gaussian
   embedding alone, and the circular figures are not drawn. kappa_floor,
-  circular_parameterisation and w_kl_vmf are kept in the overrides so this
+  circular_parameterisation and w_kl_circ are kept in the overrides so this
   file diffs against c_ref by two lines; they act on nothing.
 
   WHAT THIS IS NOT. Not a test of the bottleneck (that is c_wide, stopped)
@@ -51,7 +51,7 @@ overrides:
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
@@ -62,7 +62,7 @@ overrides:
 
   # The two lines this arm exists for.
   model.d_gauss: 16
-  model.n_vMF: 0
+  model.n_circular: 0
   model.d_platform: 16
 
   model.group_encoder.grad_checkpointing: true

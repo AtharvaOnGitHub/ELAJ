@@ -26,7 +26,7 @@ overrides:
   training.early_stop_warmup_epochs: 3
 
   # Left at its default 1.0 — this is the variable being held fixed.
-  model.loss.w_kl_vmf: 1.0
+  model.loss.w_kl_circ: 1.0
   model.dab.lambda_dab: 0.0
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

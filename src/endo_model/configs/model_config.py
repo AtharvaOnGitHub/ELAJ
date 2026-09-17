@@ -102,7 +102,7 @@ class LossConfig:
 
     w_nb: float = 1.0
     w_kl_gauss: float = 1.0
-    w_kl_vmf: float = 1.0
+    w_kl_circ: float = 1.0
     w_dab: float = 1.0
     free_bits: float = 0.0
 
@@ -111,7 +111,7 @@ class LossConfig:
         return cls(
             w_nb=float(d.get("w_nb", 1.0)),
             w_kl_gauss=float(d.get("w_kl_gauss", 1.0)),
-            w_kl_vmf=float(d.get("w_kl_vmf", 1.0)),
+            w_kl_circ=float(d.get("w_kl_circ", d.get("w_kl_vmf", 1.0))),
             w_dab=float(d.get("w_dab", 1.0)),
             free_bits=float(d.get("free_bits", 0.0)),
         )
@@ -145,8 +145,8 @@ class ModelConfig:
     d_gauss: int = 32          # Gaussian latent dimensions
     # Number of circular latent dimensions. 0 is a Gaussian-only model: the
     # branch returns width-zero tensors, its KL and the circular figures are
-    # empty, and d_z is d_gauss. See VonMisesBranch.forward.
-    n_vMF: int = 8
+    # empty, and d_z is d_gauss. See CircularBranch.forward.
+    n_circular: int = 8
     d_dec: int = 64            # decoder internal dimension
     # Width of the technical-covariate embedding handed to the decoder.
     # 0 disables it, which is what every run before wave R5 did.
@@ -154,14 +154,14 @@ class ModelConfig:
     # Smallest concentration a circular latent dimension may take. Zero is an
     # absorbing state for this branch -- KL against the uniform prior depends
     # only on kappa, and near zero its gradient vanishes quadratically -- so a
-    # dimension that drifts down cannot climb back. See VonMisesBranch.
+    # dimension that drifts down cannot climb back. See CircularBranch.
     # 1e-4 is the pre-R7 value and sits inside that flat region.
     kappa_floor: float = 1e-4
     # How the circular posterior's mean is produced. "angle" predicts one
     # unbounded number per dimension and takes (cos, sin) of it -- what every
     # run up to R7 did, and what wraps. "direction" predicts two numbers and
     # normalises them, so the head's magnitude is discarded instead of
-    # aliasing. See VonMisesBranch._mean_angle. Default preserves pre-R8 runs.
+    # aliasing. See CircularBranch._mean_angle. Default preserves pre-R8 runs.
     circular_parameterisation: str = "angle"
     # Tissue hierarchy embedding concatenated onto z_proj at the decoder, so
     # the latent is not obliged to encode anatomy.  Small on purpose: it
@@ -193,15 +193,15 @@ class ModelConfig:
     def d_z(self) -> int:
         """Total latent dimension.
 
-        Each vMF circular dim is encoded as (cos θ, sin θ) — two Cartesian
+        Each circular dim is encoded as (cos θ, sin θ) — two Cartesian
         coordinates per circular dim.  This preserves circular geometry for
         downstream Euclidean operations: angles 0.01 and 6.27 are adjacent on
         the circle and map to nearly identical 2D unit-circle vectors, whereas
         as raw scalars they are 6.26 apart.
 
-        Default: d_gauss + 2 * n_vMF = 32 + 16 = 48.
+        Default: d_gauss + 2 * n_circular = 32 + 16 = 48.
         """
-        return self.d_gauss + 2 * self.n_vMF
+        return self.d_gauss + 2 * self.n_circular
 
     @property
     def d_gene_rep(self) -> int:
@@ -222,7 +222,9 @@ class ModelConfig:
             d_token=d.get("d_token", 32),
             d_agg=d.get("d_agg", 64),
             d_gauss=d.get("d_gauss", 32),
-            n_vMF=d.get("n_vMF", 8),
+            # `n_vMF` was this field's name until September 2026; run_config.json
+            # snapshots and any YAML outside the repo still carry it.
+            n_circular=d.get("n_circular", d.get("n_vMF", 8)),
             d_dec=d.get("d_dec", 64),
             d_platform=int(d.get("d_platform", 0)),
             kappa_floor=float(d.get("kappa_floor", 1e-4)),

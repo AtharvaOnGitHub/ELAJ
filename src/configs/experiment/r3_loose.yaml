@@ -14,11 +14,11 @@ description: >
   Two facts about the collapse that shape every arm here:
 
   * A quiet circular dimension sits at kappa ~ 3e-4, where KL ~ kappa^2/4 and
-    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_vmf cannot rescue it -- the
+    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_circ cannot rescue it -- the
     penalty down there is already almost zero. free_bits can: clamp_min on the
     per-dimension mean makes the KL term CONSTANT below the floor, so its
     gradient is zero and reconstruction can pull the dimension back up without
-    paying. That is why free_bits appears in four of five arms and w_kl_vmf
+    paying. That is why free_bits appears in four of five arms and w_kl_circ
     barely moves.
   * The model has little reason to use the latent at all. Its best val_nb
     (0.37996) is 0.78% from a baseline that knows only the study (0.38293), so
@@ -42,7 +42,7 @@ overrides:
   training.early_stop_patience: 7
   training.early_stop_warmup_epochs: 4
 
-  # beta_max 0.1 and w_kl_vmf 0.05 make the latent almost free to use, and
+  # beta_max 0.1 and w_kl_circ 0.05 make the latent almost free to use, and
   # free_bits 1.0 removes the floor gradient entirely for any dimension below a
   # nat. This is not a configuration to ship -- a VAE this weakly regularised
   # has a latent that generalises poorly -- and that is the point.
@@ -59,7 +59,7 @@ overrides:
   training.kl_annealing.beta_max: 0.1
   training.kl_annealing.warmup_fraction: 0.10
   model.loss.w_kl_gauss: 0.5
-  model.loss.w_kl_vmf: 0.05
+  model.loss.w_kl_circ: 0.05
   model.loss.free_bits: 1.0
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 1.0e-4

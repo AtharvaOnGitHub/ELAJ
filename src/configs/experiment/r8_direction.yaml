@@ -8,7 +8,7 @@ description: >
   WHAT R7 SETTLED AND WHAT IT DID NOT. The kappa floor stopped the collapse:
   0 of 4 dimensions collapsed in both arms, against 3 of 4 in every earlier CCE
   run. But it did not produce usage. Median kappa came out at 0.51-0.57 against
-  a floor of 0.50, with the mass piled against the wall, and val_kl_vmf was
+  a floor of 0.50, with the mass piled against the wall, and val_kl_circ was
   6.7e-5 -- below r5_cce's 7.6e-5 and fourteen times below r5_lambda_low's
   9.6e-4. The floor removed the absorbing state without giving the branch a
   job. Note also that "0 of 4 collapsed" is now unreachable by construction:
@@ -78,7 +78,7 @@ overrides:
   # ---- shared base, unchanged since wave R4 ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
@@ -95,7 +95,7 @@ overrides:
 
   # ---- the tiny latent ----
   model.d_gauss: 8
-  model.n_vMF: 4
+  model.n_circular: 4
   model.d_platform: 16
 
   # The two lines that make batch 256 reachable and the circular branch

@@ -24,7 +24,7 @@ metrics = evaluator.evaluate()
 from endo_model.evaluation.latent_analysis import collect_embeddings, kappa_histogram
 
 embeddings, study_ids = collect_embeddings(model, test_loader, key="mu_gauss")
-kappa = kappa_histogram(model, test_loader)  # (N, n_vMF)
+kappa = kappa_histogram(model, test_loader)  # (N, n_circular)
 
 # ── scib batch-correction and bio-conservation metrics ────────────────────
 from endo_model.evaluation.scib_metrics import compute_scib_metrics

@@ -112,11 +112,11 @@ worse for study mixing.
 
 ```
 d_token 32   d_agg 64   d_dec 64   d_tissue 16   d_platform 16
-d_gauss 8    n_vMF 4    kappa_floor 1.0    circular_parameterisation direction
+d_gauss 8    n_circular 4    kappa_floor 1.0    circular_parameterisation direction
 group_encoder: 2 layers, 4 heads, dropout 0.1, 4 buckets, grad checkpointing
 aggregation_encoder: 2 layers, 4 heads, dropout 0.1
 lr 1e-3   batch 256   bf16   AdamW   CosineAnnealingLR(T_max=20)
-beta_max 0.5   w_kl_vmf 0.1   free_bits 0.25
+beta_max 0.5   w_kl_circ 0.1   free_bits 0.25
 lambda_dab 0.02   lambda_cce 0.025   block_normalise false
 ```
 
@@ -147,7 +147,7 @@ Every run void or partial. Causes, with attribution confidence:
 
 ### Waves s0, s1, r1 — tuning
 
-Established: LR wants to be high; `w_kl_vmf = 0.1` keeps the circular branch
+Established: LR wants to be high; `w_kl_circ = 0.1` keeps the circular branch
 alive; **the seed noise floor is ~4%** — nothing smaller is a result.
 
 `r1_ref` was the best measurement of that era: **+8.4%** on all measured genes,
@@ -188,7 +188,7 @@ angle appears nowhere in it. Predicting a **direction** — two numbers divided 
 their own length — discards the magnitude rather than wrapping it. This is what
 the reference hyperspherical-VAE implementation does.
 
-**Result:** median κ rose from 0.51–0.57 (on a 0.50 floor) to 47–62, `val_kl_vmf`
+**Result:** median κ rose from 0.51–0.57 (on a 0.50 floor) to 47–62, `val_kl_circ`
 rose monotonically, and `marecko_2024` fell from 74.3% to 21.8% excess.
 
 ---

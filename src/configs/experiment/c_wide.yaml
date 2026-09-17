@@ -12,7 +12,7 @@ description: >
   scores like c_ref and the stage probe (outputs/probes/r8_stages) says
   where else to look.
 
-  WHAT CHANGES. d_gauss 8 to 32. n_vMF stays at 4, so the combined latent
+  WHAT CHANGES. d_gauss 8 to 32. n_circular stays at 4, so the combined latent
   is 40 wide. The KL terms are divided by the measured gene count and
   summed over dimensions, so four times the dimensions means four times the
   Gaussian KL at the same beta; free bits per dimension are unchanged, so
@@ -55,7 +55,7 @@ overrides:
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
@@ -66,7 +66,7 @@ overrides:
 
   # The change this arm exists for.
   model.d_gauss: 32
-  model.n_vMF: 4
+  model.n_circular: 4
   model.d_platform: 16
 
   model.group_encoder.grad_checkpointing: true

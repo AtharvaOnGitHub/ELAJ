@@ -156,7 +156,7 @@ class PowerSpherical:
         # whenever loc is near e1 — a real, non-negligible case for a directional
         # prior. float32 rounding there can drift the result off the unit sphere
         # by ~1e-3; renormalize so downstream code can rely on exact unit norm
-        # (z_vmf's components are used directly as cos θ, sin θ).
+        # (z_circ's components are used directly as cos θ, sin θ).
         return x / x.norm(dim=-1, keepdim=True).clamp_min(1e-12)
 
     def _reflect_e1_to_loc(self, y: Tensor, loc: Tensor) -> Tensor:

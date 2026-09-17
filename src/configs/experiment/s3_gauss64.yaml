@@ -3,7 +3,7 @@ description: >
   d_gauss 32 -> 64. Twice the Gaussian latent width.
 
   Stage 3 hyperparameter sweep. Every arm sits on the s1_circ_low base — lr
-  2e-3, w_kl_vmf 0.1, no adversary — which is the best configuration measured so
+  2e-3, w_kl_circ 0.1, no adversary — which is the best configuration measured so
   far (val_nb 0.3605, 6 of 8 circular dimensions alive). Each arm moves ONE
   thing off that base, listed under "the variable".
 
@@ -29,7 +29,7 @@ overrides:
 
   # ---- the base (held fixed across the sweep) ----
   training.optimizer.lr: 2.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.0
 
   # ---- the variable ----

@@ -12,7 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from endo_model.model.encoders.batched.encoder import BatchedGroupEncoder
-from endo_model.model.latent.vonmises_vae import VonMisesBranch
+from endo_model.model.latent.circular_vae import CircularBranch
 
 GROUPS = ["g0", "g1", "g2"]
 SIZES = {"g0": 6, "g1": 9, "g2": 9}      # uneven, so the padding mask is live
@@ -79,7 +79,7 @@ def test_checkpointing_defaults_off():
 def test_kappa_never_falls_below_the_floor():
     """The point of the floor: kappa cannot reach the flat region where
     dKL/dkappa ~ kappa/2 vanishes and a dimension can no longer climb back."""
-    branch = VonMisesBranch(d_agg=16, n_vMF=4, kappa_floor=0.5)
+    branch = CircularBranch(d_agg=16, n_circular=4, kappa_floor=0.5)
     torch.manual_seed(0)
     # Drive the head hard negative — softplus underflows to ~0, so whatever
     # survives is the floor and nothing else.
@@ -97,7 +97,7 @@ def test_kappa_never_falls_below_the_floor():
 def test_the_floor_is_a_floor_not_a_clamp_on_large_values():
     """It must not cap concentration — a dimension carrying real signal needs
     to be able to run to high kappa."""
-    branch = VonMisesBranch(d_agg=16, n_vMF=4, kappa_floor=0.5)
+    branch = CircularBranch(d_agg=16, n_circular=4, kappa_floor=0.5)
     with torch.no_grad():
         branch.kappa_head.weight.fill_(0.0)
         branch.kappa_head.bias.fill_(10.0)
@@ -108,13 +108,13 @@ def test_the_floor_is_a_floor_not_a_clamp_on_large_values():
 def test_default_floor_is_the_pre_r7_value():
     """1e-4, so every earlier config still trains the model it names — the R7
     configs set 0.5 explicitly."""
-    assert VonMisesBranch(d_agg=16, n_vMF=4).kappa_floor == pytest.approx(1e-4)
+    assert CircularBranch(d_agg=16, n_circular=4).kappa_floor == pytest.approx(1e-4)
 
 
 def test_kappa_stays_differentiable_through_the_floor():
     """Adding a constant must not detach the head; a floor that stopped the
     gradient would freeze concentration rather than protect it."""
-    branch = VonMisesBranch(d_agg=16, n_vMF=4, kappa_floor=0.5)
+    branch = CircularBranch(d_agg=16, n_circular=4, kappa_floor=0.5)
     _, kappa, _ = branch(torch.randn(8, 16))
     kappa.sum().backward()
     assert branch.kappa_head.weight.grad is not None
@@ -134,27 +134,27 @@ class TestCircularParameterisation:
     magnitude instead of wrapping it.
     """
 
-    D_AGG, N_VMF, B = 16, 4, 32
+    D_AGG, N_CIRC, B = 16, 4, 32
 
     def branch(self, parameterisation: str):
         torch.manual_seed(24)
-        return VonMisesBranch(
-            d_agg=self.D_AGG, n_vMF=self.N_VMF, kappa_floor=1.0,
+        return CircularBranch(
+            d_agg=self.D_AGG, n_circular=self.N_CIRC, kappa_floor=1.0,
             parameterisation=parameterisation,
         )
 
     def test_head_width_doubles_for_direction(self):
-        assert self.branch("angle").mu_head.out_features == self.N_VMF
-        assert self.branch("direction").mu_head.out_features == 2 * self.N_VMF
+        assert self.branch("angle").mu_head.out_features == self.N_CIRC
+        assert self.branch("direction").mu_head.out_features == 2 * self.N_CIRC
 
     def test_latent_shapes_are_unchanged_either_way(self):
         """The latent is still two numbers per circular dimension, so nothing
         downstream — DAB, CCE, the decoder — sees a different shape."""
         for p in ("angle", "direction"):
             mu_angle, kappa, z = self.branch(p)(torch.randn(self.B, self.D_AGG))
-            assert mu_angle.shape == (self.B, self.N_VMF)
-            assert kappa.shape == (self.B, self.N_VMF)
-            assert z.shape == (self.B, 2 * self.N_VMF)
+            assert mu_angle.shape == (self.B, self.N_CIRC)
+            assert kappa.shape == (self.B, self.N_CIRC)
+            assert z.shape == (self.B, 2 * self.N_CIRC)
 
     def test_direction_angles_are_bounded_to_one_turn(self):
         """atan2 returns [-pi, pi], so wrapping is impossible by construction.
@@ -204,9 +204,9 @@ class TestCircularParameterisation:
         """A typo in a config must fail loudly, not silently train the old
         model under a new name."""
         with pytest.raises(ValueError, match="angle.*direction|direction.*angle"):
-            VonMisesBranch(d_agg=self.D_AGG, n_vMF=self.N_VMF,
+            CircularBranch(d_agg=self.D_AGG, n_circular=self.N_CIRC,
                            parameterisation="directional")
 
     def test_default_is_the_pre_r8_head(self):
-        assert VonMisesBranch(d_agg=self.D_AGG, n_vMF=self.N_VMF).parameterisation \
+        assert CircularBranch(d_agg=self.D_AGG, n_circular=self.N_CIRC).parameterisation \
             == "angle"

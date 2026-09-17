@@ -43,7 +43,7 @@ overrides:
   # step. 2e-3 won partly by compensating for that. With each group on its own
   # budget the optimum should move DOWN, and this is the first step down.
   training.optimizer.lr: 1.0e-3
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.dab.lambda_dab: 0.0
 
   # Pinned to 0 so this config still reproduces the run it names. ELAJ_small

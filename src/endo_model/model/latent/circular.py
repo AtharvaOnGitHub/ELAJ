@@ -1,7 +1,7 @@
 """Turning circular latent angles into the coordinates a linear layer can read.
 
 A circular latent dimension is an angle θ. The encoder's `mu_head` is an
-unbounded linear layer, so the θ it emits is a real number, and `VonMisesBranch`
+unbounded linear layer, so the θ it emits is a real number, and `CircularBranch`
 hands that number out as `mu_angle` alongside the (cos θ, sin θ) pair it gives
 the decoder.
 
@@ -26,8 +26,8 @@ so α and β that differ by 2π land on the same point and contribute distance 0
 It costs one extra dimension per circular latent and removes the artefact
 entirely.
 
-This is what `VonMisesBranch` already does before sampling and before the
-decoder — see `vonmises_vae.py`. This module exists so that every other consumer
+This is what `CircularBranch` already does before sampling and before the
+decoder — see `circular_vae.py`. This module exists so that every other consumer
 does the same thing, from the same code.
 """
 
@@ -46,7 +46,7 @@ def angles_to_cartesian(angles: Tensor) -> Tensor:
 
     Returns:
         (..., 2n) with all n cosines first and all n sines after, matching the
-        layout `VonMisesBranch.forward` uses for `z_vmf` so that a reader
+        layout `CircularBranch.forward` uses for `z_circ` so that a reader
         comparing the two is not comparing two different conventions.
     """
     return torch.cat([torch.cos(angles), torch.sin(angles)], dim=-1)

@@ -325,7 +325,7 @@ def circular_coordinates(mu_angle: np.ndarray) -> np.ndarray:
     of the angle between them, so Euclidean nearest-neighbours on these
     coordinates ARE angular nearest-neighbours.
 
-    Returns (n, 2 * n_vMF). Layout does not matter -- Euclidean distance is
+    Returns (n, 2 * n_circular). Layout does not matter -- Euclidean distance is
     invariant to permuting columns.
     """
     a = np.asarray(mu_angle, dtype=float)

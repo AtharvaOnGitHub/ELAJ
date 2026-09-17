@@ -81,14 +81,14 @@ class Evaluator:
                 pred=out["mu_hat"].cpu().numpy(),
             )
 
-            # (N, n_vMF) is small — a few tens of MB — and an exact median
+            # (N, n_circular) is small — a few tens of MB — and an exact median
             # needs every value, so this one stays materialised.
             all_kappa.append(out["kappa"].cpu().numpy())
 
         if pearson is None:
             raise ValueError("Evaluation loader yielded no batches.")
 
-        kappa = np.concatenate(all_kappa, axis=0)  # (N, n_vMF)
+        kappa = np.concatenate(all_kappa, axis=0)  # (N, n_circular)
         pearson_r = pearson.result()               # (vocab_size,)
 
         return {

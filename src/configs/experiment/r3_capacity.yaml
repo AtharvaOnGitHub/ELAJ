@@ -14,11 +14,11 @@ description: >
   Two facts about the collapse that shape every arm here:
 
   * A quiet circular dimension sits at kappa ~ 3e-4, where KL ~ kappa^2/4 and
-    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_vmf cannot rescue it -- the
+    the slope is kappa/2 ~ 1.5e-4. Lowering w_kl_circ cannot rescue it -- the
     penalty down there is already almost zero. free_bits can: clamp_min on the
     per-dimension mean makes the KL term CONSTANT below the floor, so its
     gradient is zero and reconstruction can pull the dimension back up without
-    paying. That is why free_bits appears in four of five arms and w_kl_vmf
+    paying. That is why free_bits appears in four of five arms and w_kl_circ
     barely moves.
   * The model has little reason to use the latent at all. Its best val_nb
     (0.37996) is 0.78% from a baseline that knows only the study (0.38293), so
@@ -47,7 +47,7 @@ overrides:
   #   d_dec      64 -> 128   the width where genes and the latent meet, so the
   #                          decoder can express more per latent direction
   #   d_gauss    32 -> 48    more Gaussian dimensions
-  #   n_vMF       8 -> 12    more circular ones
+  #   n_circular       8 -> 12    more circular ones
   #   w_nb      1.0 -> 2.0   reconstruction worth twice as much against every
   #                          other term, which is the same as halving all of
   #                          them but states the intent
@@ -60,14 +60,14 @@ overrides:
   # measurement, far below the 0.1 that emptied the latent.
   #
   # Note the parameter count rises here, so a better val_nb is not by itself
-  # evidence that capacity was the constraint -- compare kl_vmf and kl_gauss
+  # evidence that capacity was the constraint -- compare kl_circ and kl_gauss
   # against r3_free before concluding anything.
   training.optimizer.lr: 5.0e-4
   model.d_dec: 128
   model.d_gauss: 48
-  model.n_vMF: 12
+  model.n_circular: 12
   model.loss.w_nb: 2.0
-  model.loss.w_kl_vmf: 0.1
+  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 0.02

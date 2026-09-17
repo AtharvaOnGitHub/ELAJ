@@ -1,0 +1,59 @@
+name: c_nocce
+description: >
+  c_ref without CCE. The second reference of the c_ series.
+
+  WHAT CHANGES. model.cce.enabled false. The trainer runs one encoder pass
+  per step instead of two, so the epoch is about a third shorter, and the
+  InfoNCE term (weight 0.025 in c_ref) is gone. lambda_cce and
+  block_normalise are kept in the overrides so this file diffs against
+  c_ref by one line; with CCE off they act on nothing.
+
+  WHY A SECOND REFERENCE. Waves R5 to R8 kept CCE because it was thought to
+  help the circular branch, and findings E1 says it collapsed the branch
+  at every weight tried. Its effect on the numbers the paper is judged by
+  (cross-donor family and phase) was never measured on its own. c_ref
+  (every step) and this arm (none) bracket the arms that follow, which run
+  CCE every fourth step; if the two references agree, the cadence is
+  immaterial and CCE is a Discussion sentence. If c_nocce is better, CCE
+  comes out of every arm after it.
+
+  EPOCH BUDGET. About two thirds of c_ref's: roughly 4,600 s/epoch, T_max
+  22 in about 28 h.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_c.yaml
+
+output_dir: outputs/c_nocce/
+seed: 24
+
+overrides:
+  # The change this arm exists for.
+
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  # ---- r8_direction's operating point, unchanged ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_circ: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: false
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.d_platform: 16
+
+  model.group_encoder.grad_checkpointing: true
+  model.kappa_floor: 1.0
+  model.circular_parameterisation: direction

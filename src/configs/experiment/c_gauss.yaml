@@ -28,9 +28,13 @@ description: >
   c_ref on every headline number, the circular branch is a Discussion
   paragraph, not a Results section.
 
-  EPOCH BUDGET. As c_ref: T_max 22 on about 1.2 M training cells, CCE every
-  fourth step. Check the first epoch time; above 7,800 s the run will not
-  anneal before the wall.
+  CCE CADENCE. model.cce.every 4: the second encoder pass on every fourth
+  step, about a third off the epoch. c_ref (every step) and c_nocce (none)
+  are the two references this arm is read against.
+
+  EPOCH BUDGET. About 1.2 M training cells at roughly 5,300 s/epoch; T_max
+  22 in about 32 h. Check the first epoch time; above 7,800 s the run will
+  not anneal before the wall.
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml

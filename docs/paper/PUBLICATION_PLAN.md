@@ -125,12 +125,12 @@ the probe is read, because the reference arm is needed either way.
 ## 4. Phase B: the training campaign (weeks 1 to 3)
 
 The `c_` series: control-included runs on `configs/data/corpus_c.yaml`
-(the r-series' twelve studies, controls in). `c_ref` is r8_direction on that
-corpus with CCE's second encoder pass every fourth step (about a third off
-the epoch for a term weighted 0.025; T_max 22, one 48 h job). Every later
-arm is compared against it. The first c_ref attempt, at every-step CCE, was
-stopped at epoch 9 on 18 September so the reference and the arms share the
-cadence.
+(the r-series' twelve studies, controls in). Two references: `c_ref` is
+r8_direction on that corpus, CCE on every step as r8 had it; `c_nocce` is the
+same without CCE. Every arm after them runs CCE's second pass every fourth
+step (`model.cce.every: 4`, about a third off the epoch for a term weighted
+0.025) and is read against both, so the cadence cannot be mistaken for the
+arm's own change.
 
 ### 4.1 Compute
 
@@ -146,7 +146,8 @@ parent and its YAML says what and why, as the r-series did.
 
 **Wave 1, submitted now, no diagnosis needed:**
 
-- [ ] **c_ref** r8_direction on corpus_c, CCE every 4. Restarted 18 September.
+- [ ] **c_ref** r8_direction on corpus_c, CCE every step. Running since 16 September.
+- [ ] **c_nocce** c_ref without CCE. The second reference; also the arm that measures what CCE buys on the paper's numbers.
 - [x] **c_wide** `d_gauss` 8 to 32, `n_circular` unchanged. Stopped at epoch 7 (first corpus): 3 of 4 circles collapsed, as the r4 to r8 history predicted. Not revisited unless the probe points at the bottleneck.
 - [ ] **c_gauss** `n_circular` 0, `d_gauss` 16: Gaussian only at the same width (C6). Next after c_ref.
 - [ ] **c_gauss_dx** c_gauss + `d_disease` 16: disease status to the decoder, encoder still blind. The pair answers where disease status belongs.

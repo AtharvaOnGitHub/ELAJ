@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=120G
+#SBATCH --mem=180G
 #SBATCH --job-name=elaj_probe
 #SBATCH --output=logs/probe_%j.log
 
@@ -16,19 +16,24 @@
 #   sbatch data_collation/scripts/probe_stages.sh r8_direction \
 #       --runs-dir outputs/r8 --out outputs/probes/r8_stages
 #
-#   # pipeline stages only, no scIB, for a quick first look:
+#   # pipeline stages only, for a quick first look:
 #   sbatch data_collation/scripts/probe_stages.sh r8_direction \
-#       --runs-dir outputs/r8 --no-groups --no-scib \
-#       --out outputs/probes/r8_quick
+#       --runs-dir outputs/r8 --no-groups --out outputs/probes/r8_quick
 #
 # The first positional argument is the experiment name; everything else is
 # passed through to scripts/probe_stages.py.
 #
-# GPU: the embedding pass only, a few minutes. The rest is CPU: 95 stages
-# of nearest-neighbour searches. The five pipeline stages take the full
-# battery (about 15 min each, the 1,440-wide ones longer); the ninety group
-# stages take the short one (about 3 min each). The script writes the
+# GPU: the embedding pass only, a few minutes. The rest is CPU: the six
+# pipeline stages take the benchmark battery without scIB (about 15 min
+# each, the three 1,440-wide ones over an hour because the patient-identity
+# search runs over 238k cells at that width); the 135 group stages take
+# family and phase kNN only (about 2 min each). The script writes the
 # tables after every stage, so a job killed early keeps what it finished.
+#
+# MEMORY: 180 G. The first run at 120 G died in scIB's silhouette on a
+# 1,440-wide stage; scIB is now off unless --scib is passed, and the
+# headroom is for the corpus, the references, and the collected stages
+# (about 10 GB together) with room for sklearn's brute-force searches.
 
 set -euo pipefail
 
@@ -36,7 +41,8 @@ ARMS=()
 EXTRA=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        --k|--k-cross-donor|--permutations|--seed|--out|--root|--config-dir|--runs-dir)
+        --k|--k-cross-donor|--permutations|--seed|--out|--root|--config-dir|--runs-dir|\
+        --reference-components)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --splits)
             EXTRA+=("$1"); shift

@@ -4,12 +4,15 @@
         --runs-dir outputs/r8 --splits val test --out outputs/probes/r8_stages
 
 THE QUESTION. The benchmark put the latent below 16-component PCA on cell
-family. The latent is the last of five per-cell tensors the encoder makes;
-this scores all five, in order, so the row where the family signal falls is
-the stage that lost it. It also scores the input and the output of each of
-the 45 group encoders separately, so the table says which pathway groups
-carry the signal and whether the transformer over a group added anything to
-the counts it was given.
+family. The latent is the last of four per-cell tensors the encoder makes;
+this scores all four, in order, under two references for what the encoder
+was given (per-group PCA of the counts, raw as ELAJ reads them and
+log-normalised as everyone else does), so the row where the family signal
+falls is the stage that lost it. It also scores every group on its own,
+three ways (raw PCA, log PCA, encoder output), so the table says which
+pathway groups carry the signal, whether the transformer over a group added
+anything a linear reading could not see, and what the raw-count
+tokenisation costs before any attention runs.
 
 SAME CELLS, SAME SCORER. The corpus is built over the sampler order exactly
 as benchmark_baselines.py builds it, and the scorer is the benchmark's, so
@@ -17,9 +20,11 @@ every row here can be read next to that table. The `latent` row IS the
 benchmark's elaj/native row and must reproduce it; if it does not, nothing
 else on the page can be trusted.
 
-Group stages get a shorter battery (family, phase, cross-donor family) than
-the pipeline stages, because ninety of them at the full battery would run
-for a day and the ranking does not need scIB. `--no-groups` skips them.
+Group stages get a shorter battery (family and phase agreement) than the
+pipeline stages, because 135 of them at the full battery would run for
+days. `--no-groups` skips them. scIB is off unless `--scib` is passed: its
+silhouette materialises the cell-by-cell distance matrix and ran a
+1,440-wide stage out of 120 GB.
 """
 
 from __future__ import annotations
@@ -52,8 +57,15 @@ def parse_args() -> argparse.Namespace:
                    choices=["train", "val", "test"])
     p.add_argument("--no-groups", action="store_true",
                    help="Score the five pipeline stages only.")
+    p.add_argument("--scib", action="store_true",
+                   help="Run the scIB battery on the pipeline stages too. "
+                        "Needs memory for a full distance matrix at the "
+                        "widest stage.")
     p.add_argument("--no-scib", action="store_true",
-                   help="Skip the scIB battery on the pipeline stages.")
+                   help="Accepted for compatibility; scIB is already off.")
+    p.add_argument("--reference-components", type=int, default=32,
+                   help="Width of the per-group PCA references; 32 matches "
+                        "d_token so the searches are in spaces of equal size.")
     p.add_argument("--k", type=int, default=30)
     p.add_argument("--k-cross-donor", type=int, default=100)
     p.add_argument("--permutations", type=int, default=200)
@@ -124,7 +136,12 @@ def main() -> None:
     from endo_model.evaluation.baselines import BenchmarkReport, ScorerSettings
     from endo_model.evaluation.baselines.scorer import required_obs_columns
     from endo_model.evaluation.purity_report import best_checkpoint
-    from endo_model.evaluation.stages import ProbeSettings, StageProbe, StageTables
+    from endo_model.evaluation.stages import (
+        ProbeSettings, StageEmbeddings, StageProbe, StageTables,
+    )
+    from endo_model.evaluation.stages.references import (
+        LOG, RAW, GroupPCAReference, group_masks_from_vocabulary,
+    )
     from endo_model.model.endo_model import EndoFoundationModel
     from endo_model.training.checkpointing import CheckpointManager
     from scripts.report_purity import resolve_run_dir
@@ -170,9 +187,21 @@ def main() -> None:
     logger.info("Corpus: %d cells, %d studies, splits %s",
                 corpus.n_cells, corpus.n_studies, corpus.split)
 
+    # The input references, from the counts, ahead of the collected stages:
+    # raw first, then log-normalised, then what the model computed. Per-group
+    # references only if the group stages were asked for.
+    masks = group_masks_from_vocabulary(vocab, corpus.n_genes)
+    staged = StageEmbeddings()
+    for transform in (RAW, LOG):
+        reference = GroupPCAReference(transform, args.reference_components,
+                                      seed=args.seed)
+        staged.merge(reference.build(corpus, masks, per_group=not args.no_groups))
+    staged.merge(embeddings)
+    embeddings = staged
+
     base = ScorerSettings(k=args.k, k_cross_donor=args.k_cross_donor,
                           permutations=args.permutations, seed=args.seed)
-    probe = StageProbe(ProbeSettings.default(base, scib=not args.no_scib))
+    probe = StageProbe(ProbeSettings.default(base, scib=args.scib))
     widths = {n: embeddings.width(n) for n in embeddings.names}
     tables_of = lambda r: StageTables(r, embeddings.kinds, widths)  # noqa: E731
 

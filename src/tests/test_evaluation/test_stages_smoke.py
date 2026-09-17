@@ -31,7 +31,8 @@ from endo_model.evaluation.baselines.scorer import (  # noqa: E402
 )
 from endo_model.evaluation.latent_validation import circular_coordinates  # noqa: E402
 from endo_model.evaluation.stages import (  # noqa: E402
-    ProbeSettings, StageCollector, StageProbe, StageTables, group_battery,
+    GroupPCAReference, ProbeSettings, StageCollector, StageEmbeddings,
+    StageProbe, StageTables, group_battery, group_masks_from_vocabulary,
     group_readers, pipeline_readers,
 )
 from endo_model.model.endo_model import EndoFoundationModel  # noqa: E402
@@ -68,12 +69,12 @@ class TestSmoke:
         groups = list(vocab.group_names)
         readers = pipeline_readers(groups) + group_readers(groups)
         model = _model(vocab)
-        emb = StageCollector(readers).collect(model, loader, torch.device("cpu"),
-                                              order_len=len(order))
-        assert emb.n_cells == len(order)
-        assert len(emb.names) == 5 + 2 * len(groups)
-        assert emb.width("groups/concat") == 8 * len(groups)
-        assert emb.width("latent") == 4 + 2 * 2
+        collected = StageCollector(readers).collect(model, loader, torch.device("cpu"),
+                                                    order_len=len(order))
+        assert collected.n_cells == len(order)
+        assert len(collected.names) == 4 + len(groups)
+        assert collected.width("groups/concat") == 8 * len(groups)
+        assert collected.width("latent") == 4 + 2 * 2
 
         # The latent stage is what validate_latent / the benchmark score.
         mu, angle = [], []
@@ -84,7 +85,7 @@ class TestSmoke:
                 angle.append(out["mu_angle"].numpy())
         want = np.concatenate([np.concatenate(mu),
                                circular_coordinates(np.concatenate(angle))], -1)
-        got = emb.matrices["latent"]
+        got = collected.matrices["latent"]
         # circular_coordinates' column layout is its own; compare as sets of
         # per-row values, which is what a Euclidean neighbour search sees.
         np.testing.assert_allclose(np.sort(got, axis=1), np.sort(want, axis=1),
@@ -92,6 +93,17 @@ class TestSmoke:
 
         corpus = extract_corpus_matrix(ds, gene_names, names, indices=order)
         add_harmonised_labels(corpus)
+
+        # The input references from the counts, ahead of the collected stages.
+        masks = group_masks_from_vocabulary(vocab, corpus.n_genes)
+        emb = StageEmbeddings()
+        for transform in ("counts_raw", "counts_log"):
+            emb.merge(GroupPCAReference(transform, n_components=8).build(corpus, masks))
+        emb.merge(collected)
+        assert emb.names[0] == "counts_raw/concat" or emb.names[0].startswith("counts_raw/")
+        assert emb.width("counts_log/concat") == 8 * len(groups)
+        assert len(emb.names) == 2 * (len(groups) + 1) + 4 + len(groups)
+
         base = ScorerSettings(k=5, k_cross_donor=10, permutations=5, scib_labels=())
         report = StageProbe(ProbeSettings(base, group_battery(base))).score(emb, corpus)
         assert report.methods() == emb.names

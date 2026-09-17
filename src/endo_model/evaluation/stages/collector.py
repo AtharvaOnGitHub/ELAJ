@@ -44,6 +44,23 @@ class StageEmbeddings:
     def nbytes(self) -> int:
         return int(sum(m.nbytes for m in self.matrices.values()))
 
+    def merge(self, other: "StageEmbeddings") -> None:
+        """Take ``other``'s stages in, after this one's, over the same rows.
+
+        Refuses a row-count mismatch and a duplicate name, since either
+        would put a stage's scores against the wrong cells or overwrite a
+        stage silently. Order is insertion order, which is the order the
+        tables print, so merge references before collected stages.
+        """
+        if self.matrices and other.matrices and self.n_cells != other.n_cells:
+            raise ValueError(f"cannot merge {other.n_cells} rows into "
+                             f"{self.n_cells}")
+        clash = sorted(set(self.matrices) & set(other.matrices))
+        if clash:
+            raise ValueError(f"stages already present: {clash}")
+        self.matrices.update(other.matrices)
+        self.kinds.update(other.kinds)
+
     @staticmethod
     def concatenate(parts: list["StageEmbeddings"]) -> "StageEmbeddings":
         """Rows of several splits, stacked in the order given. Every part

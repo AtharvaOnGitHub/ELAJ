@@ -62,9 +62,8 @@ class TestReaders:
         assert TokenMeanReader("g0").kind == GROUP
         assert CellClsReader().kind == PIPELINE
         names = [r.name for r in pipeline_readers(list(GROUPS))]
-        assert names == ["tokens/concat", "groups/concat", "cell_cls",
-                         "mu_gauss", "latent"]
-        assert len(group_readers(list(GROUPS))) == 2 * len(GROUPS)
+        assert names == ["groups/concat", "cell_cls", "mu_gauss", "latent"]
+        assert [r.name for r in group_readers(list(GROUPS))] == ["group/g0", "group/g1"]
 
     def test_masked_token_mean_ignores_dns_genes(self):
         tokens = torch.tensor([[[1.0], [2.0], [100.0]]])        # (1, 3, 1)
@@ -141,3 +140,13 @@ class TestStageEmbeddings:
     def test_empty(self):
         e = StageEmbeddings.concatenate([])
         assert e.n_cells == 0 and e.names == [] and e.nbytes() == 0
+
+    def test_merge_keeps_order_and_refuses_clashes(self):
+        a = StageEmbeddings({"r": np.zeros((2, 3), np.float32)}, {"r": PIPELINE})
+        b = StageEmbeddings({"s": np.ones((2, 2), np.float32)}, {"s": GROUP})
+        a.merge(b)
+        assert a.names == ["r", "s"] and a.kinds["s"] == GROUP
+        with pytest.raises(ValueError, match="already present"):
+            a.merge(b)
+        with pytest.raises(ValueError, match="rows"):
+            a.merge(StageEmbeddings({"t": np.zeros((3, 1), np.float32)}, {"t": GROUP}))

@@ -6,14 +6,15 @@ Entry point: `scripts/probe_stages.py`. Package:
 The benchmark ([13](13-baselines.md)) put the latent below 16-component PCA
 on cell family: excess over chance 0.84 against 0.98, which in raw terms is
 5% of a cell's family neighbours in the wrong family against 0.5%. The
-latent is the last of five per-cell tensors the encoder makes. This probe
-scores all five, in order, with the benchmark's own scorer on the
-benchmark's own cells, so the row where the number falls is the stage that
-lost it. It also scores the input and output of each of the 45 group
-encoders on their own, which answers two questions the pipeline table
-cannot: which pathway groups carry cell-family information at all, and
-whether the transformer over a group added anything to the counts it was
-handed.
+latent is the last of four per-cell tensors the encoder makes. This probe
+scores all four, in order, under two references for what the encoder was
+given, with the benchmark's own scorer on the benchmark's own cells, so the
+row where the number falls is the stage that lost it. It also scores each
+of the 45 groups on its own, three ways, which answers questions the
+pipeline table cannot: which pathway groups carry cell-family information
+at all, whether the transformer over a group added anything a linear
+reading of its counts did not have, and what the raw-count tokenisation
+costs before any attention runs.
 
 ---
 
@@ -30,18 +31,23 @@ EncoderStages                               model/encoder_stages.py    ← new
     latent       mu_gauss, mu_angle, ...   the bottleneck
     │
     ▼  StageReader.read(stages, batch)      stages/readers.py
-    │      pipeline: tokens/concat, groups/concat, cell_cls, mu_gauss, latent
-    │      group:    tokens/<g>, group/<g>              for each of 45 groups
+    │      pipeline: groups/concat, cell_cls, mu_gauss, latent
+    │      group:    group/<g>                          for each of 45 groups
     ▼
 StageCollector.collect(model, loader)       stages/collector.py
     │  → StageEmbeddings {name: (n_cells, width)}, rows in sampler order
     ▼
 extract_corpus_matrix(dataset, order)       baselines/corpus_matrix.py
     │  the same corpus the benchmark built
+    ├─ GroupPCAReference(RAW).build()       stages/references.py
+    │      counts_raw/<g>, counts_raw/concat    PCA-32 of each group's raw counts
+    ├─ GroupPCAReference(LOG).build()
+    │      counts_log/<g>, counts_log/concat    the same, log-normalised
+    │  StageEmbeddings.merge(): references first, then the collected stages
     ▼
 StageProbe.score(embeddings, corpus)        stages/probe.py
-    │  EmbeddingScorer per stage; full battery for pipeline stages,
-    │  short battery (family, phase, cross-donor family) for group stages
+    │  EmbeddingScorer per stage; benchmark battery (no scIB) for pipeline
+    │  stages, family and phase kNN for group stages
     ▼
 BenchmarkReport                             baselines/report.py
     │  method key = stage name
@@ -73,24 +79,47 @@ probe picks the battery by it.
 
 | reader | name | width | what it is |
 |---|---|---:|---|
-| `ConcatReader` of `TokenMeanReader` | `tokens/concat` | 45 × 32 = 1,440 | every group's input, before any attention |
-| `ConcatReader` of `GroupClsReader` | `groups/concat` | 1,440 | every group encoder's output |
+| `ConcatReader` of `GroupClsReader` | `groups/concat` | 45 × 32 = 1,440 | every group encoder's output |
 | `CellClsReader` | `cell_cls` | 64 | after aggregation over the 45 groups |
 | `MuGaussReader` | `mu_gauss` | 8 | the Gaussian mean |
 | `LatentReader` | `latent` | 16 | mu_gauss beside (cos, sin) of the 4 circular means |
-| `TokenMeanReader(g)` | `tokens/<g>` | 32 | one group's input |
 | `GroupClsReader(g)` | `group/<g>` | 32 | one group's output |
 
-**`TokenMeanReader` is the no-transformer reference.** The value encoder is
-`nn.Linear(1, d_token)` and DSBN is affine, so the mean over a group's
-measured genes of its tokens is a fixed 32-dimensional linear projection of
-the group's counts. If `group/<g>` scores no better than `tokens/<g>`, the
-attention over that group added nothing the scorer can see.
+⚠ **`TokenMeanReader` exists and is not a default, and the reason is a
+finding.** The value encoder is `nn.Linear(1, d_token)` on the raw count
+and DSBN is affine, so the mean over a group's tokens is a constant (the
+mean identity embedding, fixed per study) plus `W` times one scalar: the
+group's mean raw count. Rank one. The first probe run scored it at 0.876 on
+cell family before dying, which is what 45 group-mean counts can do, not
+what the encoder is given. The reader is kept for the question it does
+answer (how much of a summary is total expression) and the input reference
+moved to the counts themselves.
 
-**Decision:** DNS genes are excluded from the mean (`masked_token_mean`).
-Their token is `identity + dns_embedding`, the same for every cell of a
-study, so including them adds a per-study constant that is panel, not
-expression. A group with no measured gene reads as zeros, not NaN.
+## The references — [`references.py`](../../src/endo_model/evaluation/stages/references.py)
+
+`GroupPCAReference(transform, n_components=32)` computes, per group, a PCA
+of the group's genes from the corpus counts, and concatenates the 45 for a
+pipeline row. Two transforms:
+
+| prefix | input | what it stands for |
+|---|---|---|
+| `counts_raw` | raw counts | the encoder's input as ELAJ reads it: `ValueEncoder` takes the count itself, with no library-size normalisation and no log |
+| `counts_log` | `normalize_total` then `log1p` | the same genes as scVI, Harmony, or PCA would see them |
+
+The gap between the two is what the tokenisation costs before any attention
+runs. Every other model in this space transforms first (scVI: log; scGPT:
+bins; Geneformer: ranks). `group/<g>` against `counts_log/<g>` is whether
+the transformer over the group added anything a linear method could not
+already see.
+
+**Contract:** the corpus is in sampler order, the same order the collector
+produced, so `StageEmbeddings.merge` can put the references beside the
+collected stages row for row. `merge` refuses a row-count mismatch and a
+duplicate name.
+
+Fewer genes than components (none of the real groups; the tests have one)
+pads with zeros so every group has one width and the concatenation stays
+rectangular.
 
 **Contract:** the `latent` row must reproduce the benchmark's `elaj/native`
 row. `LatentReader` builds `[mu_gauss, cos, sin]` in torch;
@@ -109,9 +138,10 @@ reader. It refuses duplicate reader names at construction and a row-count
 mismatch against `order_len` after collection, for the reason `collect`
 does: a misaligned metadata join produces wrong numbers that look right.
 
-Memory at 238,592 cells with every reader: the two 1,440-wide concatenations
-are 1.37 GB each, the ninety group stages 2.75 GB together, the rest under
-0.1 GB. About 5.6 GB, against a 120 GB job.
+Memory at 238,592 cells: three 1,440-wide pipeline stages at 1.37 GB each,
+135 group stages of 32 at 4.1 GB together, the rest under 0.1 GB, plus the
+corpus as CSR at about 4.6 GB. About 13 GB. The job asks for 180 GB
+because the first run died at 120 GB in scIB (below).
 
 `StageEmbeddings.concatenate` stacks splits and refuses parts whose stage
 sets differ, so `val` and `test` cannot silently contribute different rows.
@@ -124,20 +154,26 @@ sets differ, so `val` and `test` cannot silently contribute different rows.
 
 | battery | stages | kNN labels | cross-donor labels | scIB |
 |---|---|---|---|---|
-| pipeline | 5 | family, phase, cell cycle, AnnotationRefined, patient | family, phase, grade, stage | family, AnnotationRefined |
-| group | 90 | family, phase | family | none |
+| pipeline | 6 | family, phase, cell cycle, AnnotationRefined, patient | family, phase, grade, stage | off unless `--scib` |
+| group | 135 | family, phase | none | none |
 
 `group_battery(base)` derives the short one from the full one with
-`dataclasses.replace`, so k, seed and permutation count stay shared.
-`ProbeSettings.default(base, scib=False)` drops scIB from the pipeline
-stages too, for a quick pass.
+`dataclasses.replace`, so k and seed stay shared.
 
-Cost, on the benchmark's cells: a pipeline stage is the benchmark's per-method
-cost (about 15 min, the 1,440-wide ones longer because sklearn goes brute
-force above about 15 dimensions); a group stage is three neighbour searches
-on 32 dimensions, about 3 min. Ninety of them is the bulk of the job.
-`after_each(report)` is called after every stage and the script writes the
-tables in it, so a killed job keeps what it finished.
+⚠ **scIB is off by default because it killed the first run.** scib-metrics'
+silhouette builds the full 72,908 × 72,908 distance matrix through jax; on
+a 1,440-wide stage that passed 120 GB and the job was OOM-killed after 95
+minutes, having finished the stage's kNN and cross-donor rows. The scIB
+numbers for the latent are in the benchmark table already; for the other
+stages they add nothing the kNN rows do not say.
+
+Cost, on the benchmark's cells: a 1,440-wide pipeline stage is about 75
+minutes, 48 of them the patient-identity search over all 238,592 cells
+(sklearn goes brute force above about 15 dimensions); the narrow ones about
+15 minutes; a group stage is two searches on 32 dimensions over 73k and 69k
+cells, about 2 minutes. `after_each(report)` is called after every stage
+and the script writes the tables in it, so a killed job keeps what it
+finished.
 
 ---
 
@@ -145,14 +181,15 @@ tables in it, so a killed job keeps what it finished.
 
 `StageTables` only arranges rows; the numbers are the report's.
 
-**Along the encoder.** Stages in reader order, top to bottom, with the
-benchmark's headline columns. Read for the row where family or phase falls.
+**Along the encoder.** `counts_raw/concat`, `counts_log/concat`, then the
+stages in reader order, with the benchmark's headline columns. Read for the
+row where family or phase falls.
 
 **Per group.** One row per group, sorted by the encoder output's family
-excess, best first. Three column triples (family, phase, cross-donor family),
-each `in | out | delta` where `in` is `tokens/<g>` and `out` is `group/<g>`.
-`summary()` counts the groups whose output beats its input by more than
-0.01 and the groups where it is the other way round.
+excess, best first. For family and for phase: `counts_raw | counts_log |
+group | delta`, where delta is `group` minus `counts_log`. `summary()`
+counts the groups whose encoder beats the log-PCA reading by more than 0.01
+and the groups where it is the other way round.
 
 ---
 
@@ -160,11 +197,11 @@ each `in | out | delta` where `in` is `tokens/<g>` and `out` is `group/<g>`.
 
 | pattern | meaning | where to act |
 |---|---|---|
+| `counts_log/concat` far above `counts_raw/concat` | the raw-count tokenisation loses resolution before attention | `ValueEncoder` input: log1p, or library-size normalise then log |
+| `groups/concat` at or below `counts_raw/concat` | the group encoders recover nothing beyond a linear reading of their raw input | group encoder depth, `d_token`, the training signal |
 | `groups/concat` high, `cell_cls` high, `mu_gauss` low | the bottleneck loses it | latent width, `beta_max`, `free_bits`, DAB pressure |
 | `groups/concat` high, `cell_cls` low | aggregation loses it | `AggregationEncoder`, `d_agg` |
-| `groups/concat` low, `tokens/concat` high | the group encoders lose it | group encoder depth, `d_token`, training signal |
-| `tokens/concat` low | the counts as tokenised do not separate families | tokenisation, DSBN, DNS |
-| most `group/<g>` at or below `tokens/<g>` | attention within groups is not earning its parameters | the grouping claim needs a different defence |
+| most `group/<g>` at or below `counts_log/<g>` | attention within groups is not earning its parameters | the grouping claim needs a different defence |
 
 The last row is the one to watch for the paper: the grouping argument in the
 thesis is a cost argument, and this table is the first place the benefit
@@ -177,8 +214,9 @@ side can be measured per group.
 | file | proves |
 |---|---|
 | `tests/test_model/test_encoder_stages.py` | shapes of every stage; `encode` is `encode_stages().latent` exactly; forward still reconstructs |
-| `tests/test_evaluation/test_stages_collector.py` | each reader reads its tensor; DNS excluded from the token mean; rows follow the loader order; mismatches and duplicates refused; `concatenate` |
+| `tests/test_evaluation/test_stages_collector.py` | each reader reads its tensor; DNS excluded from the token mean; rows follow the loader order; mismatches and duplicates refused; `concatenate`; `merge` keeps order and refuses clashes |
+| `tests/test_evaluation/test_stages_references.py` | one stage per group plus concat; uniform padded widths; per-group can be left out; planted family found where planted; an empty group is zeros; vocabulary masks partition the genes |
 | `tests/test_evaluation/test_stages_probe.py` | one method key per stage; group battery has no patient or scIB rows; planted signal shows where planted; `after_each`; tables sort, difference and render |
-| `tests/test_evaluation/test_stages_smoke.py` | real model + real Dataset → every stage → corpus → tables; the `latent` stage equals what `encode` would have been scored on |
+| `tests/test_evaluation/test_stages_smoke.py` | real model + real Dataset → every stage, references merged in front → corpus → tables; the `latent` stage equals what `encode` would have been scored on |
 
-The probe and table tests run without torch; the rest need it.
+The probe, table, and reference tests run without torch; the rest need it.

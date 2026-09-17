@@ -5,11 +5,12 @@ a stage's row can be read next to the benchmark table directly. The
 `latent` stage is the check: it is what the benchmark scored as
 elaj/native, and its numbers must reproduce.
 
-Two batteries, because ninety-five stages do not all deserve the same
-budget. Pipeline stages get the full battery the benchmark ran. Group
-stages get the short one: family and phase agreement, and the cross-donor
-family test, which is enough to rank the groups and to see whether a
-group's encoder added anything to its input.
+Two batteries, because 140 stages do not all deserve the same budget.
+Pipeline stages get the benchmark's battery, less scIB by default: its
+silhouette materialises the full cell-by-cell distance matrix and ran a
+1,440-wide stage out of 120 GB. Group stages get the short one: family and
+phase agreement, enough to rank the groups and to see whether a group's
+encoder added anything to a linear reading of its counts.
 """
 
 from __future__ import annotations
@@ -31,11 +32,13 @@ logger = logging.getLogger(__name__)
 
 def group_battery(base: ScorerSettings) -> ScorerSettings:
     """The short battery for per-group stages, derived from the full one so
-    k, seed and permutation count stay shared."""
+    k and seed stay shared. kNN on family and phase only: with three
+    references per group (raw PCA, log PCA, encoder) there are 135 group
+    stages, and the cross-donor search at k=100 would triple the job."""
     return replace(
         base,
         knn_labels=(HARMONISED_LINEAGE, HARMONISED_PHASE),
-        cross_donor_labels=(HARMONISED_LINEAGE,),
+        cross_donor_labels=(),
         scib_labels=(),
     )
 
@@ -47,7 +50,7 @@ class ProbeSettings:
 
     @classmethod
     def default(cls, base: ScorerSettings | None = None,
-                scib: bool = True) -> "ProbeSettings":
+                scib: bool = False) -> "ProbeSettings":
         base = base or ScorerSettings()
         pipeline = base if scib else replace(base, scib_labels=())
         return cls(pipeline=pipeline, group=group_battery(base))

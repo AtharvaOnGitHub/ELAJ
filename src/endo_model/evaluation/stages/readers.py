@@ -8,13 +8,13 @@ and nothing anywhere else.
 Two kinds, told apart by `kind`:
 
   pipeline   one matrix per cell at a point EVERY group has passed through:
-             the concatenated token means, the concatenated group summaries,
-             cell_cls, mu_gauss, the combined latent. Five rows in the table,
-             read top to bottom to see where a signal is lost.
-  group      one matrix per cell for ONE group: its token mean (what went in)
-             or its encoder summary (what came out). Forty-five rows each,
-             read side by side to see which groups carry the signal and
-             whether the transformer over a group added anything to it.
+             the concatenated group summaries, cell_cls, mu_gauss, the
+             combined latent. Read top to bottom, under the input references
+             from references.py, to see where a signal is lost.
+  group      one matrix per cell for ONE group: its encoder summary. Read
+             beside that group's input references to see which groups carry
+             the signal and whether the transformer over a group added
+             anything a linear reading of its counts did not have.
 """
 
 from __future__ import annotations
@@ -63,13 +63,18 @@ def masked_token_mean(tokens: Tensor, dns_mask: Tensor) -> Tensor:
 
 
 class TokenMeanReader(StageReader):
-    """What went INTO one group's encoder, averaged over its measured genes.
+    """One group's tokens averaged over its measured genes.
 
-    The value encoder is linear and DSBN is affine, so this is a fixed
-    32-dimensional linear projection of the group's counts. It is the
-    no-transformer reference for the group: if the encoder's summary scores
-    no better than this, the attention over the group added nothing that the
-    scorer can see.
+    NOT the encoder's input, and not in the default reader set. The value
+    encoder is ``nn.Linear(1, d_token)`` on the raw count and DSBN is
+    affine, so the mean over genes is a constant (the mean identity
+    embedding, fixed per study) plus ``W`` times ONE scalar, the group's
+    mean raw count. Rank one. The probe's first run scored it at 0.876 on
+    cell family, which is what 45 group-mean counts can do, not what the
+    encoder is given. The per-group input reference is `GroupPCAReference`
+    in references.py, computed from the counts themselves. This reader is
+    kept for what it does measure: how much of a group's summary is its
+    total expression.
     """
 
     kind = GROUP
@@ -164,9 +169,11 @@ class LatentReader(StageReader):
 # ── the default set ────────────────────────────────────────────────────────
 
 def pipeline_readers(group_names: list[str]) -> list[StageReader]:
-    """The five points along the encoder, in the order a cell passes them."""
+    """The four points along the encoder that the model computes, in the
+    order a cell passes them. The input references (per-group PCA of the
+    counts, raw and log-normalised) come from references.py and sit above
+    these in the table."""
     return [
-        ConcatReader("tokens/concat", [TokenMeanReader(g) for g in group_names]),
         ConcatReader("groups/concat", [GroupClsReader(g) for g in group_names]),
         CellClsReader(),
         MuGaussReader(),
@@ -175,9 +182,5 @@ def pipeline_readers(group_names: list[str]) -> list[StageReader]:
 
 
 def group_readers(group_names: list[str]) -> list[StageReader]:
-    """Input and output of every group encoder, ninety readers for 45 groups."""
-    readers: list[StageReader] = []
-    for g in group_names:
-        readers.append(TokenMeanReader(g))
-        readers.append(GroupClsReader(g))
-    return readers
+    """The output of every group encoder, one reader per group."""
+    return [GroupClsReader(g) for g in group_names]

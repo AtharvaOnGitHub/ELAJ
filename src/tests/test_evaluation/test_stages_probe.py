@@ -4,8 +4,8 @@ read off.
 
 Stages are planted by hand: a pipeline stage that carries family, one that
 carries only patient identity, and two groups, one whose encoder output
-carries family while its token mean does not, one the other way round. The
-tables must sort and difference them accordingly.
+carries family while the linear reading of its counts does not, one the
+other way round. The tables must sort and difference them accordingly.
 """
 
 from __future__ import annotations
@@ -54,13 +54,16 @@ def planted():
     emb.kinds["cell_cls"] = PIPELINE
     emb.matrices["latent"] = _patient_matrix(corpus)
     emb.kinds["latent"] = PIPELINE
-    # Group A: the encoder made family out of noise.
-    emb.matrices["tokens/A"] = _noise_matrix(corpus)
+    # Group A: the encoder made family out of counts that read as noise.
+    emb.matrices["counts_raw/A"] = _noise_matrix(corpus)
+    emb.matrices["counts_log/A"] = _noise_matrix(corpus, seed=2)
     emb.matrices["group/A"] = _family_matrix(corpus, seed=3)
-    # Group B: the tokens had family and the encoder threw it away.
-    emb.matrices["tokens/B"] = _family_matrix(corpus, seed=4)
+    # Group B: the counts had family and the encoder threw it away.
+    emb.matrices["counts_raw/B"] = _family_matrix(corpus, seed=4)
+    emb.matrices["counts_log/B"] = _family_matrix(corpus, seed=6)
     emb.matrices["group/B"] = _noise_matrix(corpus, seed=5)
-    for n in ("tokens/A", "group/A", "tokens/B", "group/B"):
+    for n in ("counts_raw/A", "counts_log/A", "group/A",
+              "counts_raw/B", "counts_log/B", "group/B"):
         emb.kinds[n] = GROUP
     return corpus, emb
 
@@ -71,11 +74,11 @@ class TestGroupBattery:
         short = group_battery(base)
         assert short.k == 7 and short.permutations == 11
         assert short.knn_labels == (HARMONISED_LINEAGE, HARMONISED_PHASE)
-        assert short.cross_donor_labels == (HARMONISED_LINEAGE,)
+        assert short.cross_donor_labels == ()
         assert short.scib_labels == ()
 
-    def test_default_settings_can_drop_scib(self):
-        assert ProbeSettings.default(scib=False).pipeline.scib_labels == ()
+    def test_scib_is_off_unless_asked(self):
+        assert ProbeSettings.default().pipeline.scib_labels == ()
         assert ProbeSettings.default(scib=True).pipeline.scib_labels != ()
 
 
@@ -97,8 +100,8 @@ class TestStageProbe:
         fam = lambda s: report.value(s, "knn-agreement", HARMONISED_LINEAGE)  # noqa: E731
         assert fam("cell_cls") > 0.9
         assert fam("latent") < 0.3
-        assert fam("group/A") > 0.9 > fam("tokens/A")
-        assert fam("tokens/B") > 0.9 > fam("group/B")
+        assert fam("group/A") > 0.9 > fam("counts_log/A")
+        assert fam("counts_log/B") > 0.9 > fam("group/B")
 
     def test_after_each_is_called_per_stage_with_a_growing_report(self, planted):
         corpus, emb = planted
@@ -130,16 +133,23 @@ class TestStageTables:
     def test_groups_are_sorted_by_encoder_output_family(self, scored):
         assert scored.groups() == ["A", "B"]
 
-    def test_group_table_differences_output_from_input(self, scored):
-        rows = [l for l in scored.group_table().splitlines() if l.startswith("| A |")]
+    def test_group_table_differences_encoder_from_log_pca(self, scored):
+        table = scored.group_table()
+        assert "family counts_raw" in table and "family counts_log" in table
+        assert "family group" in table and "family delta" in table
+        rows = [l for l in table.splitlines() if l.startswith("| A |")]
         cells = [c.strip() for c in rows[0].strip("|").split("|")]
-        # in family, out family, delta
-        assert float(cells[3]) > 0.6
+        # group, raw, log, encoder, delta (family) ...
+        assert float(cells[4]) > 0.6
+        rows = [l for l in table.splitlines() if l.startswith("| B |")]
+        cells = [c.strip() for c in rows[0].strip("|").split("|")]
+        assert float(cells[4]) < -0.6
 
     def test_summary_counts_improved_and_worsened(self, scored):
         s = scored.summary()
         assert "2 groups scored" in s
         assert "more than 0.01: 1; below: 1" in s
+        assert "counts_log" in s
 
     def test_write_markdown(self, scored, tmp_path):
         path = scored.write_markdown(tmp_path / "s.md", title="t")

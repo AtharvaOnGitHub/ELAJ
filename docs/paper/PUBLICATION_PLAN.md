@@ -125,12 +125,12 @@ the probe is read, because the reference arm is needed either way.
 ## 4. Phase B: the training campaign (weeks 1 to 3)
 
 The `c_` series: control-included runs on `configs/data/corpus_c.yaml`
-(controls in, wang_2022 out: adenomyosis myometrium, four donors, not
-endometrial tissue; decided 18 September). `c_ref` is r8_direction on that
+(the r-series' twelve studies, controls in). `c_ref` is r8_direction on that
 corpus with CCE's second encoder pass every fourth step (about a third off
 the epoch for a term weighted 0.025; T_max 22, one 48 h job). Every later
-arm is compared against it. The first c_ref attempt, with wang and
-every-step CCE, was stopped at epoch 9 when wang was dropped.
+arm is compared against it. The first c_ref attempt, at every-step CCE, was
+stopped at epoch 9 on 18 September so the reference and the arms share the
+cadence.
 
 ### 4.1 Compute
 

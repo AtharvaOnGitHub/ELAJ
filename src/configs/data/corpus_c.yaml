@@ -1,9 +1,9 @@
-# The c_ series corpus: controls in, wang_2022 out.
+# The c_ series corpus: the r-series corpus with the control donors in.
 #
-# Differs from corpus.yaml (the r-series corpus, kept unchanged so every r
-# checkpoint still loads against the study table it was trained with) in
-# two places, both marked below. Every c_ arm points here; none overrides
-# the study list or the disease filter.
+# Differs from corpus.yaml (kept unchanged so every r checkpoint still loads
+# against the study table it was trained with) in one place, the disease
+# filter. Every c_ arm points here; none overrides the study list or the
+# filter.
 #
 vocabulary_path: data/processed/vocabulary.json
 
@@ -48,21 +48,20 @@ max_cells_per_study: null      # null = use all; integer = cap for debugging
 # silently keeping the study.
 #   zhang_2022  GSE174399 — chorionic villus / decidua, not endometrial tissue.
 #     Out of scope for an endometrial atlas, excluded permanently.
-#   wang_2022   GSE218044 — adenomyosis, MYOMETRIUM, four donors, no eutopic or
-#     ectopic cells. The r-series carried it as a disease contrast; the c_
-#     series drops it (decision of 18 September 2026): it is not endometrial
-#     tissue, and four donors of one status cannot anchor a contrast.
+#
+# wang_2022 (GSE218044, adenomyosis, myometrium, four donors) stays in as the
+# adenomyosis contrast, as in the r-series. It was briefly dropped on
+# 18 September 2026 through a mix-up with zhang_2022 and put back the same day.
 exclude_studies:
   - zhang_2022
-  - wang_2022
 
 # Keep only cells with these disease_status values; empty keeps every cell.
 # Unlike exclude_studies this drops cells, not studies, so study ids are
 # untouched and a study reduced to nothing still holds its DSBN parameters.
 #
-# Controls are in: the c_ series exists to train on them. adenomyosis is
-# not listed because its only study, wang_2022, is excluded above.
+# Controls are in: the c_ series exists to train on them.
 include_disease_statuses:
   - eutopic
   - ectopic
+  - adenomyosis
   - control

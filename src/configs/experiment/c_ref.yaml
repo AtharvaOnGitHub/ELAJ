@@ -1,8 +1,8 @@
 name: c_ref
 description: >
-  r8_direction on the c_ series corpus: control donors in, wang_2022 out,
-  with CCE's second encoder pass every fourth step. The reference arm every
-  later c_ arm is compared against.
+  r8_direction on the c_ series corpus (control donors in) with CCE's
+  second encoder pass every fourth step. The reference arm every later c_
+  arm is compared against.
 
   WHY NOW. The baseline benchmark (outputs/benchmarks/r8_all) put r8_direction
   below 16-component PCA on every biology metric, as excess over chance:
@@ -13,23 +13,23 @@ description: >
   training. A retrain is the moment to change the corpus, because the
   splits and the reference checkpoint change anyway.
 
-  WHAT CHANGES AGAINST r8_direction. Three things, all in the base and none
-  an arm:
-    - data: configs/data/corpus_c.yaml. Controls are in (the deadline
-      exclusion is lifted; a model that has never seen normal endometrium
-      has no reference for what "different in endometriosis" means) and
-      wang_2022 is out (adenomyosis myometrium, four donors, no eutopic or
-      ectopic cells: not endometrial tissue). Eleven studies.
+  WHAT CHANGES AGAINST r8_direction. Two things, both in the base and
+  neither an arm:
+    - data: configs/data/corpus_c.yaml. Controls are in: the deadline
+      exclusion is lifted, since a model that has never seen normal
+      endometrium has no reference for what "different in endometriosis"
+      means. Same twelve studies as the r-series.
     - model.cce.every: 4. CCE's second encoder pass costs about a third of
       the epoch for a term weighted 0.025; running it on every fourth step
       keeps the term and removes most of the cost. Its average pressure is
       a quarter of r8's. Unmeasured against every-step on this corpus; if
       an arm's result is ever suspected of resting on it, c_cce1 (every: 1)
       is the one-line check.
-    - the first attempt of this arm (job 54525748, corpus with wang,
-      every-step CCE) was stopped at epoch 9 on 18 September when wang was
-      dropped. Its metrics.csv is in outputs/c_ref_wang/ if anyone wants
-      the first nine epochs of that variant.
+    - the first attempt of this arm (job 54525748, same corpus, every-step
+      CCE) was stopped at epoch 9 on 18 September so that the reference and
+      every arm after it share the CCE cadence. Its metrics.csv is in
+      outputs/c_ref_cce1/ if anyone wants the first nine epochs at every
+      step.
 
   EPOCH BUDGET. About 1.2 M training cells. r8_direction ran 4,374 s/epoch
   on 786k cells with every-step CCE; with a quarter of the second passes

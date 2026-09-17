@@ -201,15 +201,22 @@ End to end: **2h04 → ~31 min per epoch.**
 Two fields were removed from here, and both removals change what the trained
 model can be used to claim.
 
-### `disease_status` — removed from the model entirely
+### `disease_status` — never on the encoder; optionally on the decoder
 
 It used to be an encoder input, and the UMAP panel carried a `CIRCULAR:` caption
 saying so. For a disease atlas that is not a caveat, it is a disqualification: a
 model *told* which cells are diseased will separate them, and the separation
-then demonstrates nothing. It is now held out and used only to colour the UMAP.
+then demonstrates nothing. The encoder never receives it.
 
-`DiseaseStatusEncoder` still exists and is deliberately unwired, with the reason
-in its docstring.
+`ModelConfig.d_disease` (default 0, every run to date) can hand it to the
+**decoder**, beside tissue and platform in `BilinearDecoder._context`, through
+`DiseaseStatusEncoder`. That is a different model making a different claim:
+the latent is then no longer obliged to encode what separates control from
+eutopic, so a disease signal in it is not a finding, and what remains is the
+variation disease does not explain. `c_gauss` (0) and `c_gauss_dx` (16) are
+the pair that measures the difference. `tests/test_model/test_decoder_disease.py`
+pins that the status changes the reconstruction and not the latent, and that
+0 drops it entirely.
 
 ### `tissue` — moved to the decoder
 
@@ -270,6 +277,13 @@ Reparameterisation only when `self.training`; at eval `z = mu` exactly, so
 inference is deterministic.
 
 ### `VonMisesBranch` — [`vonmises_vae.py:28`](../../src/endo_model/model/latent/vonmises_vae.py:28)
+
+`n_vMF = 0` is a Gaussian-only model. `forward` returns width-zero tensors
+without touching the heads or the sampler (the Beta draw is not defined on
+an empty batch), `d_z` is `d_gauss`, `kl_vmf` is zero, CCE and DAB read the
+Gaussian embedding alone, and the circular figures are skipped.
+`tests/test_model/test_gaussian_only.py` runs forward, loss, and backward
+at zero. `c_gauss` is the arm.
 
 ```python
 mu_angle = self._mean_angle(cell_cls)                        # (B, n_vMF)

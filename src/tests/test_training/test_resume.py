@@ -1,0 +1,128 @@
+"""A resumed run continues the run it was; it does not start a new one.
+
+Findings A2: the first resume restored the epoch and nothing else, so the
+KL warm-up and the DAB ramp (functions of `global_step`) restarted from
+zero, the cosine LR went back to its peak, early stopping forgot its best,
+and metrics.csv began again empty. Each of those is now saved in every
+checkpoint and restored by `Trainer.restore`, and each is asserted here by
+training a run in two halves and comparing it with the same run in one
+piece.
+"""
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from endo_model.configs.training_config import TrainingConfig  # noqa: E402
+from endo_model.model.endo_model import EndoFoundationModel  # noqa: E402
+from endo_model.model.objectives.composite import CompositeLoss  # noqa: E402
+from endo_model.training.callbacks import EarlyStopping  # noqa: E402
+from endo_model.training.checkpointing import CheckpointManager  # noqa: E402
+from endo_model.training.trainer import Trainer  # noqa: E402
+from tests.test_training.test_trainer import (  # noqa: E402
+    D_GAUSS, N_STUDIES, N_VMF, _BatchList, make_batch, make_config, make_vocab,
+)
+
+
+def _setup(seed: int, max_epochs: int, ckpt_dir):
+    torch.manual_seed(seed)
+    vocab = make_vocab()
+    model = EndoFoundationModel(vocab, make_config())
+    loss = CompositeLoss(n_studies=N_STUDIES, d_gauss=D_GAUSS, n_vMF=N_VMF,
+                         w_kl_gauss=0.01, w_kl_vmf=0.01, w_dab=0.01, w_cce=0.0)
+    optimizer = torch.optim.Adam(list(model.parameters()) + list(loss.parameters()),
+                                 lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    torch.manual_seed(seed)
+    batches = _BatchList([make_batch(vocab)])
+    config = TrainingConfig(max_epochs=max_epochs, early_stop_patience=100)
+    trainer = Trainer(model=model, train_loader=batches, val_loader=batches,
+                      composite_loss=loss, optimizer=optimizer, scheduler=scheduler,
+                      config=config, checkpoint_dir=str(ckpt_dir))
+    return trainer, model, optimizer
+
+
+class TestEarlyStoppingState:
+    def test_round_trip(self):
+        es = EarlyStopping(patience=3, warmup_epochs=1)
+        for v in (1.0, 0.5, 0.7):
+            es.step(v)
+        state = es.state_dict()
+        again = EarlyStopping(patience=3, warmup_epochs=1)
+        again.load_state_dict(state)
+        assert again.state_dict() == state
+        assert again._best == 0.5 and again._counter == 1 and again._seen == 3
+
+
+class TestCheckpointManagerRehydrate:
+    def test_adopts_existing_checkpoints(self, tmp_path):
+        trainer, model, optimizer = _setup(0, 3, tmp_path)
+        for epoch, val in ((0, 0.9), (1, 0.4), (2, 0.6)):
+            trainer.ckpt_manager.save(model, optimizer, epoch, epoch * 10, val)
+        fresh = CheckpointManager(str(tmp_path))
+        assert fresh.best_path.name.startswith("epoch_0001_")
+        assert len(fresh._history) == 3
+
+    def test_prunes_across_a_restart(self, tmp_path):
+        trainer, model, optimizer = _setup(0, 3, tmp_path)
+        for epoch, val in ((0, 0.9), (1, 0.4), (2, 0.6)):
+            trainer.ckpt_manager.save(model, optimizer, epoch, epoch * 10, val)
+        fresh = CheckpointManager(str(tmp_path), max_to_keep=3)
+        fresh.save(model, optimizer, 3, 30, 0.5)
+        kept = sorted(p.name[:10] for p in tmp_path.glob("epoch_*.pt"))
+        # The worst of the four (0.9 at epoch 0) is gone, not the oldest new one.
+        assert kept == ["epoch_0001", "epoch_0002", "epoch_0003"]
+
+
+class TestResume:
+    def test_split_run_matches_single_run(self, tmp_path):
+        """Four epochs in one go against two, a checkpoint, then two more."""
+        whole, _, _ = _setup(7, 4, tmp_path / "whole")
+        history_whole = whole.fit()
+
+        first, model, optimizer = _setup(7, 4, tmp_path / "split")
+        first.config.max_epochs = 2
+        first.fit()
+        last = sorted((tmp_path / "split").glob("epoch_*.pt"))[-1]
+
+        second, model2, optimizer2 = _setup(7, 4, tmp_path / "split")
+        payload = CheckpointManager.load(str(last), model2, optimizer2)
+        start = second.restore(payload)
+        assert start == 2
+        assert second.global_step == first.global_step
+        assert second.early_stopping.state_dict() == first.early_stopping.state_dict()
+        assert second.scheduler.last_epoch == first.scheduler.last_epoch
+        history_split = second.fit()
+
+        assert len(history_split["train_loss"]) == 4
+        assert history_split["train_loss"][:2] == pytest.approx(
+            history_whole["train_loss"][:2])
+        assert second.global_step == whole.global_step
+        assert second.scheduler.get_last_lr() == pytest.approx(whole.scheduler.get_last_lr())
+
+    def test_restore_without_state_warns_and_continues(self, tmp_path, caplog):
+        trainer, _, _ = _setup(1, 3, tmp_path)
+        start = trainer.restore({"epoch": 4})
+        assert start == 5 and trainer.global_step == 0
+        assert "not restored" in caplog.text
+
+
+class TestResolveResume:
+    def test_latest_picks_the_newest_epoch(self, tmp_path):
+        from scripts.train import resolve_resume
+
+        ck = tmp_path / "run" / "checkpoints"
+        ck.mkdir(parents=True)
+        for name in ("epoch_0003_step_0000030.pt", "epoch_0011_step_0000110.pt",
+                     "epoch_0007_step_0000070.pt"):
+            (ck / name).write_bytes(b"")
+        assert resolve_resume(str(tmp_path), tmp_path / "run", "latest").name.startswith("epoch_0011")
+        assert resolve_resume(str(tmp_path), tmp_path / "run", None) is None
+        assert resolve_resume(str(tmp_path), tmp_path / "run", "x/y.pt") == tmp_path / "x/y.pt"
+
+    def test_latest_with_no_checkpoints_is_an_error(self, tmp_path):
+        from scripts.train import resolve_resume
+
+        (tmp_path / "run" / "checkpoints").mkdir(parents=True)
+        with pytest.raises(FileNotFoundError):
+            resolve_resume(str(tmp_path), tmp_path / "run", "latest")

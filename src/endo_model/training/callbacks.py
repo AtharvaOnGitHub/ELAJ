@@ -55,6 +55,19 @@ class EarlyStopping:
             self.should_stop = True
         return self.should_stop
 
+    def state_dict(self) -> dict:
+        """What a resume needs: the best so far, the epochs since it, and how
+        many epochs have been scored (the warm-up counts real epochs, not
+        epochs since the restart)."""
+        return {"best": self._best, "counter": self._counter,
+                "seen": self._seen, "should_stop": self.should_stop}
+
+    def load_state_dict(self, state: dict) -> None:
+        self._best = float(state.get("best", float("inf")))
+        self._counter = int(state.get("counter", 0))
+        self._seen = int(state.get("seen", 0))
+        self.should_stop = bool(state.get("should_stop", False))
+
     def reset(self) -> None:
         self._best = float("inf")
         self._counter = 0

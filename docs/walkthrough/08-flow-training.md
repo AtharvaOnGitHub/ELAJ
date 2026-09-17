@@ -128,19 +128,41 @@ matching no run this project has done. Nothing was miscalibrated by it, because
 `train.py` always derived the value; it cost a review cycle instead. The cosine
 period has to equal the run length, so a second number could only disagree.
 
-### 13. Resume — [`:162`](../../src/scripts/train.py:162)
+### 13. Resume — `resolve_resume` and `Trainer.restore`
 
 ```python
-payload     = CheckpointManager.load(path, model, optimizer, map_location=device)
-start_epoch = payload.get("epoch", 0) + 1
+resume_path    = resolve_resume(root, out_dir, args.resume_from or cfg.resume_from_checkpoint)
+resume_payload = CheckpointManager.load(resume_path, model, optimizer, ...)   # weights, optimizer
 ...
-trainer.current_epoch = start_epoch
+trainer.restore(resume_payload)     # everything else, once the Trainer exists
 ```
 
-⚠ **`global_step` is not restored**, although the payload contains `"step"`.
-`Trainer.__init__` sets `self.global_step = 0`, so on resume both the KL ramp and
-the DAB ramp restart from zero. A run resumed at epoch 50 re-anneals as if it
-were fresh. See [11](11-findings.md).
+`--resume-from latest` (what `train.sh --resume` passes) is the newest
+`epoch_*.pt` in the run's own `checkpoints/`; a path resumes from that file;
+the YAML's `training.resume_from_checkpoint` still works and the flag
+overrides it.
+
+Every checkpoint now carries `Trainer.resumable_state(history)` beside the
+weights: the scheduler's `state_dict`, `EarlyStopping.state_dict()`, and the
+metrics history. `restore` sets `current_epoch` and `global_step`, loads the
+scheduler and early-stopping state, and seeds `fit()`'s history so
+`metrics.csv` and the loss panels cover the whole run.
+
+**Contract:** a checkpoint is written in the middle of its epoch, after the
+training steps but before `early_stopping.step(metric)` and
+`scheduler.step()`. `restore` replays both, so the resumed run stands where
+the killed one would have at the start of the next epoch.
+`tests/test_training/test_resume.py` trains four epochs in one piece and in
+two halves and checks `global_step`, the LR, the early-stopping state, and
+the history agree.
+
+`CheckpointManager.rehydrate()` (called from `__init__`) adopts the
+checkpoints already on disk, so a resumed run prunes across the restart and
+`best_path` sees the old ones.
+
+A checkpoint written before this change restores weights, optimizer, and
+epoch only, with a warning naming what it could not restore. This was
+findings A2 ([11](11-findings.md)); it is closed.
 
 ### 14. Snapshot + run — [`:187`](../../src/scripts/train.py:187)
 
@@ -166,9 +188,9 @@ self.total_steps  = len(train_loader) * config.max_epochs
 `len(train_loader)` delegates to `PerStudyBatchSampler.__len__`, which is
 precomputed and constant.
 
-⚠ `total_steps` is computed at construction from `max_epochs`, so on resume the
-denominator is still the *full* run length while `global_step` restarts at 0 —
-compounding the resume problem above.
+`total_steps` is computed at construction from `max_epochs`: the full run
+length, which is the right denominator for the schedules once `global_step`
+is restored (§1.13).
 
 ---
 

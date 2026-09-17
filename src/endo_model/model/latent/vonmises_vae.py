@@ -75,6 +75,8 @@ class VonMisesBranch(nn.Module):
                 f"parameterisation must be 'angle' or 'direction', "
                 f"got {parameterisation!r}"
             )
+        if n_vMF < 0:
+            raise ValueError(f"n_vMF must be >= 0, got {n_vMF}")
         self.n_vMF = n_vMF
         self.kappa_floor = kappa_floor
         self.parameterisation = parameterisation
@@ -154,6 +156,15 @@ class VonMisesBranch(nn.Module):
                 z_vmf:    (B, 2*n_vMF) — sampled angles as (cos, sin) pairs.
                           Layout: [cos_0, cos_1, ..., cos_{n-1}, sin_0, ..., sin_{n-1}].
         """
+        if self.n_vMF == 0:
+            # Gaussian-only model. Empty tensors of the documented shapes, so
+            # every consumer (concatenation, KL, CCE, DAB, figures) sees a
+            # branch of width zero rather than a missing key. The heads exist
+            # with zero rows and are never called: the sampler's Beta draw is
+            # not defined on an empty batch and would raise here.
+            empty = cell_cls.new_zeros(cell_cls.shape[0], 0)
+            return empty, empty, cell_cls.new_zeros(cell_cls.shape[0], 0)
+
         mu_angle = self._mean_angle(cell_cls)          # (B, n_vMF)
         kappa = torch.nn.functional.softplus(
             self.kappa_head(cell_cls)

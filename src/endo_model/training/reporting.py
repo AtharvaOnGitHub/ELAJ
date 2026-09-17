@@ -208,10 +208,11 @@ class EpochReporter:
         also redraw the loss panels — it has no history to draw them from.
         """
         self.last_mixing_rows = self.report_mixing(latents)
-        self._draw(
-            f"latent_circular_epoch{epoch:03d}",
-            lambda: circular_latent(latents["mu_angle"], latents["kappa"], epoch),
-        )
+        if latents["mu_angle"].shape[1] > 0:      # Gaussian-only models have none
+            self._draw(
+                f"latent_circular_epoch{epoch:03d}",
+                lambda: circular_latent(latents["mu_angle"], latents["kappa"], epoch),
+            )
         self._draw_umap(epoch, latents)
 
     def report_mixing(self, latents: dict) -> list[dict]:

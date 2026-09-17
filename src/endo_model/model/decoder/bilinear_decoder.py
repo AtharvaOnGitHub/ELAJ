@@ -49,11 +49,12 @@ class BilinearDecoder(nn.Module):
     """
 
     def __init__(self, d_agg: int, d_dec: int = 64, d_tissue: int = 0,
-                 d_platform: int = 0) -> None:
+                 d_platform: int = 0, d_disease: int = 0) -> None:
         super().__init__()
         self.d_tissue = d_tissue
         self.d_platform = d_platform
-        d_context = d_agg + d_tissue + d_platform
+        self.d_disease = d_disease
+        d_context = d_agg + d_tissue + d_platform + d_disease
         self.W_k = nn.Linear(d_context, d_dec, bias=False)   # context key
         self.W_v = nn.Linear(d_context, d_dec, bias=False)   # context value
         self.W_out = nn.Linear(d_dec, 1, bias=True)
@@ -65,6 +66,7 @@ class BilinearDecoder(nn.Module):
         z_proj: Tensor,
         tissue: Tensor | None = None,
         platform: Tensor | None = None,
+        disease: Tensor | None = None,
     ) -> Tensor:
         """Compute log-unnormalised predicted expression for measured genes.
 
@@ -78,6 +80,8 @@ class BilinearDecoder(nn.Module):
                           when the decoder was built with d_tissue=0.
             platform:     (B, d_platform) — technical covariate embedding, or
                           None when the decoder was built with d_platform=0.
+            disease:      (B, d_disease) — disease status embedding, or None
+                          when the decoder was built with d_disease=0.
 
         Returns:
             log_mu: (B, G_meas) — log un-normalised expression.
@@ -87,7 +91,7 @@ class BilinearDecoder(nn.Module):
                 falling back to latent-only would train a different model from
                 the configured one and produce no error to notice.
         """
-        context = self._context(z_proj, tissue, platform)
+        context = self._context(z_proj, tissue, platform, disease)
         k = self.W_k(context)                            # (B, d_dec)
         v = self.W_v(context)                            # (B, d_dec)
 
@@ -103,13 +107,15 @@ class BilinearDecoder(nn.Module):
         return scores * gain.unsqueeze(1) + self.W_out.bias
 
     def _context(self, z_proj: Tensor, tissue: Tensor | None,
-                 platform: Tensor | None = None) -> Tensor:
+                 platform: Tensor | None = None,
+                 disease: Tensor | None = None) -> Tensor:
         """The per-cell vector the decoder reads: latent, then whatever it was
         built to condition on, in the order the widths were summed."""
         parts = [z_proj]
         for name, width, value in (
             ("tissue", self.d_tissue, tissue),
             ("platform", self.d_platform, platform),
+            ("disease", self.d_disease, disease),
         ):
             if width == 0:
                 continue

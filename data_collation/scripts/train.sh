@@ -30,13 +30,33 @@
 # its best epoch on the LAST epoch it completed, meaning all six were still
 # improving when they died. At ~4400 s/epoch two days holds about 39 epochs.
 #
-# Walltime was a guess until an epoch had actually been timed.  Training is
-# resumable — set training.resume_from_checkpoint in the experiment YAML to
-# outputs/first_run/checkpoints/<file> and resubmit.
+# RESUMING. A run the wall killed continues from its newest checkpoint with
+#
+#   sbatch data_collation/scripts/train.sh configs/experiment/c_ref.yaml --resume
+#
+# which restores weights, optimizer, global step (so the KL and DAB
+# schedules continue rather than restart), the cosine LR state, early
+# stopping, and the metrics history. A specific checkpoint:
+#   --resume outputs/c_ref/checkpoints/epoch_0011_step_0059994.pt
+# The YAML's training.resume_from_checkpoint still works and is overridden
+# by the flag.
 
 set -euo pipefail
 
 CONFIG="${1:-configs/experiment/first_run.yaml}"
+shift $(( $# > 0 ? 1 : 0 ))
+RESUME=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --resume)
+            if [ $# -gt 1 ] && [[ "$2" != -* ]]; then
+                RESUME=(--resume-from "$2"); shift 2
+            else
+                RESUME=(--resume-from latest); shift
+            fi ;;
+        *) echo "unknown argument $1" >&2; exit 2 ;;
+    esac
+done
 
 module purge
 module load bear-apps/2024a
@@ -66,4 +86,5 @@ echo "Training with ${CONFIG} ..."
 # otherwise lose every print() it made — including a fault report it had
 # already produced — while stderr survived, which reads as "it hung".
 export PYTHONUNBUFFERED=1
-python -u scripts/train.py --config "${CONFIG}" --root .
+if [ ${#RESUME[@]} -gt 0 ]; then echo "Resume: ${RESUME[*]}"; fi
+python -u scripts/train.py --config "${CONFIG}" --root . ${RESUME[@]+"${RESUME[@]}"}

@@ -41,7 +41,32 @@ def parse_args() -> argparse.Namespace:
         "--root", default=None,
         help="Project root directory (default: current working directory).",
     )
+    parser.add_argument(
+        "--resume-from", default=None,
+        help="Checkpoint to continue from, relative to --root. Overrides "
+             "training.resume_from_checkpoint in the YAML. 'latest' picks the "
+             "newest checkpoint in the run's own checkpoints directory.",
+    )
     return parser.parse_args()
+
+
+def resolve_resume(root: str, out_dir: Path, requested: str | None) -> Path | None:
+    """Which checkpoint to continue from, or None for a fresh run.
+
+    'latest' is the newest file by epoch in <run>/checkpoints, which is what
+    a walltime-killed run wants: the manager keeps the best three by
+    val_nb, and the newest of those is the furthest point training reached
+    that is worth continuing from.
+    """
+    if not requested:
+        return None
+    if requested != "latest":
+        return Path(root) / requested
+    found = sorted((out_dir / "checkpoints").glob("epoch_*.pt"))
+    if not found:
+        raise FileNotFoundError(f"--resume-from latest: no checkpoints in "
+                                f"{out_dir / 'checkpoints'}")
+    return found[-1]
 
 
 def main() -> None:
@@ -231,13 +256,18 @@ def main() -> None:
     )
 
     # ── Resume from checkpoint ────────────────────────────────────────────────
-    start_epoch = 0
-    if train_cfg.resume_from_checkpoint:
+    # Weights and optimizer here; everything else (global step, LR schedule,
+    # early stopping, history) once the Trainer exists, in Trainer.restore.
+    resume_payload = None
+    resume_path = resolve_resume(
+        root, out_dir, args.resume_from or train_cfg.resume_from_checkpoint
+    )
+    if resume_path is not None:
         from endo_model.training.checkpointing import CheckpointManager
-        resume_path = Path(root) / train_cfg.resume_from_checkpoint
         logger.info("Resuming from %s", resume_path)
-        payload = CheckpointManager.load(str(resume_path), model, optimizer, map_location=str(device))
-        start_epoch = payload.get("epoch", 0) + 1
+        resume_payload = CheckpointManager.load(
+            str(resume_path), model, optimizer, map_location=str(device)
+        )
 
     # ── Baseline ──────────────────────────────────────────────────────────────
     # Fitted before training, once, over the training split. Without it a
@@ -348,7 +378,8 @@ def main() -> None:
             out_dir / "metrics.csv", history
         ),
     )
-    trainer.current_epoch = start_epoch
+    if resume_payload is not None:
+        trainer.restore(resume_payload)
 
     # ── Save run config snapshot ──────────────────────────────────────────────
     _save_run_config(out_dir, exp_cfg, model_cfg, train_cfg, data_cfg)

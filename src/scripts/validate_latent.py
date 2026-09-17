@@ -369,8 +369,8 @@ def main() -> None:
             logger.info("   %s vs circular dim %d: r = %.3f  (n=%d)",
                         col, d, r, int(ok.sum()))
             record("periodic", col, f"circular dim {d}", int(ok.sum()), r)
-        best = max(periodic_corr(mu_angle[ok, d], day[ok], args.cycle_period)
-                   for d in range(mu_angle.shape[1]))
+        best = _best_over_dims(periodic_corr(mu_angle[ok, d], day[ok], args.cycle_period)
+                               for d in range(mu_angle.shape[1]))
         logger.info("   best circular dimension: r = %.3f", best)
 
     # ── 1b. the OTHER cycle, and the one this corpus can resolve ────────────
@@ -405,8 +405,8 @@ def main() -> None:
             # Against the Gaussian half too. The circular branch's claim is
             # that it represents periodic structure BETTER, and that is a
             # comparison rather than an absolute.
-            rg = max(circular_linear_corr(mu_angle[ok, d], cc_hours[ok])
-                     for d in range(mu_angle.shape[1]))
+            rg = _best_over_dims(circular_linear_corr(mu_angle[ok, d], cc_hours[ok])
+                                 for d in range(mu_angle.shape[1]))
             logger.info("   circular-linear (best circular dim): r = %.3f", rg)
         else:
             logger.info("   only %d labelled cells — skipped", int(ok.sum()))
@@ -424,8 +424,8 @@ def main() -> None:
         # Against the circular branch too: serum progesterone rises and falls
         # with the cycle, so it is a periodic quantity and the Gaussian
         # correlation alone would miss it sitting on the torus.
-        rc = max(circular_linear_corr(mu_angle[ok, d], x[ok])
-                 for d in range(mu_angle.shape[1]))
+        rc = _best_over_dims(circular_linear_corr(mu_angle[ok, d], x[ok])
+                             for d in range(mu_angle.shape[1]))
         kind = "NEGATIVE CONTROL" if col in QC_CONTROLS else "covariate"
         logger.info("   %-24s gaussian |r|=%.3f  circular r=%.3f  (n=%d)  %s",
                     col, rg, rc, n, kind)
@@ -444,6 +444,11 @@ def main() -> None:
         "circular": circ,
         "combined": np.concatenate([mu_gauss, circ], axis=-1),
     }
+    if circ.shape[1] == 0:
+        # A Gaussian-only model has no circular half to score, and its
+        # combined latent IS its Gaussian one; scoring both would print the
+        # same numbers twice under different names.
+        del branches["circular"]
     logger.info("── 3. biological labels — kNN agreement, per latent half")
     logger.info("   (branch widths: gaussian %d, circular %d, combined %d)",
                 mu_gauss.shape[1], circ.shape[1], branches["combined"].shape[1])
@@ -727,6 +732,13 @@ def _log_contributors(values, study_id, names, col: str) -> None:
     ids, counts = np.unique(np.asarray(study_id)[ok], return_counts=True)
     parts = [f"{names.get(int(i), i)} {int(c):,}" for i, c in zip(ids, counts)]
     logger.info("        from: %s", "; ".join(parts))
+
+
+def _best_over_dims(values) -> float:
+    """The largest of a per-dimension statistic, or NaN when there are no
+    dimensions: a Gaussian-only model has no circular dimension to be best."""
+    values = list(values)
+    return max(values) if values else float("nan")
 
 
 def _as_float(values):

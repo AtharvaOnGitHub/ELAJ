@@ -143,7 +143,10 @@ class ModelConfig:
     d_token: int = 32          # gene identity embedding dimension (per group)
     d_agg: int = 64            # aggregation encoder / decoder dimension
     d_gauss: int = 32          # Gaussian latent dimensions
-    n_vMF: int = 8             # number of circular latent dimensions
+    # Number of circular latent dimensions. 0 is a Gaussian-only model: the
+    # branch returns width-zero tensors, its KL and the circular figures are
+    # empty, and d_z is d_gauss. See VonMisesBranch.forward.
+    n_vMF: int = 8
     d_dec: int = 64            # decoder internal dimension
     # Width of the technical-covariate embedding handed to the decoder.
     # 0 disables it, which is what every run before wave R5 did.
@@ -166,6 +169,15 @@ class ModelConfig:
     # lean on tissue for structure the latent should be learning.  0 disables
     # conditioning.  See model/decoder/bilinear_decoder.py.
     d_tissue: int = 16
+    # Disease status embedding concatenated onto z_proj at the DECODER, as
+    # tissue and platform are. 0, the default and every run to date, keeps
+    # disease status out of the model entirely: the encoder never sees it and
+    # neither does the decoder. Non-zero tells the decoder which of the five
+    # statuses a cell carries, so the latent is no longer obliged to encode
+    # disease and what remains in it is the variation disease does not
+    # explain. The two are different models making different claims; see
+    # model/embeddings/disease_encoder.py before choosing.
+    d_disease: int = 0
     n_groups: Optional[int] = None    # populated from vocabulary at runtime
     n_studies: Optional[int] = None   # populated from data config at runtime
     group_encoder: GroupEncoderConfig = field(default_factory=GroupEncoderConfig)
@@ -218,6 +230,7 @@ class ModelConfig:
                 d.get("circular_parameterisation", "angle")
             ),
             d_tissue=int(d.get("d_tissue", 16)),
+            d_disease=int(d.get("d_disease", 0)),
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),
             n_studies=d.get("n_studies"),

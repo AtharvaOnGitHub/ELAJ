@@ -14,6 +14,8 @@ Usage:
     trainer.fit()
 """
 
+import logging
+
 import torch
 import torch.nn as nn
 from torch.optim import Optimizer
@@ -26,6 +28,11 @@ from endo_model.precision import PrecisionPolicy
 from endo_model.training.callbacks import EarlyStopping, MetricLogger
 from endo_model.training.checkpointing import CheckpointManager
 from endo_model.training.diagnostics import TrainingMonitor
+
+# The except branch around on_epoch_metrics referenced this name without it
+# being defined: a failure to write metrics.csv would have raised NameError
+# inside the handler and ended the run it was there to protect.
+logger = logging.getLogger(__name__)
 
 
 class Trainer:
@@ -138,6 +145,70 @@ class Trainer:
         self.global_step = 0
         self.current_epoch = 0
         self.total_steps = len(train_loader) * config.max_epochs
+        # History carried over a resume, so metrics.csv and the loss panels
+        # cover the whole run rather than the part after the restart.
+        self._restored_history: dict[str, list[float]] | None = None
+
+    def resumable_state(self, history: dict[str, list[float]]) -> dict:
+        """Everything a resume needs beyond weights and optimizer.
+
+        Saved in every checkpoint's payload. The two schedules (KL warm-up,
+        DAB ramp) are functions of `global_step`; the cosine LR schedule
+        and early stopping hold state of their own; the history is what
+        the reports draw.
+        """
+        return {
+            "scheduler_state": (self.scheduler.state_dict()
+                                if self.scheduler is not None else None),
+            "early_stopping_state": self.early_stopping.state_dict(),
+            "history": {k: list(v) for k, v in history.items()},
+        }
+
+    def restore(self, payload: dict) -> int:
+        """Continue from a checkpoint payload. Returns the epoch to start at.
+
+        Weights and optimizer are already loaded by CheckpointManager.load;
+        this restores the rest, and it has to restore ALL of it. Restoring
+        the epoch alone, which is what the first version did, restarted
+        `global_step` at zero, so a run resumed at epoch 12 re-annealed KL
+        from nothing and dropped the DAB pressure to zero, while the cosine
+        LR went back to its peak. A resumed run trained a different model
+        from the configured one and nothing said so (findings A2).
+        """
+        start_epoch = int(payload.get("epoch", -1)) + 1
+        self.current_epoch = start_epoch
+        self.global_step = int(payload.get("step", 0))
+        # A checkpoint is written in the middle of its epoch: after the
+        # training steps (so `step` is current) but before the two things
+        # the epoch still does afterwards, `early_stopping.step(metric)`
+        # and `scheduler.step()`. Both are replayed here so the resumed run
+        # stands exactly where the killed one would have at the start of
+        # the next epoch.
+        state = payload.get("scheduler_state")
+        if self.scheduler is not None and state is not None:
+            self.scheduler.load_state_dict(state)
+            self.scheduler.step()
+        if payload.get("early_stopping_state") is not None:
+            self.early_stopping.load_state_dict(payload["early_stopping_state"])
+            val = payload.get("val_metrics") or {}
+            metric = val.get("nb", payload.get("val_loss"))
+            if metric is not None:
+                self.early_stopping.step(float(metric))
+        if payload.get("history"):
+            self._restored_history = {k: list(v)
+                                      for k, v in payload["history"].items()}
+        missing = [k for k in ("step", "scheduler_state",
+                               "early_stopping_state", "history")
+                   if payload.get(k) is None]
+        if missing:
+            logger.warning(
+                "Checkpoint predates resumable state; %s not restored. The "
+                "schedules and early stopping will behave as a fresh run "
+                "from epoch %d.", ", ".join(missing), start_epoch,
+            )
+        logger.info("Resumed at epoch %d, global step %d", start_epoch,
+                    self.global_step)
+        return start_epoch
 
     def fit(self) -> dict[str, list[float]]:
         """Run the full training loop.
@@ -149,7 +220,9 @@ class Trainer:
             cannot distinguish a posterior collapse from a reconstruction
             plateau, and both look like "val_loss stopped falling".
         """
-        history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
+        history: dict[str, list[float]] = (
+            self._restored_history or {"train_loss": [], "val_loss": []}
+        )
 
         # Start from current_epoch so resuming from a checkpoint continues
         # rather than re-running epochs that were already completed.
@@ -198,7 +271,8 @@ class Trainer:
                         self.model, self.optimizer,
                         epoch, self.global_step, stop_metric,
                         extra={"train_metrics": train_metrics,
-                               "val_metrics": val_metrics},
+                               "val_metrics": val_metrics,
+                               **self.resumable_state(history)},
                     )
 
                 if self.on_epoch_metrics is not None:

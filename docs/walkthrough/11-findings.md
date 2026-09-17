@@ -351,6 +351,12 @@ run rather than being done between queue slots.
 
 ### A2 — `global_step` is not restored on resume; both schedules restart
 
+**CLOSED (September 2026).** `Trainer.restore` restores `global_step`, the
+scheduler state, early stopping, and the history from state every
+checkpoint now carries; `CheckpointManager.rehydrate` adopts checkpoints on
+disk. See [08 §1.13](08-flow-training.md) and
+`tests/test_training/test_resume.py`. The original finding follows.
+
 [`train.py:162-168`](../../src/scripts/train.py:162), [`trainer.py:83`](../../src/endo_model/training/trainer.py:83)
 
 ```python

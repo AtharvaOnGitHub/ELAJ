@@ -7,10 +7,12 @@ Only the best N checkpoints are retained (by validation loss) to avoid
 filling disk.
 """
 
-import os
+import logging
 from pathlib import Path
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
@@ -26,6 +28,30 @@ class CheckpointManager:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.max_to_keep = max_to_keep
         self._history: list[tuple[float, Path]] = []  # (val_loss, path)
+        self.rehydrate()
+
+    def rehydrate(self) -> int:
+        """Adopt the checkpoints already in the directory.
+
+        A resumed run starts with a fresh manager. Without this it would keep
+        `max_to_keep` NEW checkpoints beside every old one, never prune the
+        old ones, and report a `best_path` that ignores them. Each file
+        carries its own val_loss, so the ranking is rebuilt from disk.
+        Returns the number adopted.
+        """
+        found = []
+        for path in sorted(self.checkpoint_dir.glob("epoch_*.pt")):
+            try:
+                payload = torch.load(path, map_location="cpu", weights_only=False)
+                found.append((float(payload["val_loss"]), path))
+            except Exception as exc:                            # noqa: BLE001
+                logger.warning("Ignoring unreadable checkpoint %s (%s: %s)",
+                               path.name, type(exc).__name__, exc)
+        self._history = sorted(found, key=lambda x: x[0])
+        if found:
+            logger.info("Checkpoint manager adopted %d existing checkpoint(s); "
+                        "best %s", len(found), self._history[0][1].name)
+        return len(found)
 
     def save(
         self,

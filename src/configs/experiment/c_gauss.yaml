@@ -1,0 +1,70 @@
+name: c_gauss
+description: >
+  c_ref without the circular branch. The c_ series, arm 3. Gaussian only,
+  at the same total latent width.
+
+  THE QUESTION. Can a Gaussian latent alone explain the data at hand? The
+  circular branch was the architectural hypothesis of waves R5 to R8: four
+  Power Spherical dimensions for the menstrual cycle and the cell cycle. In
+  r8_direction its dimensions were barely used (median kappa on the floor,
+  circular half at 0.31 on cell family against 0.84 for the Gaussian half),
+  and c_wide collapsed three of four by epoch 7 when the Gaussian grew. This
+  arm removes the branch and hands its width to the Gaussian, so the two
+  models hold the same 16 numbers per cell and differ only in whether four
+  of them are circles.
+
+  WHAT CHANGES. n_vMF 4 to 0; d_gauss 8 to 16. The combined latent stays 16
+  wide, so PCA-16 and scVI-16 remain the width-matched baselines and the
+  c_ref row is comparable number for number. With n_vMF at 0 the branch
+  returns width-zero tensors: kl_vmf is zero, CCE and DAB read the Gaussian
+  embedding alone, and the circular figures are not drawn. kappa_floor,
+  circular_parameterisation and w_kl_vmf are kept in the overrides so this
+  file diffs against c_ref by two lines; they act on nothing.
+
+  WHAT THIS IS NOT. Not a test of the bottleneck (that is c_wide, stopped)
+  and not a test of the input (that is c_log, pending the probe). It is C6
+  of the publication plan: what the circular branch was for and what
+  happened, measured rather than inferred. If this arm matches or beats
+  c_ref on every headline number, the circular branch is a Discussion
+  paragraph, not a Results section.
+
+  EPOCH BUDGET. As c_ref: T_max 22 on about 1.2 M training cells. Check the
+  first epoch time; above 7,800 s the run will not anneal before the wall.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus.yaml
+
+output_dir: outputs/c_gauss/
+seed: 24
+
+overrides:
+  data.include_disease_statuses: [eutopic, ectopic, adenomyosis, control]
+
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_vmf: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+
+  # The two lines this arm exists for.
+  model.d_gauss: 16
+  model.n_vMF: 0
+  model.d_platform: 16
+
+  model.group_encoder.grad_checkpointing: true
+  model.kappa_floor: 1.0
+  model.circular_parameterisation: direction

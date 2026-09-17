@@ -28,6 +28,7 @@ from endo_model.data.vocabulary import GeneVocabulary
 from endo_model.model.decoder.bilinear_decoder import BilinearDecoder
 from endo_model.model.decoder.gene_query import GroupedGeneQuery
 from endo_model.model.decoder.dispersion import PerGeneDispersion
+from endo_model.model.embeddings.disease_encoder import DiseaseStatusEncoder
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
@@ -113,9 +114,15 @@ class EndoFoundationModel(nn.Module):
         self.decoder_platform = (
             PlatformEncoder(config.d_platform) if config.d_platform else None
         )
+        # Disease status, decoder side only and off by default. See
+        # embeddings/disease_encoder.py for the two claims the two settings
+        # support; the encoder never receives it under either.
+        self.decoder_disease = (
+            DiseaseStatusEncoder(config.d_disease) if config.d_disease else None
+        )
         self.decoder = BilinearDecoder(
             config.d_agg, config.d_dec, d_tissue=config.d_tissue,
-            d_platform=config.d_platform
+            d_platform=config.d_platform, d_disease=config.d_disease,
         )
         self.dispersion = PerGeneDispersion(vocabulary.vocab_size)
 
@@ -195,8 +202,12 @@ class EndoFoundationModel(nn.Module):
             self.decoder_platform(batch["platform_codes"])      # (B, d_platform)
             if self.decoder_platform is not None else None
         )
+        disease = (
+            self.decoder_disease(batch["disease_status"])       # (B, d_disease)
+            if self.decoder_disease is not None else None
+        )
         log_mu = self.decoder(
-            gene_queries, latent["z_proj"], tissue, platform
+            gene_queries, latent["z_proj"], tissue, platform, disease
         )                                                       # (B, G_meas)
         mu_hat = (
             F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)

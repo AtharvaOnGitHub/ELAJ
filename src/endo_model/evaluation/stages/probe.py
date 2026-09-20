@@ -47,13 +47,17 @@ def group_battery(base: ScorerSettings) -> ScorerSettings:
 class ProbeSettings:
     pipeline: ScorerSettings
     group: ScorerSettings
+    # Labels the linear probe is fitted on, for pipeline stages. Empty
+    # disables it. See linear_probe.py for what it adds to the kNN rows.
+    linear_labels: tuple[str, ...] = (HARMONISED_LINEAGE, HARMONISED_PHASE)
 
     @classmethod
     def default(cls, base: ScorerSettings | None = None,
-                scib: bool = False) -> "ProbeSettings":
+                scib: bool = False, linear: bool = True) -> "ProbeSettings":
         base = base or ScorerSettings()
         pipeline = base if scib else replace(base, scib_labels=())
-        return cls(pipeline=pipeline, group=group_battery(base))
+        return cls(pipeline=pipeline, group=group_battery(base),
+                   linear_labels=(HARMONISED_LINEAGE, HARMONISED_PHASE) if linear else ())
 
 
 class StageProbe:
@@ -95,4 +99,13 @@ class StageProbe:
                    corpus: CorpusMatrix):
         embedding = Embedding(method=name, latent=embeddings.matrices[name],
                               fit_seconds=0.0, settings={"kind": kind})
-        return self._scorers[kind].score(embedding, corpus)
+        rows = self._scorers[kind].score(embedding, corpus)
+        if kind == PIPELINE and self.settings.linear_labels:
+            from endo_model.evaluation.stages.linear_probe import LinearProbe
+
+            stamp = dict(method=name, gene_policy="", width=embedding.width,
+                         fit_seconds=0.0, supervised_on="", fit_on="")
+            rows += LinearProbe(self.settings.linear_labels,
+                                seed=self.settings.pipeline.seed).score(
+                name, embedding.latent, corpus, stamp)
+        return rows

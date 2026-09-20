@@ -34,6 +34,8 @@ PIPELINE_COLUMNS = (
     ("cross-donor", HARMONISED_PHASE, "xdonor phase"),
     ("cross-donor-p", HARMONISED_PHASE, "p"),
     ("knn-agreement", "patient_id", "knn patient (low=good)"),
+    ("linear-probe", HARMONISED_LINEAGE, "linear family"),
+    ("linear-probe", HARMONISED_PHASE, "linear phase"),
 )
 GROUP_LABELS = (
     (HARMONISED_LINEAGE, "family"),
@@ -158,7 +160,11 @@ class StageTables:
                 "`counts_log` are per-group PCA of the counts as ELAJ reads "
                 "them (raw) and as scVI or PCA would (log-normalised); the "
                 "gap between those two rows is what the tokenisation costs "
-                "before any attention runs.", "",
+                "before any attention runs. `linear` columns are a logistic "
+                "regression fitted on half the donors and scored on the other "
+                "half, balanced accuracy as excess over 1/K: high linear with "
+                "low knn means the label is present but not in "
+                "neighbour-distance form.", "",
                 "## Along the encoder", "", self.pipeline_table(), "",
                 "## Per group: linear readings of the counts against the "
                 "encoder's summary", "", self.summary(), "",

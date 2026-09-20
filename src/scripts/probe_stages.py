@@ -63,6 +63,13 @@ def parse_args() -> argparse.Namespace:
                         "widest stage.")
     p.add_argument("--no-scib", action="store_true",
                    help="Accepted for compatibility; scIB is already off.")
+    p.add_argument("--untrained", action="store_true",
+                   help="Probe the model at random initialisation instead of "
+                        "the checkpoint. Same architecture, no training: says "
+                        "whether the readout or the training put the group "
+                        "summaries where they are.")
+    p.add_argument("--no-linear", action="store_true",
+                   help="Skip the linear probe on the pipeline stages.")
     p.add_argument("--reference-components", type=int, default=32,
                    help="Width of the per-group PCA references; 32 matches "
                         "d_token so the searches are in spaces of equal size.")
@@ -162,15 +169,20 @@ def main() -> None:
     names = {s["id"]: s["name"] for s in study_configs}
     obs_columns = required_obs_columns()
 
-    run_dir = resolve_run_dir(root, exp_cfg.output_dir, args.runs_dir)
-    if not run_dir.is_dir():
-        logger.error("no run directory at %s", run_dir)
-        sys.exit(1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = best_checkpoint(run_dir)
+    torch.manual_seed(exp_cfg.seed)
     model = EndoFoundationModel(vocab, model_cfg).to(device)
-    CheckpointManager.load(str(ckpt), model, None, map_location=device)
-    logger.info("Checkpoint: %s", ckpt)
+    if args.untrained:
+        logger.info("Untrained model: random initialisation at seed %d, no "
+                    "checkpoint loaded", exp_cfg.seed)
+    else:
+        run_dir = resolve_run_dir(root, exp_cfg.output_dir, args.runs_dir)
+        if not run_dir.is_dir():
+            logger.error("no run directory at %s", run_dir)
+            sys.exit(1)
+        ckpt = best_checkpoint(run_dir)
+        CheckpointManager.load(str(ckpt), model, None, map_location=device)
+        logger.info("Checkpoint: %s", ckpt)
 
     readers = build_readers(list(vocab.group_names), groups=not args.no_groups)
     logger.info("%d stages to collect", len(readers))
@@ -201,15 +213,17 @@ def main() -> None:
 
     base = ScorerSettings(k=args.k, k_cross_donor=args.k_cross_donor,
                           permutations=args.permutations, seed=args.seed)
-    probe = StageProbe(ProbeSettings.default(base, scib=args.scib))
+    probe = StageProbe(ProbeSettings.default(base, scib=args.scib,
+                                             linear=not args.no_linear))
     widths = {n: embeddings.width(n) for n in embeddings.names}
     tables_of = lambda r: StageTables(r, embeddings.kinds, widths)  # noqa: E731
 
     def write(report: BenchmarkReport) -> None:
         report.write_csv(out / "stages.csv")
         report.write_settings(out / "settings.json")
-        tables_of(report).write_markdown(out / "stages.md",
-                                         title=f"Stage probe: {args.run}")
+        tables_of(report).write_markdown(
+            out / "stages.md",
+            title=f"Stage probe: {args.run}" + (" (untrained)" if args.untrained else ""))
 
     report = probe.score(embeddings, corpus, after_each=write)
     write(report)

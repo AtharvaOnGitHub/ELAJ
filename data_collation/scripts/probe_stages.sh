@@ -20,6 +20,10 @@
 #   sbatch data_collation/scripts/probe_stages.sh r8_direction \
 #       --runs-dir outputs/r8 --no-groups --out outputs/probes/r8_quick
 #
+#   # the same architecture at random initialisation, no checkpoint:
+#   sbatch data_collation/scripts/probe_stages.sh r8_direction \
+#       --untrained --out outputs/probes/r8_untrained
+#
 # The first positional argument is the experiment name; everything else is
 # passed through to scripts/probe_stages.py.
 #

@@ -164,6 +164,24 @@ A checkpoint written before this change restores weights, optimizer, and
 epoch only, with a warning naming what it could not restore. This was
 findings A2 ([11](11-findings.md)); it is closed.
 
+### 13b. The label probe — `training/label_probe.py`
+
+Every validation pass also collects `mu_gauss` and `mu_angle` for every
+validation cell (a few MB) and, after the pass, scores the combined latent
+on cell family with the benchmark's `label_knn_agreement`: `val_family_knn`
+in metrics.csv, excess over chance, higher is better. The labels come from
+the validation dataset's `extra_obs` (the family source columns are
+requested in train.py) merged by the same harmoniser the scorer uses, and
+are aligned to the validation sampler's order, which is fixed.
+
+`training.stop_metric: family_knn` makes that number, negated, the one that
+ranks checkpoints and drives early stopping; the default `nb` keeps the old
+behaviour. This is model selection on validation labels, not training on
+them: nothing here produces a gradient and the test donors are never
+scored. A NaN probe (no labelled validation cell) falls back to `nb` for
+that epoch with a warning. The probe's own failure costs the number, not
+the epoch.
+
 ### 14. Snapshot + run — [`:187`](../../src/scripts/train.py:187)
 
 `_save_run_config` [`:198`](../../src/scripts/train.py:198) dumps all four configs

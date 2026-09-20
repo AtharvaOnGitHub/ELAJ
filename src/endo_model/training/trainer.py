@@ -16,6 +16,7 @@ Usage:
 
 import logging
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Optimizer
@@ -50,6 +51,8 @@ class Trainer:
         device:          torch.device for training.
         cce_enabled:     Whether to run two forward passes per batch for CCE.
         cce_every:       Run that second pass on every k-th step only.
+        label_probe:     A LabelProbe scored on the validation latent each
+                         epoch; its number joins val_metrics.
         monitor:         TrainingMonitor watching for non-finite values.  None
                          builds a default one, so a Trainer constructed directly
                          (in a test, say) still reports where a NaN came from
@@ -69,6 +72,7 @@ class Trainer:
         device: torch.device | None = None,
         cce_enabled: bool = False,
         cce_every: int = 1,
+        label_probe=None,
         monitor: TrainingMonitor | None = None,
         reporter=None,
         extra_val_metrics=None,
@@ -85,6 +89,10 @@ class Trainer:
         self.config = config
         self.cce_enabled = cce_enabled
         self.cce_every = max(int(cce_every), 1)
+        # Scores the validation latent on a label after every validation
+        # pass and may rank checkpoints; see label_probe.py.
+        self.label_probe = label_probe
+        self._probe_rows: list[tuple[np.ndarray, np.ndarray]] = []
         self.device = device or torch.device("cpu")
         # Called with the history dict after every epoch. train.py uses it to
         # rewrite metrics.csv, so the per-epoch record survives a run that is
@@ -274,7 +282,13 @@ class Trainer:
                 # whether the model is improving — on run s0_ref it would have
                 # fired at epoch 3 and thrown away the best model, which was at
                 # epoch 9. `nb` falls monotonically enough to be a signal.
-                stop_metric = val_metrics.get("nb", val_loss)
+                #
+                # `training.stop_metric` can name the label probe's number
+                # instead (`family_knn`), which is higher-is-better, so it is
+                # negated: early stopping and the checkpoint ranking both
+                # minimise. A probe that scored nothing this epoch (NaN)
+                # falls back to nb rather than ranking the checkpoint last.
+                stop_metric = self._stop_metric(val_metrics, val_loss)
 
                 # Checkpoints are ranked by the same metric early stopping
                 # uses, for the same reason. Ranking by the composite total
@@ -319,6 +333,16 @@ class Trainer:
                 self.scheduler.step()
 
         return history
+
+    def _stop_metric(self, val_metrics: dict, val_loss: float) -> float:
+        name = getattr(self.config, "stop_metric", "nb") or "nb"
+        if name != "nb":
+            value = val_metrics.get(name, float("nan"))
+            if value == value:                      # not NaN
+                return -float(value)
+            logger.warning("stop_metric %r is unavailable this epoch; using nb",
+                           name)
+        return val_metrics.get("nb", val_loss)
 
     def _cce_due(self) -> bool:
         """Whether this step runs the second encoder pass for CCE.
@@ -410,6 +434,7 @@ class Trainer:
     def _val_epoch(self) -> dict[str, float]:
         self.model.eval()
         val_logger = MetricLogger()
+        self._probe_rows = []
 
         for batch in self.val_loader:
             batch = _to_device(batch, self.device)
@@ -428,8 +453,24 @@ class Trainer:
             # extra pass and sample different dropout.
             if self._collector is not None:
                 self._collector.add(output, batch)
+            if self.label_probe is not None:
+                self._probe_rows.append((
+                    output["mu_gauss"].detach().float().cpu().numpy(),
+                    output["mu_angle"].detach().float().cpu().numpy(),
+                ))
 
-        return val_logger.epoch_averages()
+        metrics = val_logger.epoch_averages()
+        if self.label_probe is not None and self._probe_rows:
+            mu = np.concatenate([r[0] for r in self._probe_rows])
+            angle = np.concatenate([r[1] for r in self._probe_rows])
+            self._probe_rows = []
+            try:
+                metrics.update(self.label_probe.score(mu, angle))
+            except Exception as exc:                        # noqa: BLE001
+                # The probe is a diagnostic; a failure costs the number, not
+                # the epoch.
+                logger.warning("label probe failed (%s: %s)", type(exc).__name__, exc)
+        return metrics
 
 
 def _record(

@@ -139,6 +139,12 @@ def main() -> None:
             if data_cfg.sample_platform_csv else None
         ),
     )
+    # The validation dataset also carries the cell-family source columns, so
+    # the label probe can score the latent on family every epoch. They live in
+    # `extra_obs`, outside the Batch; the model never sees them.
+    from endo_model.evaluation.label_harmonisation import LINEAGE_SOURCE_COLUMNS
+    split_kwargs["extra_obs_columns"] = list(LINEAGE_SOURCE_COLUMNS)
+
     # One read of the corpus for both splits (findings C3: it used to be
     # read once per split, two full passes before the first step).
     datasets = EndometriosisDataset.load_splits(("train", "val"), **split_kwargs)
@@ -194,6 +200,20 @@ def main() -> None:
     )
     train_loader = DataLoader(train_dataset, batch_sampler=train_sampler, **loader_kwargs)
     val_loader = DataLoader(val_dataset, batch_sampler=val_sampler, **loader_kwargs)
+
+    # ── Label probe: cell family on the validation latent, every epoch ──────
+    # Labels are aligned to the validation sampler's order, which is fixed
+    # (shuffle=False), so the latents collected in `_val_epoch` line up.
+    from endo_model.training.label_probe import LabelProbe, family_labels_in_order
+    val_order = [i for batch in val_sampler for i in batch]
+    label_probe = LabelProbe(family_labels_in_order(val_dataset, val_order),
+                             k=30, seed=exp_cfg.seed)
+    if label_probe.n_labelled == 0:
+        logger.warning("No validation cell carries a family label; the probe "
+                       "will report NaN and stop_metric falls back to nb")
+    if train_cfg.stop_metric != "nb":
+        logger.info("Checkpoints ranked and early stopping driven by "
+                    "val_%s (negated), not val_nb", train_cfg.stop_metric)
 
     # ── Model ─────────────────────────────────────────────────────────────────
     from endo_model.model.endo_model import EndoFoundationModel
@@ -365,6 +385,7 @@ def main() -> None:
         device=device,
         cce_enabled=model_cfg.cce.enabled,
         cce_every=model_cfg.cce.every,
+        label_probe=label_probe,
         monitor=monitor,
         reporter=reporter,
         extra_val_metrics=hvg_metric,

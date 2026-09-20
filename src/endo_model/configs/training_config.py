@@ -124,6 +124,12 @@ class TrainingConfig:
     early_stop_patience: int = 10
     early_stop_warmup_epochs: int = 0
     val_check_interval: int = 1
+    # Which validation number ranks checkpoints and drives early stopping.
+    # "nb" (reconstruction per gene, lower is better) is what every run to
+    # date used. "family_knn" is the label probe's cell-family kNN excess on
+    # the validation latent (higher is better; negated internally), which is
+    # closer to what the paper is judged on. See training/label_probe.py.
+    stop_metric: str = "nb"
     kl_annealing: KLAnnealingConfig = field(default_factory=KLAnnealingConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     resume_from_checkpoint: Optional[str] = None
@@ -150,6 +156,7 @@ class TrainingConfig:
             early_stop_patience=int(d.get("early_stop_patience", 10)),
             early_stop_warmup_epochs=int(d.get("early_stop_warmup_epochs", 0)),
             val_check_interval=int(d.get("val_check_interval", 1)),
+            stop_metric=str(d.get("stop_metric", "nb")),
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
             diagnostics=DiagnosticsConfig.from_dict(d.get("diagnostics", {})),
             resume_from_checkpoint=d.get("resume_from_checkpoint"),

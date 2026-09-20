@@ -40,11 +40,26 @@ def test_codes_are_non_negative_and_sizes_admit_them(platform):
 
 
 def test_zero_is_reserved_for_unknown(platform):
-    """garcia_alonso has no confirmed platform, so it must read as unknown —
-    not as whichever category happened to be numbered zero."""
+    """A study with nothing confirmed must read as unknown, not as whichever
+    category happened to be numbered zero. garcia_alonso_2021_a was that
+    study until its h5ad was read on the cluster (20 September 2026); its
+    sequencer is still unrecorded and stays 0 while its chemistry is set."""
     record = platform.record_for("garcia_alonso_2021_a")
     assert record is not None
-    assert not record.is_known
+    assert record.is_known
+    assert record.codes[2] == 0                     # sequencer: CELLxGENE has none
+    assert record.codes[1] == 6                     # chemistry: mixed v2/v3 fallback
+
+
+def test_garcia_alonso_samples_resolve_their_own_chemistry():
+    """A13 and A30 are 10x 3' v2; every other library is v3. Read per sample
+    from sample_platform.csv, not through the study's mixed fallback."""
+    both = StudyPlatform(CSV, CSV.with_name("sample_platform.csv"))
+    v2 = both.codes_for_sample("garcia_alonso_2021_a", "A13")
+    v3 = both.codes_for_sample("garcia_alonso_2021_a", "SAMN15049048")
+    assert v2[1] == 1 and v3[1] == 2
+    assert both.codes_for_sample("garcia_alonso_2021_b", "A30")[1] == 1
+    assert both.codes_for("garcia_alonso_2021_c")[1] == 2
 
 
 def test_the_two_studies_that_differ_from_every_other_are_encoded_differently():

@@ -15,6 +15,8 @@ from tests.test_training.test_trainer import (  # noqa: E402
 
 
 def _run(cce_every: int, steps: int = 6):
+    """Number of `encode` calls beyond the one every forward pass makes:
+    `forward` goes through `encode` too, so the count is steps + CCE passes."""
     vocab = make_vocab()
     model = EndoFoundationModel(vocab, make_config())
     loss = CompositeLoss(n_studies=N_STUDIES, d_gauss=D_GAUSS, n_circular=N_CIRC,
@@ -35,7 +37,7 @@ def _run(cce_every: int, steps: int = 6):
                       config=TrainingConfig(max_epochs=1, early_stop_patience=100),
                       cce_enabled=True, cce_every=cce_every)
     trainer.fit()
-    return len(calls)
+    return len(calls) - steps
 
 
 def test_every_step_by_default():

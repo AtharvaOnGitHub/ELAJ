@@ -7,9 +7,11 @@ Two packages are in common use:
 This module tries scib-metrics first, then falls back to scib, then to
 sklearn-only metrics (NMI, ARI) which are always available when anndata is.
 
-scib metrics returned:
-    Batch correction   — ilisi_knn, silhouette_batch (ASW batch)
-    Bio conservation   — clisi_knn, silhouette_bio (ASW cell type), nmi, ari
+scib metrics returned (scib-metrics backend):
+    Batch correction   — ilisi_knn, silhouette_batch (ASW batch), kbet,
+                         graph_connectivity, pcr_batch
+    Bio conservation   — clisi_knn, silhouette_bio (ASW cell type),
+                         isolated_labels, nmi, ari
 """
 
 from __future__ import annotations
@@ -74,48 +76,76 @@ def _compute_via_scib_metrics(
     bio_labels: np.ndarray,
     n_neighbors: int,
 ) -> dict[str, float]:
-    from scib_metrics import ilisi_knn, clisi_knn, silhouette_batch, silhouette_label
+    """The scib-metrics battery, against the 0.5 API.
+
+    Every call here used to be made against an older signature (a sparse
+    kNN graph where 0.5 wants a `NeighborsResults`, two arguments to
+    `silhouette_batch` where it takes three) and the failures were logged at
+    DEBUG, so the first benchmark's scIB rows held silhouette_bio, NMI and
+    ARI and nothing else, with no line in the log to say why. Failures are
+    WARNINGs now, and the kNN result is built in the form the package wants.
+
+    Batch correction (higher = better mixed):
+        ilisi_knn, silhouette_batch, kbet, graph_connectivity, pcr_batch
+    Bio conservation (higher = better separated):
+        clisi_knn, silhouette_bio, isolated_labels, nmi, ari
+    """
+    import scib_metrics as sm
+    from scib_metrics.nearest_neighbors import NeighborsResults
     import sklearn.neighbors
 
-    # Build kNN graph as (N, N) sparse connectivity
-    nn = sklearn.neighbors.NearestNeighbors(n_neighbors=n_neighbors, metric="euclidean")
-    nn.fit(embeddings)
-    knn_graph = nn.kneighbors_graph(mode="connectivity")
+    X = np.ascontiguousarray(embeddings, dtype=np.float32)
+    batches = batch_labels.astype(str)
+    labels = bio_labels.astype(str)
+
+    # scib-metrics wants each cell's neighbours INCLUDING itself as the
+    # first column, which is what a query against the fitted set returns.
+    k = min(n_neighbors + 1, X.shape[0])
+    nn = sklearn.neighbors.NearestNeighbors(n_neighbors=k).fit(X)
+    distances, indices = nn.kneighbors(X)
+    knn = NeighborsResults(indices=indices, distances=distances)
 
     results: dict[str, float] = {}
-    try:
-        results["ilisi_knn"] = float(np.mean(
-            ilisi_knn(knn_graph, batch_labels.astype(str))
-        ))
-    except Exception as exc:
-        logger.debug("ilisi_knn failed: %s", exc)
 
-    try:
-        results["clisi_knn"] = float(np.mean(
-            clisi_knn(knn_graph, bio_labels.astype(str))
-        ))
-    except Exception as exc:
-        logger.debug("clisi_knn failed: %s", exc)
+    def attempt(name, fn):
+        try:
+            results[name] = float(fn())
+        except Exception as exc:                                  # noqa: BLE001
+            logger.warning("scib-metrics %s failed (%s: %s)", name,
+                           type(exc).__name__, exc)
 
-    try:
-        results["silhouette_batch"] = float(
-            silhouette_batch(embeddings, batch_labels.astype(str))
-        )
-    except Exception as exc:
-        logger.debug("silhouette_batch failed: %s", exc)
-
-    try:
-        results["silhouette_bio"] = float(
-            silhouette_label(embeddings, bio_labels.astype(str))
-        )
-    except Exception as exc:
-        logger.debug("silhouette_bio failed: %s", exc)
+    attempt("ilisi_knn", lambda: sm.ilisi_knn(knn, batches))
+    attempt("clisi_knn", lambda: sm.clisi_knn(knn, labels))
+    attempt("silhouette_batch", lambda: sm.silhouette_batch(X, labels, batches))
+    attempt("silhouette_bio", lambda: sm.silhouette_label(X, labels))
+    attempt("kbet", lambda: sm.kbet_per_label(knn, batches, labels))
+    attempt("graph_connectivity", lambda: sm.graph_connectivity(knn, labels))
+    attempt("isolated_labels", lambda: sm.isolated_labels(X, labels, batches))
+    # Principal component regression on the batch: the share of the
+    # embedding's variance the batch explains, reported as 1 - that share
+    # so higher is better mixed, as scib reports it.
+    attempt("pcr_batch", lambda: 1.0 - _pc_regression(X, batches))
 
     results.update(_compute_sklearn_only(embeddings, batch_labels, bio_labels))
     return results
 
 
-# ── scib (original) backend ───────────────────────────────────────────────────
+def _pc_regression(X: np.ndarray, covariate: np.ndarray, n_comps: int = 20) -> float:
+    """Variance-weighted R^2 of the principal components on a categorical
+    covariate: scib's `pcr`, on the embedding itself."""
+    from sklearn.decomposition import PCA
+    from sklearn.linear_model import LinearRegression
+    from sklearn.preprocessing import OneHotEncoder
+
+    n_comps = min(n_comps, X.shape[1], X.shape[0] - 1)
+    pca = PCA(n_components=n_comps).fit(X)
+    scores = pca.transform(X)
+    onehot = OneHotEncoder(sparse_output=False).fit_transform(covariate.reshape(-1, 1))
+    r2 = np.array([LinearRegression().fit(onehot, scores[:, i]).score(onehot, scores[:, i])
+                   for i in range(n_comps)])
+    var = pca.explained_variance_
+    return float(np.sum(r2 * var) / np.sum(var))
+
 
 def _compute_via_scib(
     embeddings: np.ndarray,

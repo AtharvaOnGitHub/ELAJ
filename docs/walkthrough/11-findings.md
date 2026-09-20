@@ -523,6 +523,20 @@ inflates `D` with genes that are DNS in every training study.
 
 ---
 
+### B8 — The scIB batch metrics were silently absent
+
+`evaluation/scib_metrics.py` called scib-metrics 0.5 with an older
+signature (a sparse kNN graph where the package wants a `NeighborsResults`;
+two arguments to `silhouette_batch` where it takes three) and logged every
+failure at DEBUG. The first benchmark (`outputs/benchmarks/r8_all`)
+therefore carries `silhouette_bio`, NMI and ARI and no batch metric at all,
+and nothing in the log said so. The cluster's own test suite caught it
+(`test_scib_metrics_keys_when_available`) on 20 September 2026.
+
+**CLOSED (September 2026).** Rewritten against the real API, with kBET,
+graph connectivity, isolated labels and a PC-regression batch score added,
+and failures at WARNING. Ten metrics verified locally.
+
 ## C. Performance
 
 ### C1 — ✅ FIXED (`ca6a0c0`) — `_build_gene_reps` did O(D) Python work every forward pass

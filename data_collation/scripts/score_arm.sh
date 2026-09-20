@@ -13,8 +13,8 @@
 # Scores one finished training arm every way the campaign needs, and puts
 # its row in outputs/campaign.csv beside the reference baseline.
 #
-#   sbatch data_collation/scripts/score_arm.sh c_ref
-#   sbatch data_collation/scripts/score_arm.sh c_wide --note "d_gauss 32"
+#   sbatch data_collation/scripts/score_arm.sh c1_ref
+#   sbatch data_collation/scripts/score_arm.sh c1_gauss --note "n_circular 0"
 #   sbatch data_collation/scripts/score_arm.sh r8_direction --runs-dir outputs/r8 \
 #       --baselines outputs/benchmarks/r8_inductive/benchmark.csv
 #
@@ -25,16 +25,19 @@
 #   4. campaign_row         -> outputs/campaign.csv, .md      the one line that matters
 #
 # THE BASELINES ARE NOT RE-TRAINED PER ARM. Step 2 reads them from
-# --baselines (default outputs/benchmarks/c_baselines/benchmark.csv, the
-# control-included corpus fitted on the training donors) and runs only what
-# that file lacks. Produce that file once per corpus with
+# --baselines and runs only what that file lacks. The default is
+# outputs/benchmarks/<series>_baselines/benchmark.csv where <series> is the
+# arm name's prefix before the first underscore (c1_gauss -> c1_baselines),
+# because baselines belong to a corpus and the series names the corpus.
+# Produce that file once per series with
 #
-#   sbatch data_collation/scripts/benchmark_baselines.sh c_ref --no-elaj \
+#   sbatch data_collation/scripts/benchmark_baselines.sh c1_ref --no-elaj \
 #       --fit-split train --methods pca scvi scanvi \
-#       --out outputs/benchmarks/c_baselines
+#       --out outputs/benchmarks/c1_baselines
 #
-# and every c_ arm reuses it. If the file is absent the baselines are
-# trained here, which adds about an hour and produces the same rows.
+# and every arm of the series reuses it. If the file is absent the
+# baselines are trained here, which adds about an hour and produces the
+# same rows.
 #
 # Flags: --runs-dir DIR      where the run directory lives (filed waves)
 #        --baselines CSV     benchmark.csv to reuse (see above)
@@ -51,7 +54,7 @@ set -euo pipefail
 
 ARM=""
 RUNS_DIR=""
-BASELINES="outputs/benchmarks/c_baselines/benchmark.csv"
+BASELINES=""
 CAMPAIGN="outputs/campaign.csv"
 NOTE=""
 GROUPS=0
@@ -72,8 +75,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 if [ -z "$ARM" ]; then
-    echo "Give the experiment name, e.g. c_ref" >&2
+    echo "Give the experiment name, e.g. c1_ref" >&2
     exit 2
+fi
+if [ -z "$BASELINES" ]; then
+    BASELINES="outputs/benchmarks/${ARM%%_*}_baselines/benchmark.csv"
 fi
 
 module purge

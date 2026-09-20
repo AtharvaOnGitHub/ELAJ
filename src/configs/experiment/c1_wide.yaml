@@ -1,6 +1,6 @@
-name: c_wide
+name: c1_wide
 description: >
-  c_ref with the Gaussian latent four times wider. The c_ series, arm 2.
+  c1_ref with the Gaussian latent four times wider. The c1 series, arm 2.
 
   THE HYPOTHESIS. The benchmark put the 16-wide latent below 16-component
   PCA on cell family (excess 0.84 against 0.98). The latent is the last of
@@ -9,7 +9,7 @@ description: >
   under a KL weight of 0.5 with free bits of 0.25 nats each, plus DAB
   pressure, is a narrow channel. If that is the cause, widening it recovers
   most of the gap without touching anything else. If it is not, this arm
-  scores like c_ref and the stage probe (outputs/probes/r8_stages) says
+  scores like c1_ref and the stage probe (outputs/probes/r8_stages) says
   where else to look.
 
   WHAT CHANGES. d_gauss 8 to 32. n_circular stays at 4, so the combined latent
@@ -31,15 +31,15 @@ description: >
   sized configuration, not a new guess. The benchmark scoring for this arm
   should use width-matched PCA as well as PCA-16.
 
-  EPOCH BUDGET. As c_ref: T_max 22 on about 1.2 M training cells. CHECK
+  EPOCH BUDGET. As c1_ref: T_max 22 on about 1.2 M training cells. CHECK
   THE FIRST EPOCH TIME IN THE LOG; above 7,800 s the run will not anneal
   before the wall and needs a resume.
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
-data:     configs/data/corpus_c.yaml
+data:     configs/data/corpus_c1.yaml
 
-output_dir: outputs/c_wide/
+output_dir: outputs/c1_wide/
 seed: 24
 
 overrides:
@@ -51,6 +51,7 @@ overrides:
   training.diagnostics.latent_every: 5
   training.early_stop_patience: 7
   training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5

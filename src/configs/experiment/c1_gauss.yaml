@@ -1,6 +1,6 @@
-name: c_gauss
+name: c1_gauss
 description: >
-  c_ref without the circular branch. The c_ series, arm 3. Gaussian only,
+  c1_ref without the circular branch. The c1 series, arm 3. Gaussian only,
   at the same total latent width.
 
   THE QUESTION. Can a Gaussian latent alone explain the data at hand? The
@@ -8,28 +8,28 @@ description: >
   Power Spherical dimensions for the menstrual cycle and the cell cycle. In
   r8_direction its dimensions were barely used (median kappa on the floor,
   circular half at 0.31 on cell family against 0.84 for the Gaussian half),
-  and c_wide collapsed three of four by epoch 7 when the Gaussian grew. This
+  and c1_wide collapsed three of four by epoch 7 when the Gaussian grew. This
   arm removes the branch and hands its width to the Gaussian, so the two
   models hold the same 16 numbers per cell and differ only in whether four
   of them are circles.
 
   WHAT CHANGES. n_circular 4 to 0; d_gauss 8 to 16. The combined latent stays 16
   wide, so PCA-16 and scVI-16 remain the width-matched baselines and the
-  c_ref row is comparable number for number. With n_circular at 0 the branch
+  c1_ref row is comparable number for number. With n_circular at 0 the branch
   returns width-zero tensors: kl_circ is zero, CCE and DAB read the Gaussian
   embedding alone, and the circular figures are not drawn. kappa_floor,
   circular_parameterisation and w_kl_circ are kept in the overrides so this
-  file diffs against c_ref by two lines; they act on nothing.
+  file diffs against c1_ref by two lines; they act on nothing.
 
-  WHAT THIS IS NOT. Not a test of the bottleneck (that is c_wide, stopped)
-  and not a test of the input (that is c_log, pending the probe). It is C6
+  WHAT THIS IS NOT. Not a test of the bottleneck (that is c1_wide, stopped)
+  and not a test of the input (that is c1_log, pending the probe). It is C6
   of the publication plan: what the circular branch was for and what
   happened, measured rather than inferred. If this arm matches or beats
-  c_ref on every headline number, the circular branch is a Discussion
+  c1_ref on every headline number, the circular branch is a Discussion
   paragraph, not a Results section.
 
   CCE CADENCE. model.cce.every 4: the second encoder pass on every fourth
-  step, about a third off the epoch. c_ref (every step) and c_nocce (none)
+  step, about a third off the epoch. c1_ref (every step) and c1_nocce (none)
   are the two references this arm is read against.
 
   EPOCH BUDGET. About 1.2 M training cells at roughly 5,300 s/epoch; T_max
@@ -38,9 +38,9 @@ description: >
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
-data:     configs/data/corpus_c.yaml
+data:     configs/data/corpus_c1.yaml
 
-output_dir: outputs/c_gauss/
+output_dir: outputs/c1_gauss/
 seed: 24
 
 overrides:
@@ -52,6 +52,7 @@ overrides:
   training.diagnostics.latent_every: 5
   training.early_stop_patience: 7
   training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5

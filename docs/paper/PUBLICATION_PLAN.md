@@ -95,89 +95,105 @@ reviewer asks for first.
 
 ---
 
-## 3. Phase A: diagnose (this week)
+## 3. Phase A: diagnose
 
-### 3.1 The stage probe (`outputs/probes/r8_stages`, running)
+### 3.1 The stage probe: read (`outputs/probes/r8_stages`, 18 September)
 
-Scores the five per-cell tensors along the encoder and the input and output
-of each of the 45 group encoders with the benchmark scorer. Walkthrough 14
-has the reading table. The outcomes and what each sends us to:
+Every number is cell-family kNN agreement, excess over chance, on the
+benchmark's 238,592 held-out cells.
 
-| if | then the fix is in |
-|---|---|
-| `groups/concat` and `cell_cls` high, `mu_gauss` low | the bottleneck: latent width, `beta_max`, `free_bits`, DAB pressure |
-| `groups/concat` high, `cell_cls` low | aggregation: `AggregationEncoder`, `d_agg` |
-| `groups/concat` low, `tokens/concat` high | the group encoders: depth, `d_token`, training signal |
-| `tokens/concat` low | tokenisation: value encoder, DSBN, DNS |
-| most `group/<g>` at or below `tokens/<g>` | attention within groups is not earning its parameters; C2 needs a different defence |
+| point along the encoder | width | family | cross-donor family |
+|---|---:|---:|---:|
+| PCA-32 of each group's raw counts, concatenated | 1,440 | 0.951 | 0.908 |
+| PCA-32 of each group's log-normalised counts | 1,440 | 0.979 | 0.974 |
+| the 45 group transformers' outputs | 1,440 | **0.777** | **0.577** |
+| after aggregation (`cell_cls`) | 64 | 0.819 | 0.717 |
+| Gaussian mean | 8 | 0.842 | 0.719 |
+| latent (the benchmark row, reproduced) | 16 | 0.840 | 0.749 |
 
-- [ ] **A1** Read the probe. Write the one-paragraph finding into §1 of this document.
-- [ ] **A2** Per-dimension KL of the Gaussian branch on r8_direction: how many of the 8 dimensions carry information. Free bits at 0.25 nats over 8 dimensions is a 2-nat floor; if half the dimensions sit on it the effective latent is 4-wide.
-- [ ] **A3** Inductive scVI: train on the 196 training donors, embed the 76 held-out ones. Same for PCA and scANVI. Harmony and Scanorama have no out-of-sample map and stay transductive, flagged. This is the number ELAJ has to beat. Needs a `fit_split` setting on `BaselineMethod`.
+**The loss is inside the 45 group transformers and nowhere else.** The
+genes carry the family (0.95 under a plain linear reading); the group
+summaries carry 0.78; every stage after recovers a little. Per group, the
+transformer's 32-number summary scores below a 32-component PCA of the same
+genes in 43 of 45 groups (median 0.42 against about 0.75), and below the
+group's mean raw count. The bottleneck and the loss weights are not the
+cause; c_wide was the wrong arm and was stopped.
 
-### 3.2 What the probe cannot tell us
+The raw-count tokenisation is a smaller, separate cost (0.951 against
+0.979) and carries donor identity through sequencing depth (0.735 against
+0.509 on patient kNN).
 
-Whether the gap closes with training. That is Phase B, and it starts before
-the probe is read, because the reference arm is needed either way.
+### 3.2 Candidate causes and how each is told apart
 
----
+| cause | test | status |
+|---|---|---|
+| A. attention logits are linear in the raw count, so the few highest-count genes take all the weight | c1_log arm | designed |
+| B. the count enters every token along one fixed direction (`e_i + c_i·w`), so a head's count information is one scalar per head | c1_valmlp arm | designed |
+| C. the CLS readout (2 layers, 4 heads, 32 wide over 344 tokens) cannot summarise whatever it is fed | untrained probe (`--untrained`) | built, to run |
+| D. the objective pulled the summaries toward the decoder's needs (high-count genes), away from family | untrained probe | built, to run |
+| E. the adversarial study term removed family along with study | c1_nodab arm | designed |
+| F. the information is present but not in neighbour-distance form | linear probe columns in the stage table | built, runs with every probe |
 
-## 4. Phase B: the training campaign (weeks 1 to 3)
+- [x] **A1** Read the probe. Done above.
+- [ ] **A2** Untrained probe on r8_direction: decides between C/D and A/B.
+- [ ] **A3** Inductive scVI. `r8_inductive` ran on 17 September; output not yet read. `c1_baselines` for the c1 corpus not yet submitted.
 
-The `c_` series: control-included runs on `configs/data/corpus_c.yaml`
-(the r-series' twelve studies, controls in). Two references: `c_ref` is
-r8_direction on that corpus, CCE on every step as r8 had it; `c_nocce` is the
-same without CCE. Every arm after them runs CCE's second pass every fourth
-step (`model.cce.every: 4`, about a third off the epoch for a term weighted
-0.025) and is read against both, so the cadence cannot be mistaken for the
-arm's own change.
+## 4. Phase B: the training campaign
 
-### 4.1 Compute
+### 4.1 Series and corpora
 
-Two A100 80 GB, 48 h wall, one GPU per run. That is **two arms per two days,
-about twenty arms in four weeks if the queue is kind**, and the campaign has
-to be planned as a sequence of decisions, not a sweep. One arm always
-running; the other slot for whatever the last result pointed at.
+A series is a corpus. Changing the study list renumbers the study table and
+the DSBN rows, so runs on different corpora are not comparable and each
+corpus gets its own reference and its own baselines.
 
-### 4.2 The sequence
+| series | corpus | studies | status |
+|---|---|---:|---|
+| r | `corpus.yaml`: disease donors only | 12 | the thesis; r8_direction is the probed model |
+| c | `corpus_c.yaml`: controls in | 12 | c_ref done (best epoch 15; adversarial blow-up at 16); no arms |
+| **c1** | `corpus_c1.yaml`: controls in, garcia_alonso_2021_c (118,672 organoid cells) out | 11 | the campaign |
 
-Arms are named `c_<what changed>`. Each arm changes one thing against its
-parent and its YAML says what and why, as the r-series did.
+Every c1 run: CCE's second pass every fourth step; checkpoints chosen by
+validation cell-family kNN (`training.stop_metric: family_knn`); the
+garcia_alonso platform codes filled in from the h5ads.
 
-**Wave 1, submitted now, no diagnosis needed:**
+### 4.2 Compute
 
-- [ ] **c_ref** r8_direction on corpus_c, CCE every step. Running since 16 September.
-- [ ] **c_nocce** c_ref without CCE. The second reference; also the arm that measures what CCE buys on the paper's numbers.
-- [x] **c_wide** `d_gauss` 8 to 32, `n_circular` unchanged. Stopped at epoch 7 (first corpus): 3 of 4 circles collapsed, as the r4 to r8 history predicted. Not revisited unless the probe points at the bottleneck.
-- [ ] **c_gauss** `n_circular` 0, `d_gauss` 16: Gaussian only at the same width (C6). Next after c_ref.
-- [ ] **c_gauss_dx** c_gauss + `d_disease` 16: disease status to the decoder, encoder still blind. The pair answers where disease status belongs.
+Two A100 80 GB, 48 h wall, one GPU per run, about 32 h per c1 arm. That is
+two arms per day and a half; the campaign is a sequence of decisions, not a
+sweep.
 
-**Wave 2, chosen from the probe:**
+### 4.3 The sequence
 
-- [ ] **c_beta** `beta_max` 0.5 to 0.1, if the bottleneck is the loss and c_wide was not enough.
-- [ ] **c_nodab** DAB off. The adversarial study term pulls biology out with the study signal; the decoder-side platform covariates (R5) were meant to make it unnecessary and it was never removed after they landed.
-- [ ] **c_deep** group encoder 2 to 4 layers, if the group encoders are where the signal is lost.
-- [ ] **c_agg** `d_agg` 64 to 128 and aggregation 2 to 4 layers, if aggregation is where it is lost.
+**References (both needed before any arm is read):**
+
+- [ ] **c1_ref** r8_direction's architecture on the c1 corpus. About 32 h.
+- [ ] **c1_nocce** c1_ref without CCE. Second reference; measures what CCE buys. About 28 h.
+
+**Wave 2, on the probe's finding (the group transformers):**
+
+- [ ] **c1_log** library-normalised, log1p counts into the value encoder. Cause A. To build.
+- [ ] **c1_valmlp** log counts through a small nonlinear value encoder. Cause B. To build.
+- [ ] **c1_nodab** DAB off. Cause E, and the adversarial blow-up c_ref showed at epoch 16.
 
 **Wave 3, on the best of wave 2:**
 
-- [ ] **c_gauss** Gaussian-only, same width, for C6.
-- [ ] **c_best_s7** the best configuration at a second seed, so the headline carries a spread. Add seeds as compute allows.
+- [ ] **c1_gauss** `n_circular` 0, `d_gauss` 16. Gaussian only at the same width (C6).
+- [ ] **c1_gauss_dx** c1_gauss with disease status handed to the decoder.
+- [ ] second seed of the best configuration.
 
-**Stop rule.** The campaign stops when an arm beats the inductive scVI on
-cross-donor family and phase with p at the floor, or at the end of week 3,
-whichever is first. If it is the latter, the fallback in §0 applies.
+**Parked:** c1_wide (the bottleneck is not the loss), c1_beta, c1_deep, c1_agg.
 
-### 4.3 Scoring every arm the same way
+**Stop rule.** The campaign stops when an arm beats scVI fitted on the
+training donors on cross-donor family and phase with p at the floor, or on
+5 October, whichever is first. If the latter, §0's fallback is decided with
+Animesh.
 
-Every arm gets, from its best checkpoint: `validate_latent`, the benchmark
-with `--include-elaj` against the cached baseline rows, and the stage probe
-with `--no-groups`. One command, one directory per arm, so the campaign
-table in §8 fills itself.
+### 4.4 Scoring every arm the same way
 
-- [ ] **B1** A `score_arm.sh` that runs all three and appends the headline row to `outputs/campaign.csv`.
-
----
+`score_arm.sh <arm>`: `validate_latent`, the benchmark with ELAJ beside the
+series' baselines (reused, not retrained), the pipeline-stage probe, and the
+arm's row in `outputs/campaign.csv`. The baselines come from
+`benchmark_baselines.sh c1_ref --no-elaj --fit-split train --methods pca scvi scanvi --out outputs/benchmarks/c1_baselines`, once.
 
 ## 5. Phase C: ablations (weeks 2 to 4, interleaved with §4)
 
@@ -272,20 +288,20 @@ figures, Extended Data for the rest.
 
 ---
 
-## 11. Four weeks
+## 11. The remaining three weeks (from 20 September)
 
-| week | training slots | analysis | writing |
-|---|---|---|---|
-| 1 (15 to 21 Sep) | c_ref, c_wide | probe read (A1); KL per dimension (A2); inductive scVI (A3); score_arm (B1) | Methods: corpus, model, validation (unchanged by results) |
-| 2 (22 to 28 Sep) | wave 2, two arms | benchmark D1, D2, D4, D5; scGPT/Geneformer environments (D3) | Results 1, 2; Fig. 1 to 3 |
-| 3 (29 Sep to 5 Oct) | best arm at seed 2; random grouping (C-1) | D3 run; E1 or E2; DNS ablation (C-2) queued | Results 3, 4; Fig. 4, 5 |
-| 4 (6 to 12 Oct) | Gaussian-only (C-3) | ablation table (C-7); R1 to R5 | Results 5, 6; Discussion; Extended Data; internal review |
+| dates | GPU 1 | GPU 2 | CPU and analysis | writing |
+|---|---|---|---|---|
+| 20 to 22 Sep | c1_ref (32 h) | untrained probe (6 h), c_baselines and c_ref scoring (5 h), then c1_nocce (28 h) | read the untrained probe and the linear-probe columns; choose between c1_log and c1_valmlp, or run both | Methods: corpus, model, validation protocol (unchanged by results) |
+| 22 to 25 Sep | c1_log | c1_valmlp | c1_baselines (2 h); score both references; Geneformer and scGPT environments | Results 1 and 2; Fig. 1 to 3 |
+| 25 to 28 Sep | c1_nodab | best of wave 2, second seed | score wave 2; decide wave 3 | Results 3 (benchmark), Fig. 4 |
+| 28 Sep to 2 Oct | c1_gauss | c1_gauss_dx | random-grouping ablation config; scGPT and Geneformer zero-shot on the c1 cells | Results 4 (diagnosis and campaign), Fig. 5 |
+| 2 to 5 Oct | random grouping (C-1) | DNS removed (C-2) | ablation table; the demonstration (E1 or E2) | Results 5 and 6; Discussion |
+| 5 to 12 Oct | reruns and seeds as needed | | reproducibility R1 to R5; figures final | full draft; internal review; Extended Data |
 
-The table assumes wave 2 lands. If it does not, week 3's slots go to wave 3
-of the campaign and the ablations slip past the deadline, which is the point
-at which §0's fallback is decided with Animesh.
-
----
+Every row assumes the arm before it landed. The decision point is 28
+September: if no wave-2 arm has beaten scVI on the fair comparison by then,
+the ablation weeks become campaign weeks and the venue question is reopened.
 
 ## 12. Open questions
 

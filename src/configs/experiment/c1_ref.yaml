@@ -1,0 +1,78 @@
+name: c1_ref
+description: >
+  The c1 series reference: r8_direction's architecture and operating point
+  on the c1 corpus (controls in, organoids out), CCE's second pass every
+  fourth step, checkpoints chosen by cell-family agreement.
+
+  WHY A NEW SERIES. c_ref (12 studies) trained on garcia_alonso_2021_c,
+  118,672 endometrial organoid cells, all labelled control, which the
+  corpus's inclusion criteria exclude as lab-grown. Removing a study
+  renumbers the study table and the DSBN rows, so nothing trained on the
+  twelve-study corpus is comparable to anything trained on eleven. c_ref
+  stands as a historical point (its epoch-15 model is scored in the
+  campaign table); every arm from here is read against this one.
+
+  WHAT CHANGES AGAINST c_ref. Three things, all in the base and none an arm:
+    - data: configs/data/corpus_c1.yaml. Eleven studies.
+    - model.cce.every: 4. CCE's second encoder pass on every fourth step,
+      about a third off the epoch for a term weighted 0.025. Every c1 arm
+      shares the cadence, so it cannot be mistaken for an arm's own change.
+      c1_nocce (CCE off) is the second reference and the arm that measures
+      what CCE buys.
+    - training.stop_metric: family_knn. The checkpoint the run keeps, and
+      the epoch it stops at, are chosen by cell-family kNN agreement on the
+      validation latent (training/label_probe.py), which is what the paper
+      is judged on, rather than by reconstruction. Model selection on
+      validation labels; no gradient, test donors untouched. c_ref showed
+      why: reconstruction chose epoch 15 and could not see the adversarial
+      blow-up at 16 as anything but a loss spike.
+
+  WHAT DOES NOT CHANGE. The architecture, the loss weights, the DAB, the
+  latent (8 Gaussian + 4 circles), the value encoder reading raw counts.
+  The probe located the information loss in the group transformers; the
+  arms that act on that (c1_log, c1_valmlp) are read against this run.
+
+  EPOCH BUDGET. About 1.1 M training cells at roughly 5,300 s/epoch with
+  the CCE cadence; T_max 22 in about 32 h. CHECK THE FIRST EPOCH TIME IN
+  THE LOG; above 7,800 s the run will not anneal before the wall and needs
+  `train.sh <yaml> --resume`.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_c1.yaml
+
+output_dir: outputs/c1_ref/
+seed: 24
+
+overrides:
+  # The change this arm exists for.
+
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  # ---- r8_direction's operating point, unchanged ----
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_kl_circ: 0.1
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.02
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.d_platform: 16
+
+  model.group_encoder.grad_checkpointing: true
+  model.kappa_floor: 1.0
+  model.circular_parameterisation: direction

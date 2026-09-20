@@ -1,0 +1,56 @@
+name: c1_circ
+description: >
+  c1_ref plus the circular branch: four Power Spherical dimensions, the
+  Gaussian cut to 8 so the combined latent stays 16 wide. r8_direction's
+  latent on the c1 corpus.
+
+  WHAT CHANGES. model.n_circular 0 to 4, model.d_gauss 16 to 8; kappa_floor
+  1.0, the direction parameterisation and w_kl_circ 0.1 as R8 settled them.
+  One thing: whether four of the sixteen latent numbers are circles.
+
+  WHAT IT MEASURES. Claim C6 of the plan. If this arm matches c1_ref on the
+  headline numbers, the circular branch is a Discussion paragraph; if it is
+  worse, the paper says so; if it is better on phase, it earns its place.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_c1.yaml
+
+output_dir: outputs/c1_circ/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # The study classifier trains and is logged (val_dab says how much study
+  # the latent holds) but at lambda 0 its reversed gradient never reaches
+  # the encoder. c1_dab turns it on.
+  model.dab.lambda_dab: 0.0
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  # Gaussian only, at the width r8's combined latent had (8 + 4 circles as
+  # cos/sin = 16). c1_circ hands 8 of these to four circles.
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.kappa_floor: 1.0
+  model.circular_parameterisation: direction
+  model.loss.w_kl_circ: 0.1
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true

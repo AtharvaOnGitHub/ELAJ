@@ -1,0 +1,56 @@
+name: c1_dx
+description: >
+  c1_ref plus disease status handed to the decoder.
+
+  WHAT CHANGES. model.d_disease 0 to 16: a 16-wide embedding of the five
+  status codes concatenated onto z_proj beside tissue and platform. The
+  encoder never sees it under either setting.
+
+  WHAT IT MEASURES. Where disease status belongs. A decoder that knows the
+  status can rebuild a status's mean profile from a latent that never
+  encoded it, so the latent is no longer obliged to carry what separates
+  control from eutopic and what remains is the variation disease does not
+  explain. Family and phase may rise (capacity freed); a disease signal in
+  THIS latent is not a finding, because the answer was supplied
+  downstream. c1_ref is the arm a disease figure is drawn from; this is the
+  arm a comparison conditional on disease is drawn from.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_c1.yaml
+
+output_dir: outputs/c1_dx/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # The study classifier trains and is logged (val_dab says how much study
+  # the latent holds) but at lambda 0 its reversed gradient never reaches
+  # the encoder. c1_dab turns it on.
+  model.dab.lambda_dab: 0.0
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  # Gaussian only, at the width r8's combined latent had (8 + 4 circles as
+  # cos/sin = 16). c1_circ hands 8 of these to four circles.
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.d_platform: 16
+  model.d_disease: 16
+
+  model.group_encoder.grad_checkpointing: true

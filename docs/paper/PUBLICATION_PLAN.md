@@ -156,6 +156,14 @@ Every c1 run: CCE's second pass every fourth step; checkpoints chosen by
 validation cell-family kNN (`training.stop_metric: family_knn`); the
 garcia_alonso platform codes filled in from the h5ads.
 
+**The reference is bare.** c1_ref is the grouped-transformer encoder, a
+16-wide Gaussian latent, the bilinear decoder with tissue and platform
+covariates, and CCE. No circular branch, no adversarial term, no disease
+covariate. Each of those is an arm that adds one thing, so what each costs
+and buys is measured on its own rather than inferred by removal. c_ref is
+not scored: its corpus (organoids in) is not the paper's, and the paper has
+no use for its row.
+
 ### 4.2 Compute
 
 Two A100 80 GB, 48 h wall, one GPU per run, about 32 h per c1 arm. That is
@@ -164,29 +172,25 @@ sweep.
 
 ### 4.3 The sequence
 
-**References (both needed before any arm is read):**
+**Reference:**
 
-- [ ] **c1_ref** r8_direction's architecture on the c1 corpus. About 32 h.
-- [ ] **c1_nocce** c1_ref without CCE. Second reference; measures what CCE buys. About 28 h.
+- [ ] **c1_ref** bare, as above. About 31 h.
 
 **Wave 2, on the probe's finding (the group transformers):**
 
 - [ ] **c1_log** library-normalised, log1p counts into the value encoder. Cause A. To build.
 - [ ] **c1_valmlp** log counts through a small nonlinear value encoder. Cause B. To build.
-- [ ] **c1_nodab** DAB off. Cause E, and the adversarial blow-up c_ref showed at epoch 16.
 
-**Wave 3, on the best of wave 2:**
+**Wave 3, the components added back one at a time, on the best of wave 2:**
 
-- [ ] **c1_gauss** `n_circular` 0, `d_gauss` 16. Gaussian only at the same width (C6).
-- [ ] **c1_gauss_dx** c1_gauss with disease status handed to the decoder.
+- [ ] **c1_dab** the adversarial study term. What donor-blindness costs.
+- [ ] **c1_circ** four circular dimensions in place of eight Gaussian. Claim C6.
+- [ ] **c1_dx** disease status to the decoder.
+- [ ] **c1_nocce** CCE off. Whether CCE buys anything; if not, it comes out to save the second pass.
 - [ ] second seed of the best configuration.
 
-**Parked:** c1_wide (the bottleneck is not the loss), c1_beta, c1_deep, c1_agg.
-
-**Stop rule.** The campaign stops when an arm beats scVI fitted on the
-training donors on cross-donor family and phase with p at the floor, or on
-5 October, whichever is first. If the latter, §0's fallback is decided with
-Animesh.
+**Parked:** width, beta, depth, aggregation arms (the bottleneck is not
+the loss).
 
 ### 4.4 Scoring every arm the same way
 
@@ -292,10 +296,10 @@ figures, Extended Data for the rest.
 
 | dates | GPU 1 | GPU 2 | CPU and analysis | writing |
 |---|---|---|---|---|
-| 20 to 22 Sep | c1_ref (32 h) | untrained probe (6 h), c_baselines and c_ref scoring (5 h), then c1_nocce (28 h) | read the untrained probe and the linear-probe columns; choose between c1_log and c1_valmlp, or run both | Methods: corpus, model, validation protocol (unchanged by results) |
-| 22 to 25 Sep | c1_log | c1_valmlp | c1_baselines (2 h); score both references; Geneformer and scGPT environments | Results 1 and 2; Fig. 1 to 3 |
-| 25 to 28 Sep | c1_nodab | best of wave 2, second seed | score wave 2; decide wave 3 | Results 3 (benchmark), Fig. 4 |
-| 28 Sep to 2 Oct | c1_gauss | c1_gauss_dx | random-grouping ablation config; scGPT and Geneformer zero-shot on the c1 cells | Results 4 (diagnosis and campaign), Fig. 5 |
+| 20 to 22 Sep | c1_ref (31 h) | untrained probe (6 h), c1_baselines (2 h), then the first wave-2 arm once built | read the untrained probe and the linear-probe columns; build c1_log and c1_valmlp; Geneformer and scGPT environments on the login node | Methods: corpus, model, validation protocol (unchanged by results) |
+| 22 to 25 Sep | c1_log | c1_valmlp | score c1_ref; score wave 2 as it lands | Results 1 and 2; Fig. 1 to 3 |
+| 25 to 28 Sep | c1_dab | c1_circ | decide the base for wave 3 | Results 3 (benchmark), Fig. 4 |
+| 28 Sep to 2 Oct | c1_dx, c1_nocce | second seed of the best | random-grouping ablation config; scGPT and Geneformer zero-shot on the c1 cells | Results 4 (diagnosis and campaign), Fig. 5 |
 | 2 to 5 Oct | random grouping (C-1) | DNS removed (C-2) | ablation table; the demonstration (E1 or E2) | Results 5 and 6; Discussion |
 | 5 to 12 Oct | reruns and seeds as needed | | reproducibility R1 to R5; figures final | full draft; internal review; Extended Data |
 

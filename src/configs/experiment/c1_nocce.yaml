@@ -1,24 +1,14 @@
 name: c1_nocce
 description: >
-  c1_ref without CCE. The second reference of the c1 series.
+  c1_ref without CCE.
 
-  WHAT CHANGES. model.cce.enabled false. The trainer runs one encoder pass
-  per step instead of two, so the epoch is about a third shorter, and the
-  InfoNCE term (weight 0.025 in c1_ref) is gone. lambda_cce and
-  block_normalise are kept in the overrides so this file diffs against
-  c1_ref by one line; with CCE off they act on nothing.
+  WHAT CHANGES. model.cce.enabled false. One encoder pass per step; the
+  InfoNCE term (weight 0.025) is gone. lambda_cce and every are kept so the
+  file diffs by one line; with CCE off they act on nothing.
 
-  WHY A SECOND REFERENCE. Waves R5 to R8 kept CCE because it was thought to
-  help the circular branch, and findings E1 says it collapsed the branch
-  at every weight tried. Its effect on the numbers the paper is judged by
-  (cross-donor family and phase) was never measured on its own. c1_ref
-  (CCE every fourth step) and this arm (none) are the two references; if
-  they agree, CCE is a Discussion sentence and comes out of every arm after
-  it to save the epoch time. If c1_ref is better, CCE stays at its cadence.
-
-  EPOCH BUDGET. Somewhat under c1_ref's: roughly 4,600 s/epoch, T_max 22 in
-  about 28 h.
-
+  WHAT IT MEASURES. What CCE buys on the paper's numbers, which waves R5 to
+  R8 never measured on its own. If this matches c1_ref, CCE comes out of
+  every later arm and saves the second pass.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_c1.yaml
@@ -27,8 +17,6 @@ output_dir: outputs/c1_nocce/
 seed: 24
 
 overrides:
-  # The change this arm exists for.
-
   training.max_epochs: 22
   training.batch_size: 256
 
@@ -38,23 +26,26 @@ overrides:
   training.early_stop_warmup_epochs: 6
   training.stop_metric: family_knn
 
-  # ---- r8_direction's operating point, unchanged ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
-  model.dab.lambda_dab: 0.02
+  # The study classifier trains and is logged (val_dab says how much study
+  # the latent holds) but at lambda 0 its reversed gradient never reaches
+  # the encoder. c1_dab turns it on.
+  model.dab.lambda_dab: 0.0
+
   model.cce.enabled: false
   model.cce.lambda_cce: 0.025
   model.cce.block_normalise: false
   model.cce.every: 4
 
-  model.d_gauss: 8
-  model.n_circular: 4
+  # Gaussian only, at the width r8's combined latent had (8 + 4 circles as
+  # cos/sin = 16). c1_circ hands 8 of these to four circles.
+  model.d_gauss: 16
+  model.n_circular: 0
   model.d_platform: 16
+  model.d_disease: 0
 
   model.group_encoder.grad_checkpointing: true
-  model.kappa_floor: 1.0
-  model.circular_parameterisation: direction

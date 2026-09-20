@@ -1,42 +1,40 @@
 name: c1_ref
 description: >
-  The c1 series reference: r8_direction's architecture and operating point
-  on the c1 corpus (controls in, organoids out), CCE's second pass every
-  fourth step, checkpoints chosen by cell-family agreement.
+  The c1 series reference, bare: the pathway-grouped transformer encoder,
+  a Gaussian latent of 16, the bilinear decoder with tissue and platform
+  covariates, and CCE every fourth step. No circular branch, no adversarial
+  study term, no disease covariate. Everything else in the series is this
+  plus one thing, so each addition is measured on its own.
 
-  WHY A NEW SERIES. c_ref (12 studies) trained on garcia_alonso_2021_c,
-  118,672 endometrial organoid cells, all labelled control, which the
-  corpus's inclusion criteria exclude as lab-grown. Removing a study
-  renumbers the study table and the DSBN rows, so nothing trained on the
-  twelve-study corpus is comparable to anything trained on eleven. c_ref
-  stands as a historical point (its epoch-15 model is scored in the
-  campaign table); every arm from here is read against this one.
+  WHY BARE. r8_direction carried four circular dimensions that were barely
+  used (findings E1 to E5) and an adversarial term that blew the latent up
+  at epoch 16 of c_ref. A reference that carries both cannot say what either
+  costs or buys. This one carries neither; c1_circ and c1_dab add them back
+  one at a time. The DAB classifier still trains here at lambda 0, so
+  val_dab reports how much study identity the latent holds without pushing
+  on the encoder: expect it low (the classifier succeeds) and expect knn
+  patient to be high. That is the measurement c1_dab is read against.
 
-  WHAT CHANGES AGAINST c_ref. Three things, all in the base and none an arm:
-    - data: configs/data/corpus_c1.yaml. Eleven studies.
-    - model.cce.every: 4. CCE's second encoder pass on every fourth step,
-      about a third off the epoch for a term weighted 0.025. Every c1 arm
-      shares the cadence, so it cannot be mistaken for an arm's own change.
-      c1_nocce (CCE off) is the second reference and the arm that measures
-      what CCE buys.
-    - training.stop_metric: family_knn. The checkpoint the run keeps, and
-      the epoch it stops at, are chosen by cell-family kNN agreement on the
-      validation latent (training/label_probe.py), which is what the paper
-      is judged on, rather than by reconstruction. Model selection on
-      validation labels; no gradient, test donors untouched. c_ref showed
-      why: reconstruction chose epoch 15 and could not see the adversarial
-      blow-up at 16 as anything but a loss spike.
+  THE CORPUS. configs/data/corpus_c1.yaml: controls in, garcia_alonso_2021_c
+  (118,672 endometrial organoid cells, all control) out, eleven studies.
+  Removing a study renumbers the study table, so nothing trained on the
+  twelve-study corpora (r, c) is comparable to anything here.
 
-  WHAT DOES NOT CHANGE. The architecture, the loss weights, the DAB, the
-  latent (8 Gaussian + 4 circles), the value encoder reading raw counts.
-  The probe located the information loss in the group transformers; the
-  arms that act on that (c1_log, c1_valmlp) are read against this run.
+  CHECKPOINT SELECTION. training.stop_metric family_knn: the checkpoint the
+  run keeps and the epoch it stops at are chosen by cell-family kNN
+  agreement on the validation latent (training/label_probe.py), which is
+  what the paper is judged on. Model selection on validation labels; no
+  gradient; test donors untouched.
 
-  EPOCH BUDGET. About 1.1 M training cells at roughly 5,300 s/epoch with
-  the CCE cadence; T_max 22 in about 32 h. CHECK THE FIRST EPOCH TIME IN
-  THE LOG; above 7,800 s the run will not anneal before the wall and needs
-  `train.sh <yaml> --resume`.
+  WHAT THE PROBE SAID, AND WHAT THIS RUN DOES NOT FIX. The family signal is
+  lost inside the 45 group transformers (outputs/probes/r8_stages); this
+  run keeps the raw-count value encoder and the same group encoders. c1_log
+  and c1_valmlp act on that and are read against this run.
 
+  EPOCH BUDGET. About 1.1 M training cells at roughly 5,000 s/epoch (no
+  circular sampler, no reversed gradient, CCE every fourth step); T_max 22
+  in about 31 h. CHECK THE FIRST EPOCH TIME IN THE LOG; above 7,800 s the
+  run will not anneal before the wall and needs `train.sh <yaml> --resume`.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_c1.yaml
@@ -45,8 +43,6 @@ output_dir: outputs/c1_ref/
 seed: 24
 
 overrides:
-  # The change this arm exists for.
-
   training.max_epochs: 22
   training.batch_size: 256
 
@@ -56,23 +52,26 @@ overrides:
   training.early_stop_warmup_epochs: 6
   training.stop_metric: family_knn
 
-  # ---- r8_direction's operating point, unchanged ----
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.w_kl_circ: 0.1
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
-  model.dab.lambda_dab: 0.02
+  # The study classifier trains and is logged (val_dab says how much study
+  # the latent holds) but at lambda 0 its reversed gradient never reaches
+  # the encoder. c1_dab turns it on.
+  model.dab.lambda_dab: 0.0
+
   model.cce.enabled: true
   model.cce.lambda_cce: 0.025
   model.cce.block_normalise: false
   model.cce.every: 4
 
-  model.d_gauss: 8
-  model.n_circular: 4
+  # Gaussian only, at the width r8's combined latent had (8 + 4 circles as
+  # cos/sin = 16). c1_circ hands 8 of these to four circles.
+  model.d_gauss: 16
+  model.n_circular: 0
   model.d_platform: 16
+  model.d_disease: 0
 
   model.group_encoder.grad_checkpointing: true
-  model.kappa_floor: 1.0
-  model.circular_parameterisation: direction

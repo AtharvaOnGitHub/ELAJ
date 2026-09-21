@@ -26,6 +26,7 @@ optimising against, so it cannot be gamed the same way.
 from __future__ import annotations
 
 import csv
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,12 +79,35 @@ class PurityResult:
         }
 
 
-def best_checkpoint(run_dir: Path) -> Path:
-    """The retained checkpoint at the run's lowest-val_nb epoch.
+def run_stop_metric(run_dir: Path) -> str:
+    """The validation number the run ranked its checkpoints by.
 
-    CheckpointManager keeps the best three and encodes the epoch in the
-    filename; metrics.csv holds val_nb per epoch. Joining the two here means no
+    Read from run_config.json (`training.stop_metric`); "nb" for runs that
+    predate the field. A higher-is-better metric (anything but nb) is
+    compared negated, which is how the trainer stored it.
+    """
+    config = run_dir / "run_config.json"
+    if not config.exists():
+        return "nb"
+    try:
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        return str(payload.get("training", {}).get("stop_metric", "nb") or "nb")
+    except (OSError, ValueError):
+        return "nb"
+
+
+def best_checkpoint(run_dir: Path) -> Path:
+    """The retained checkpoint at the run's best epoch, by the metric the
+    run selected on.
+
+    CheckpointManager keeps the best three by `training.stop_metric` (val_nb
+    unless the run said otherwise) and encodes the epoch in the filename;
+    metrics.csv holds every epoch's metrics. Joining the two here means no
     caller has to read a directory listing and work it out by hand.
+
+    If the best epoch's file is missing (two jobs writing one directory
+    pruned each other's files on 21 September 2026), the best of the epochs
+    whose files remain is used, by the same metric, and the log says so.
     """
     available = sorted((run_dir / "checkpoints").glob("epoch_*.pt"))
     if not available:
@@ -92,24 +116,48 @@ def best_checkpoint(run_dir: Path) -> Path:
     metrics = run_dir / "metrics.csv"
     if not metrics.exists():
         # A run killed at the walltime never wrote it — wave R7 lost both arms
-        # this way. The checkpoints carry their own val_nb, so the history file
-        # is a convenience, not the only record.
+        # this way. The checkpoints carry their own ranking metric, so the
+        # history file is a convenience, not the only record.
         return _best_from_checkpoint_payloads(available)
 
+    metric = run_stop_metric(run_dir)
+    column = "val_nb" if metric == "nb" else f"val_{metric}"
+    sign = 1.0 if metric == "nb" else -1.0          # lower is better after sign
+
     rows = list(csv.DictReader(metrics.open()))
-    best = min(rows, key=lambda r: float(r["val_nb"]))
-    prefix = f"epoch_{int(best['epoch']):04d}_"
+    scored = []
+    for r in rows:
+        try:
+            value = float(r.get(column, ""))
+        except ValueError:
+            continue
+        if value == value:                           # not NaN
+            scored.append((sign * value, int(float(r["epoch"])), r))
+    if not scored:
+        logger.warning("  metrics.csv has no usable %s column; ranking the "
+                       "retained checkpoints by their own payloads", column)
+        return _best_from_checkpoint_payloads(available)
+    scored.sort()
 
+    by_epoch = {}
     for path in available:
-        if path.name.startswith(prefix):
-            logger.info("  best val_nb %.5f at epoch %s -> %s",
-                        float(best["val_nb"]), best["epoch"], path.name)
-            return path
+        by_epoch.setdefault(int(path.name.split("_")[1]), path)
+    best_value, best_epoch, _ = scored[0]
+    for value, epoch, _ in scored:
+        if epoch in by_epoch:
+            if epoch != best_epoch:
+                logger.warning(
+                    "  no checkpoint for best epoch %d (%s %.5f); using epoch %d "
+                    "(%s %.5f), the best whose file remains",
+                    best_epoch, column, sign * best_value, epoch, column, sign * value,
+                )
+            else:
+                logger.info("  best %s %.5f at epoch %d -> %s", column,
+                            sign * value, epoch, by_epoch[epoch].name)
+            return by_epoch[epoch]
 
-    logger.warning(
-        "  no checkpoint for best epoch %s (kept: %s); using %s",
-        best["epoch"], ", ".join(p.name for p in available), available[-1].name,
-    )
+    logger.warning("  no retained checkpoint matches any epoch in metrics.csv; "
+                   "using %s", available[-1].name)
     return available[-1]
 
 

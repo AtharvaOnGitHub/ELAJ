@@ -19,15 +19,28 @@ class GroupEncoderConfig:
     # so this is what makes batch 256 reachable at all with CCE running a
     # second graph. Costs roughly 30% more time per epoch.
     grad_checkpointing: bool = False
+    # How many summary (CLS) tokens each group encoder carries. One is what
+    # every run to date used. A CLS token reads its group through attention,
+    # and one head produces one attention-weighted average of the group's
+    # genes, so k tokens over h heads give k*h independent readouts of the
+    # same genes rather than h. The cost is k learned vectors per group
+    # (45*k*d_token parameters in total, 1,440 per extra token) and k extra
+    # positions on a 250-to-494-token sequence; nothing else in the encoder
+    # or the aggregation grows. See encoders/batched/encoder.py.
+    n_cls: int = 1
 
     @classmethod
     def from_dict(cls, d: dict) -> "GroupEncoderConfig":
+        n_cls = int(d.get("n_cls", 1))
+        if n_cls < 1:
+            raise ValueError(f"group_encoder.n_cls must be >= 1, got {n_cls}")
         return cls(
             n_layers=d.get("n_layers", 2),
             n_heads=d.get("n_heads", 4),
             dropout=d.get("dropout", 0.1),
             n_buckets=int(d.get("n_buckets", 4)),
             grad_checkpointing=bool(d.get("grad_checkpointing", False)),
+            n_cls=n_cls,
         )
 
 

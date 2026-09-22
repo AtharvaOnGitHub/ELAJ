@@ -48,6 +48,7 @@ class AggregationEncoder(nn.Module):
         group_names: list[str],
         d_token: int,
         d_agg: int,
+        n_cls: int = 1,
         n_metadata: int = N_METADATA,
         n_heads: int = 4,
         n_layers: int = 2,
@@ -56,6 +57,7 @@ class AggregationEncoder(nn.Module):
         super().__init__()
         self.group_names = group_names
         self.d_agg = d_agg
+        self.n_cls = int(n_cls)
         n_groups = len(group_names)
 
         # CELL_CLS is a learnable parameter (one vector, no batch dim)
@@ -90,6 +92,8 @@ class AggregationEncoder(nn.Module):
 
         self.n_groups = n_groups
         self.n_metadata = n_metadata
+        # Sequence: CELL_CLS, then every group's summary tokens, then metadata.
+        self.seq_len = 1 + n_groups * self.n_cls + n_metadata
 
     def forward(
         self,
@@ -99,8 +103,12 @@ class AggregationEncoder(nn.Module):
         """Run cross-module aggregation.
 
         Args:
-            group_cls_dict:  dict mapping group_name → (B, d_token) — from
-                             HierarchicalEncoder.
+            group_cls_dict:  dict mapping group_name → (B, n_cls, d_token) —
+                             from the group encoder. Every summary token
+                             becomes its own position here, so a group with
+                             four of them contributes four tokens rather than
+                             one wider one: the attention that mixes groups
+                             sees each readout separately.
             metadata_tokens: (B, n_metadata, d_agg) — from MetadataEncoder.
 
         Returns:
@@ -109,17 +117,18 @@ class AggregationEncoder(nn.Module):
         """
         B = metadata_tokens.shape[0]
 
-        # Stack group CLS tokens in canonical order (B, K, d_token)
-        group_cls = torch.stack(
+        # Groups in canonical order, their summary tokens flattened into
+        # consecutive positions: (B, K * n_cls, d_token).
+        group_cls = torch.cat(
             [group_cls_dict[name] for name in self.group_names], dim=1
         )
-        group_cls_proj = self.proj(group_cls)  # (B, K, d_agg)
+        group_cls_proj = self.proj(group_cls)  # (B, K * n_cls, d_agg)
 
-        # Assemble sequence: [CELL_CLS, group_CLS..., metadata...]
+        # Assemble sequence: [CELL_CLS, group summaries..., metadata...]
         cell_cls = self.cell_cls.expand(B, -1, -1)          # (B, 1, d_agg)
         seq = torch.cat([cell_cls, group_cls_proj, metadata_tokens], dim=1)
-        # seq shape: (B, 1 + K + n_metadata, d_agg)
+        # seq shape: (B, 1 + K * n_cls + n_metadata, d_agg)
 
-        out = self.transformer(seq)            # (B, 1 + K + n_metadata, d_agg)
+        out = self.transformer(seq)
 
         return out[:, 0, :]                   # (B, d_agg) — CELL_CLS only

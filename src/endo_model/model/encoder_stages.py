@@ -25,7 +25,7 @@ class EncoderStages:
     """The encoder's intermediate tensors for one batch.
 
     group_tokens  {group: (B, G_k, d_token)}  after DSBN, before any attention
-    group_cls     {group: (B, d_token)}       each group encoder's summary
+    group_cls     {group: (B, n_cls, d_token)}  each group's summary tokens
     cell_cls      (B, d_agg)                  after aggregation over the groups
     latent        the BifurcatedLatentSpace output: mu_gauss, mu_angle, kappa,
                   z, z_proj and the rest

@@ -130,6 +130,7 @@ class BucketedGroupEncoder(nn.Module):
         dropout:     Dropout probability.
         n_buckets:   How many buckets to split into. 1 reproduces the previous
                      single-block behaviour exactly.
+        n_cls:       Summary tokens per group. See BatchedGroupEncoder.
     """
 
     def __init__(
@@ -142,6 +143,7 @@ class BucketedGroupEncoder(nn.Module):
         dropout: float = 0.1,
         n_buckets: int = 4,
         grad_checkpointing: bool = False,
+        n_cls: int = 1,
     ) -> None:
         super().__init__()
         self.group_names = list(group_names)
@@ -153,16 +155,17 @@ class BucketedGroupEncoder(nn.Module):
             BatchedGroupEncoder(
                 list(bucket.names), group_sizes, d_token,
                 n_heads=n_heads, n_layers=n_layers, dropout=dropout,
-                grad_checkpointing=grad_checkpointing,
+                grad_checkpointing=grad_checkpointing, n_cls=n_cls,
             )
             for bucket in self.buckets
         ])
         self.grad_checkpointing = grad_checkpointing
+        self.n_cls = int(n_cls)
         self._log_plan(group_sizes)
 
     def _log_plan(self, group_sizes: dict[str, int]) -> None:
         """Report the partition and what it saved, once, at build time."""
-        seq = [group_sizes[name] + 1 for name in self.group_names]
+        seq = [group_sizes[name] + self.n_cls for name in self.group_names]
         unbucketed = len(seq) * max(seq) ** 2
         bucketed = sum(bucket.attention_work for bucket in self.buckets)
         ideal = sum(s * s for s in seq)
@@ -175,6 +178,11 @@ class BucketedGroupEncoder(nn.Module):
             bucketed / 1e6, unbucketed / 1e6, ideal / 1e6,
             100.0 * (unbucketed - bucketed) / max(unbucketed - ideal, 1),
         )
+        if self.n_cls != 1:
+            logger.info("Group encoder: %d summary tokens per group; each "
+                        "group hands on %d numbers instead of %d",
+                        self.n_cls, self.n_cls * self.encoders[0].d_token,
+                        self.encoders[0].d_token)
         if self.grad_checkpointing:
             logger.info(
                 "Group encoder: gradient checkpointing ON — attention "
@@ -186,7 +194,7 @@ class BucketedGroupEncoder(nn.Module):
     def forward(self, group_tokens: dict[str, Tensor]) -> dict[str, Tensor]:
         """Args: group_tokens {name: (B, G_k, d_token)}.
 
-        Returns: {name: (B, d_token)} — each group's CLS after encoding.
+        Returns: {name: (B, n_cls, d_token)} — each group's summary tokens.
         """
         out: dict[str, Tensor] = {}
         for encoder in self.encoders:

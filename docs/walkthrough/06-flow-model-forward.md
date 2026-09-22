@@ -155,6 +155,40 @@ groups are split into **4 size buckets** so a 253-gene group is not padded to th
 claim is that this is a scheduling change with no modelling content, and that
 claim is only worth anything because it is tested.
 
+### Several summary tokens per group — `group_encoder.n_cls`
+
+One CLS token per group is what every run to date used, and it is what the
+stage probe ([14](14-stage-probe.md)) found wanting: a 32-component PCA of a
+group's genes scores 0.98 on cell family, the group's CLS token 0.78, and an
+UNTRAINED encoder scores 0.80, slightly above the trained one. The loss is
+structural, not unlearned.
+
+The mechanism it points at: inside one attention head the CLS token produces
+one attention-weighted average of the gene tokens, so h heads give h
+readouts spread over d_token dimensions. A PCA takes 32 independent
+projections. `n_cls` raises the number of readouts to `n_cls × n_heads`.
+
+**What it costs.** One learned vector per (group, token): 45 × 32 = 1,440
+parameters per extra token, 0.08% of the model. The attention and
+feed-forward weights are shared across positions and do not grow, the
+aggregation's projection is per token and does not grow, and the group
+sequence goes from 494 to 501 positions at n_cls = 8 (+3% attention). The
+aggregation sequence goes from 1 + 45 + 1 to 1 + 360 + 1, whose attention is
+2% of the group encoders' work.
+
+**Contract:** `n_cls = 1` is the single-token path exactly, including the
+`cls_token` parameter's shape, so every checkpoint written before September
+2026 loads and c1_ref stays comparable to the arms that widen the readout.
+`tests/test_model/test_multi_cls.py` pins that and the parameter arithmetic.
+
+Each summary token becomes its own position in the aggregation encoder
+rather than being concatenated into a wider one, so the attention that mixes
+groups sees each readout separately.
+
+`scripts/sweep_cls.py` measures whether more readouts recover the family
+signal without training anything: the same architecture at several `n_cls`,
+random weights, scored against a per-group PCA at matched width.
+
 ### Why buckets, and what they buy
 
 Attention is quadratic in sequence length, and one padded block pads every group

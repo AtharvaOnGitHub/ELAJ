@@ -79,9 +79,11 @@ class EndoFoundationModel(nn.Module):
             dropout=config.group_encoder.dropout,
             n_buckets=config.group_encoder.n_buckets,
             grad_checkpointing=config.group_encoder.grad_checkpointing,
+            n_cls=config.group_encoder.n_cls,
         )
         self.aggregation_encoder = AggregationEncoder(
             vocabulary.group_names, config.d_token, config.d_agg,
+            n_cls=config.group_encoder.n_cls,
             n_heads=config.aggregation_encoder.n_heads,
             n_layers=config.aggregation_encoder.n_layers,
             dropout=config.aggregation_encoder.dropout,

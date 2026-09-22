@@ -11,7 +11,7 @@ d_token=32 with 4 heads, every matrix multiply in a group encoder is small
 enough that launching it costs more than running it, and there were 45 of them
 per layer per direction.
 
-Padding: sequences are padded to the largest group (494 with the CLS token)
+Padding: sequences are padded to the largest group (494 with one CLS token)
 and masked. Attention is quadratic in length, so padding a mean length of ~345
 up to 494 costs about 2x on the attention term. That is a real price, and it
 still leaves a large net gain against 45 separate launches. Bucketing groups by
@@ -168,17 +168,23 @@ class BatchedGroupEncoder(nn.Module):
         n_layers: int = 2,
         dropout: float = 0.1,
         grad_checkpointing: bool = False,
+        n_cls: int = 1,
     ) -> None:
         super().__init__()
+        if n_cls < 1:
+            raise ValueError(f"n_cls must be >= 1, got {n_cls}")
         self.group_names = list(group_names)
         self.d_token = d_token
+        self.n_cls = int(n_cls)
         self.grad_checkpointing = grad_checkpointing
         n_groups = len(self.group_names)
         self._sizes = [group_sizes[name] for name in self.group_names]
-        # +1 for the CLS token prepended at position 0.
-        self.seq_len = max(self._sizes) + 1
+        # +n_cls for the summary tokens prepended at positions 0..n_cls-1.
+        self.seq_len = max(self._sizes) + self.n_cls
 
-        self.cls_token = nn.Parameter(torch.empty(n_groups, 1, d_token))
+        # One learned vector per (group, summary token). At n_cls = 1 this is
+        # the same shape every checkpoint before September 2026 carries.
+        self.cls_token = nn.Parameter(torch.empty(n_groups, self.n_cls, d_token))
         nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
 
         self.layers = nn.ModuleList([
@@ -203,23 +209,27 @@ class BatchedGroupEncoder(nn.Module):
         else:
             key_valid = torch.zeros(n_groups, self.seq_len, dtype=torch.bool)
             for k, size in enumerate(self._sizes):
-                key_valid[k, : size + 1] = True
+                key_valid[k, : size + self.n_cls] = True
             self.register_buffer("key_valid", key_valid, persistent=False)
 
     def forward(self, group_tokens: dict[str, Tensor]) -> dict[str, Tensor]:
         """Args: group_tokens {name: (B, G_k, d_token)}.
 
-        Returns: {name: (B, d_token)} — each group's CLS token after encoding.
+        Returns: {name: (B, n_cls, d_token)} — each group's summary tokens
+        after encoding.
         """
         first = group_tokens[self.group_names[0]]
         B = first.shape[0]
         K = len(self.group_names)
+        n_cls = self.n_cls
 
         x = first.new_zeros(K, B, self.seq_len, self.d_token)
-        x[:, :, 0, :] = self.cls_token.expand(K, B, self.d_token)
+        x[:, :, :n_cls, :] = self.cls_token.unsqueeze(1).expand(
+            K, B, n_cls, self.d_token
+        )
         for k, name in enumerate(self.group_names):
             size = self._sizes[k]
-            x[k, :, 1 : size + 1, :] = group_tokens[name]
+            x[k, :, n_cls : size + n_cls, :] = group_tokens[name]
 
         for layer in self.layers:
             if self.grad_checkpointing and self.training and x.requires_grad:
@@ -238,5 +248,5 @@ class BatchedGroupEncoder(nn.Module):
             else:
                 x = layer(x, self.key_valid)
 
-        cls_out = x[:, :, 0, :]                      # (K, B, d_token)
+        cls_out = x[:, :, :n_cls, :]                 # (K, B, n_cls, d_token)
         return {name: cls_out[k] for k, name in enumerate(self.group_names)}

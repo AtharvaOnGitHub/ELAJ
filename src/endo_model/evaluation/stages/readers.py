@@ -92,7 +92,12 @@ class TokenMeanReader(StageReader):
 
 
 class GroupClsReader(StageReader):
-    """What came OUT of one group's encoder: its (B, d_token) summary."""
+    """What came OUT of one group's encoder: its summary tokens, flattened.
+
+    `(B, n_cls, d_token)` becomes `(B, n_cls * d_token)`, which is the group's
+    contribution to the cell as a plain vector. At the default n_cls = 1 that
+    is the same 32 numbers this reader always returned.
+    """
 
     kind = GROUP
 
@@ -104,7 +109,8 @@ class GroupClsReader(StageReader):
         return f"group/{self.group}"
 
     def read(self, stages: EncoderStages, batch: dict) -> Tensor:
-        return stages.group_cls[self.group]
+        summary = stages.group_cls[self.group]
+        return summary.reshape(summary.shape[0], -1)
 
 
 # ── pipeline readers ───────────────────────────────────────────────────────

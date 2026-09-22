@@ -23,8 +23,15 @@
 # for a trained one AT THE GROUP ENCODERS (0.799 random against 0.777
 # trained on cell family).
 #
+# TWO PCA REFERENCES. pca32 is a 32-component PCA per group, 1,440 numbers
+# whatever the model's width: what a plain linear method gets from these
+# genes, and the number the paper quotes. pcaW is a PCA at the model's own
+# width, there only to separate "more readouts" from "more numbers". Both
+# come from one PCA per group at the widest setting, sliced.
+#
 # GPU: four embedding passes over the validation split, minutes each. The
-# rest is CPU: a neighbour search and a logistic regression per stage per
+# rest is CPU: one PCA per group at the widest width (about ten minutes for
+# all 45), then a neighbour search and a logistic regression per stage per
 # setting, on --cells cells. At the default 20,000 cells the widest stage
 # (45 x 8 x 32 = 11,520 numbers) is the slow one, a few minutes.
 

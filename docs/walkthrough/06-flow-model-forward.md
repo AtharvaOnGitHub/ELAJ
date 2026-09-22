@@ -187,7 +187,11 @@ groups sees each readout separately.
 
 `scripts/sweep_cls.py` measures whether more readouts recover the family
 signal without training anything: the same architecture at several `n_cls`,
-random weights, scored against a per-group PCA at matched width.
+random weights, against two references. **pca32** is a 32-component PCA per
+group, 1,440 numbers whatever the model's width, which is what a plain
+linear method gets from these genes and the number the paper quotes.
+**pcaW** is a PCA at the model's own width, there only to separate "more
+readouts" from "more numbers".
 
 ### Why buckets, and what they buy
 

@@ -18,11 +18,23 @@ weights and scoring what leaves the group encoders.
 WHY UNTRAINED IS FAIR HERE, AND WHERE IT IS NOT. Fair because the probe
 measured training to be worth -0.02 on this component: a random group
 encoder is a good stand-in for a trained one. Not fair as proof that a
-trained model will USE the extra readouts well, and not a clean test of
-"more readouts" on its own, because more numbers preserve more information
-mechanically whatever produces them. Read the ceiling, not the slope: the
-reference is `counts_log/concat`, a per-group PCA of the same genes, which
-this script scores at the same width for comparison.
+trained model will USE the extra readouts well.
+
+TWO PCA REFERENCES, AND THEY ANSWER DIFFERENT QUESTIONS.
+
+  pca32   a 32-component PCA per group, 1,440 numbers in all, whatever the
+          model's readout width is. The FIXED reference: what a plain
+          linear method gets out of these genes, and the number the paper
+          quotes. A model that beats it has earned its place; a model that
+          does not has not, however wide its own representation is.
+  pcaW    a PCA per group at the model's own width (n_cls x d_token). The
+          MATCHED control, which exists only to separate "more readouts"
+          from "more numbers": more numbers preserve more information
+          whatever produces them.
+
+Read pca32 for the result and pcaW for the mechanism. Both are computed
+from one PCA per group at the widest setting and sliced, since the first k
+components of a 256-component PCA are the k-component PCA exactly.
 
 WHAT IS SCORED. `groups/concat` (every group's summary tokens, which is the
 cell representation before any aggregation), `cell_cls`, and the latent, on
@@ -189,20 +201,45 @@ def main() -> None:
                 "linear_family": round(float(lin["excess"]), 4)}
 
     results = []
+    settings = sorted(set(args.n_cls))
+    d_token = model_cfg.d_token
 
-    # The reference: a per-group PCA of the same genes, at each width the
-    # sweep produces, so "more numbers" is controlled for.
+    # ── the PCA references ─────────────────────────────────────────────────
+    # One PCA per group at the widest setting, then sliced: the first k
+    # components of a 256-component PCA ARE the k-component PCA, so this is
+    # exact and costs one pass instead of one per width.
     masks = group_masks_from_vocabulary(vocab, corpus.n_genes)
-    for n_cls in sorted(set(args.n_cls)):
-        width = n_cls * model_cfg.d_token
-        logger.info("── reference: per-group PCA-%d of the log counts", width)
-        reference = GroupPCAReference(LOG, n_components=width,
-                                      seed=args.seed).build(corpus, masks,
-                                                            per_group=False)
-        row = score(f"counts_log/concat (PCA-{width}/group)",
-                    reference.matrices[f"{LOG}/concat"][rows_kept])
-        row.update({"n_cls": n_cls, "kind": "reference", "parameters": 0})
+    max_width = max(settings) * d_token
+    logger.info("── per-group PCA of the log counts, %d components, sliced "
+                "for every width below", max_width)
+    reference = GroupPCAReference(LOG, n_components=max_width,
+                                  seed=args.seed).build(corpus, masks)
+    per_group = {g: reference.matrices[f"{LOG}/{g}"][rows_kept] for g in masks}
+    del reference          # the full-corpus matrices; only the sample is kept
+
+    def pca_at(width: int):
+        return np.concatenate([per_group[g][:, :width] for g in masks], axis=1)
+
+    logger.info("── fixed reference: PCA-%d per group (%d numbers)",
+                d_token, d_token * len(masks))
+    fixed = score(f"pca32 (PCA-{d_token}/group)", pca_at(d_token))
+    fixed.update({"n_cls": 0, "kind": "reference-fixed", "parameters": 0})
+    results.append(fixed)
+
+    for n_cls in settings:
+        width = n_cls * d_token
+        if width == d_token:
+            row = dict(fixed)
+            row.update({"n_cls": n_cls, "kind": "reference-matched",
+                        "stage": f"pcaW (PCA-{width}/group)"})
+        else:
+            logger.info("── matched reference: PCA-%d per group", width)
+            row = score(f"pcaW (PCA-{width}/group)", pca_at(width))
+            row.update({"n_cls": n_cls, "kind": "reference-matched",
+                        "parameters": 0})
         results.append(row)
+    # `per_group` stays: the rows were subsampled before it was built, so it
+    # is 45 x cells x max_width floats, under a gigabyte at the defaults.
 
     for n_cls in sorted(set(args.n_cls)):
         logger.info("── untrained model, n_cls = %d", n_cls)
@@ -240,11 +277,15 @@ def _table(results) -> str:
 def _markdown(results) -> str:
     body = ["# Group readout sweep (untrained)", "",
             "Cell-family agreement, excess over chance, on a subsample of the "
-            "corpus. `counts_log/concat` is a per-group PCA of the same genes "
-            "at the same width: the ceiling a linear reading of the group "
-            "achieves. `groups/concat` is what the group encoders hand on. "
-            "Read the ceiling, not the slope: more numbers preserve more "
-            "information whatever produces them.", "",
+            "corpus. `groups/concat` is what the group encoders hand on: every "
+            "group's summary tokens, which is the cell representation before "
+            "any aggregation.", "",
+            "Two references. **`pca32`** is a 32-component PCA per group "
+            "(1,440 numbers), fixed whatever the model's width: what a plain "
+            "linear method gets from these genes, and the number to beat. "
+            "**`pcaW`** is a PCA at the model's own width, which exists only "
+            "to separate more readouts from more numbers, since more numbers "
+            "preserve more information whatever produces them.", "",
             "| n_cls | kind | stage | width | knn family | linear family | parameters |",
             "|---:|---|---|---:|---:|---:|---:|"]
     for r in results:

@@ -96,9 +96,12 @@ def test_matches_independent_transformer_encoders():
         )
         with torch.no_grad():
             expected = stack(seq)[:, 0, :]
-        assert torch.allclose(got[name], expected, atol=1e-5), (
+        # got[name] is (B, n_cls, d_token); this encoder carries one summary
+        # token, so squeeze it rather than letting allclose broadcast
+        # (B, 1, D) against (B, D) into an all-pairs comparison.
+        assert torch.allclose(got[name][:, 0, :], expected, atol=1e-5), (
             f"group {name!r} diverged from nn.TransformerEncoder: "
-            f"max |diff| = {(got[name] - expected).abs().max().item():.3e}"
+            f"max |diff| = {(got[name][:, 0, :] - expected).abs().max().item():.3e}"
         )
 
 
@@ -176,7 +179,8 @@ def test_output_shapes_and_keys():
     out = enc(make_tokens())
     assert set(out) == set(NAMES)
     for name in NAMES:
-        assert out[name].shape == (B, D_TOKEN)
+        # (B, n_cls, d_token): one summary token unless the config says more.
+        assert out[name].shape == (B, enc.n_cls, D_TOKEN)
 
 
 def test_parameter_count_matches_independent_encoders():

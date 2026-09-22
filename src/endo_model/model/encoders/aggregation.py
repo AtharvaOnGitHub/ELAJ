@@ -117,6 +117,17 @@ class AggregationEncoder(nn.Module):
         """
         B = metadata_tokens.shape[0]
 
+        # A 2-D summary would be concatenated along the wrong axis rather
+        # than rejected: torch.cat on (B, d_token) tensors with dim=1 yields
+        # (B, K * d_token), which the projection accepts silently whenever
+        # d_token == d_agg. Refuse it here instead.
+        first = group_cls_dict[self.group_names[0]]
+        if first.dim() != 3 or first.shape[1] != self.n_cls:
+            raise ValueError(
+                f"AggregationEncoder expects each group's summary as "
+                f"(B, n_cls={self.n_cls}, d_token); got {tuple(first.shape)}"
+            )
+
         # Groups in canonical order, their summary tokens flattened into
         # consecutive positions: (B, K * n_cls, d_token).
         group_cls = torch.cat(

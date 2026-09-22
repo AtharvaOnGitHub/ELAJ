@@ -26,7 +26,7 @@ class TestEncodeStages:
         for name in vocab.group_names:
             g_k = len(vocab.global_indices_for_group(name))
             assert stages.group_tokens[name].shape == (B, g_k, D_TOKEN)
-            assert stages.group_cls[name].shape == (B, D_TOKEN)
+            assert stages.group_cls[name].shape == (B, 1, D_TOKEN)
         assert stages.cell_cls.shape == (B, D_AGG)
         assert stages.latent["mu_gauss"].shape == (B, 8)
         assert stages.latent["mu_angle"].shape == (B, 2)

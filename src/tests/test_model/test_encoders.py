@@ -156,9 +156,28 @@ class TestAggregationEncoder:
                                   n_metadata=3, n_heads=2, n_layers=1)
 
     def _make_inputs(self, enc):
-        group_cls_dict = {name: torch.randn(B, D_TOKEN) for name in GROUP_NAMES}
+        # (B, n_cls, d_token): every group hands on its summary TOKENS, one
+        # by default. See encoders/batched/encoder.py.
+        group_cls_dict = {name: torch.randn(B, enc.n_cls, D_TOKEN)
+                          for name in GROUP_NAMES}
         meta_tokens = torch.randn(B, 3, D_AGG)
         return group_cls_dict, meta_tokens
+
+    def test_two_dimensional_summary_is_refused(self):
+        """A (B, d_token) summary would be concatenated along the wrong axis
+        rather than rejected, and the projection would accept it silently
+        whenever d_token == d_agg."""
+        enc = self._make_agg()
+        flat = {name: torch.randn(B, D_TOKEN) for name in GROUP_NAMES}
+        with pytest.raises(ValueError, match="n_cls"):
+            enc(flat, torch.randn(B, 3, D_AGG))
+
+    def test_every_summary_token_becomes_its_own_position(self):
+        enc = AggregationEncoder(GROUP_NAMES, D_TOKEN, D_AGG, n_cls=4,
+                                 n_metadata=3, n_heads=2, n_layers=1)
+        gcd = {name: torch.randn(B, 4, D_TOKEN) for name in GROUP_NAMES}
+        assert enc.seq_len == 1 + len(GROUP_NAMES) * 4 + 3
+        assert enc(gcd, torch.randn(B, 3, D_AGG)).shape == (B, D_AGG)
 
     def test_cell_cls_shape(self):
         enc = self._make_agg()

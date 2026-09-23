@@ -1,0 +1,69 @@
+name: c1_scale
+description: >
+  c1_ref with one change: the value encoder reads log1p of the
+  library-normalised count instead of the raw count. No new parameters, no
+  shape change anywhere, one call in TokenConstructor.
+
+  WHY. The token sweep (outputs/sweeps/c1_ref_tokens) found the model's
+  input was never transformed while every reference it is judged against
+  was. A 32-component PCA per group scores 0.955 on cell family from the
+  log counts and 0.858 from the raw ones, so 0.097 of the gap we had been
+  charging to the group encoders is the transform alone. The same change
+  to the model moved its group output from 0.691 to 0.760 untrained.
+
+  Raw counts inside one cell span zero to several thousand. Two things
+  follow. The value part of a token is `count * w`, so a housekeeping gene's
+  token is a thousand times longer than a marker's and DSBN spends its
+  capacity on that. And a gene's attention score is shifted by `count * s`
+  for one shared scalar s, so at counts in the thousands the softmax
+  saturates and attention becomes a near-hard pick of the highest-count
+  gene, the same gene for every cell of a type.
+
+  WHAT THIS RUN IS FOR. It is the minimal-change control for c1_combined,
+  which adds gene-specific count directions and a pooled readout on top. If
+  c1_combined wins, the difference between the two says how much of the win
+  was preprocessing rather than architecture, which is a question a reviewer
+  will ask. If c1_combined's aggregation chokes on its 405 summary tokens
+  per cell, this is the working fallback.
+
+  Everything else is c1_ref exactly: same corpus, same seed, same epoch
+  budget, same stop metric, so the two are directly comparable.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_c1.yaml
+
+output_dir: outputs/c1_scale/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.0
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  # The one change. See model/embeddings/counts/log_normalised.py.
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4

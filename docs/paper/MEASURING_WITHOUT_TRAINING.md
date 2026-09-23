@@ -509,43 +509,151 @@ we score *thirteen candidate architectures* without training thirteen models?
 
 ## 6. Untrained measurement
 
-### 6.1 The two explanations it separates
+Every sweep in this project scores models with **random weights**, before any
+training. That only makes sense if a random network carries information at all,
+so this section establishes why it does, what specifically survives, and where
+the argument stops.
 
-When a model underperforms there are two quite different explanations:
+### 6.1 Why a random network carries anything
 
-1. **Structural.** The architecture cannot carry the information regardless of
-   training.
-2. **Learning.** The architecture could carry it, but training did not arrange
-   the weights that way.
+**The information is in the input, not created by the model.** Two cells of the
+same family already have similar count vectors when they arrive. That is a fact
+about endometrial biology. The model does not manufacture that similarity; it
+either preserves it or destroys it.
 
-They need opposite fixes: a design change, or a better optimiser, schedule, or
-loss. Confusing them wastes months.
+**A random linear map preserves distances.** This is the Johnson-Lindenstrauss
+lemma: project N points from any number of dimensions onto m random directions,
+and every pairwise distance is preserved to within a factor of (1 ± ε) with
+high probability, provided
 
-They separate by running the model with **random weights**, before any training.
-If a randomly initialised model already carries as much as the trained one, then
-training was not the missing ingredient and the ceiling is structural.
+```
+m  ≳  8 ln(N) / ε²
+```
 
-Measured at the group encoder outputs:
+Nothing in that statement requires the directions to be chosen well. Random is
+enough. Preservation is the default behaviour of a random map, and destroying
+information takes something specific: a bottleneck narrower than the bound
+allows, or a nonlinearity driven into saturation.
 
-| | cell family excess |
+**The bound, at this project's widths.** With N = 3,634 labelled cells scored,
+ln(N) = 8.2:
+
+| stage | width m | ε the bound allows | measured untrained excess |
+|---|---:|---:|---:|
+| `groups/concat` | 1,440 | 0.21 | 0.799 |
+| `cell_cls` | 64 | 1.01 | 0.512 |
+| `latent` | 16 | 2.02 | 0.465 |
+
+At 1,440 dimensions distances survive a random map to within about 20%, which
+is easily enough to keep the 30 nearest cells mostly the same 30 cells. At 64
+the bound permits distortion as large as the distances themselves, and at 16 it
+guarantees nothing. The measured column follows exactly that ordering.
+
+The Johnson-Lindenstrauss bound is loose, and real random projections preserve
+rather better than it promises, so those ε values should be read as an ordering
+rather than as predictions. The ordering is the point: **wide stages of an
+untrained model preserve neighbourhood structure, narrow ones do not.**
+
+### 6.2 What survives the group encoders specifically
+
+The group encoder is not a random linear map. It is a two-layer transformer, so
+the argument needs to be made about attention.
+
+**At initialisation, attention is close to uniform.** The query and key
+projections are drawn small. With `d_token = 32` over 4 heads, each head works
+in 8 dimensions, and the attention logits `q · k / sqrt(8)` come out with a
+standard deviation near 1. A softmax over 344 positions with logits of that
+size is mildly uneven, not peaked. The readout is therefore close to an
+unweighted average of the group's genes.
+
+**So what reaches the readout is each group's mean expression.** Writing the
+token as `identity_i + count_i × w`, the average over a group's genes is:
+
+```
+mean(identity)  +  mean(count) × w
+```
+
+The first term is a constant for that group, the same in every cell. The only
+cell-varying quantity is **`mean(count)`, one number per group**. Across 45
+groups, an untrained model's readout carries roughly 45 numbers of real
+information, embedded in 1,440 dimensions.
+
+**Forty-five pathway means are a strong signal.** The stage probe measured this
+directly by scoring the token mean, which is exactly that quantity: it reached
+**0.876** on cell family, higher than the group encoders' own 0.799. Pathway
+activity differs sharply between epithelial, stromal, immune, and endothelial
+cells, so knowing the average expression of 45 pathways is most of the way to
+knowing the family.
+
+That is the concrete answer to how an untrained model scores 0.799. Not because
+randomness is clever, but because the architecture's fixed shape routes a small
+and biologically potent summary through to the readout, whatever the weights
+happen to be.
+
+### 6.3 Why training adds nothing at this stage
+
+The measurement:
+
+| at the group encoder outputs | cell family excess |
 |---|---:|
 | trained model | 0.777 |
 | untrained model, random weights | 0.799 |
 
-Training was worth **minus 0.02** at that point. The trained model was very
-slightly worse than random.
+Training was worth **minus 0.02**, and there is a structural reason.
 
-That result is what licenses the sweeps. If training does not change what the
-group encoders preserve, candidate architectures can be compared **without
-training any of them**, and a thirty-hour question becomes a five-minute one.
+Whatever the attention weights `α`, a head's output is:
 
-### 6.2 What untrained measurement cannot settle
+```
+sum_i (alpha_i × V identity_i)  +  (sum_i alpha_i × count_i) × Vw
+```
 
-It tells you what a representation **can** carry. It says nothing about whether
-training will use that capacity. It ranks designs by ceiling, not by outcome.
+Training changes **which** weighted average is taken. It cannot change that the
+count enters through `(sum_i alpha_i count_i)`, a single scalar multiplying one
+fixed direction. Sharpening the attention picks a different weighted mean of
+the counts; it still yields one number per head.
 
-The output of a sweep is therefore always a **decision about what to train**,
-never a conclusion in its own right.
+So the set of outputs the architecture can produce is a one-dimensional family
+in the counts, trained or not. An untrained draw from that family is
+representative of the whole family, which is why the two rows agree.
+
+**That is what licenses the sweeps.** If training does not change what the group
+encoders preserve, candidate architectures can be compared without training any
+of them, and a thirty-hour question becomes a five-minute one.
+
+### 6.4 The test does discriminate
+
+If random initialisation preserved everything, the measurement would be vacuous.
+It does not:
+
+| | untrained excess |
+|---|---:|
+| `base` token map | 0.691 |
+| `fourier` token map | **0.562** |
+| the input itself (diagnostic PCA, raw) | 0.858 |
+| the latent, 16 numbers | **0.465** |
+
+A bad token map destroys information at initialisation (`fourier` loses 0.13
+against `base`), and a narrow bottleneck destroys it regardless of the map (the
+latent loses 0.39 against the input). Both failure modes are visible in the
+measurements, so a high untrained score is a real result rather than an
+artefact of the method.
+
+### 6.5 Where the argument stops
+
+**Capacity, not outcome.** An untrained measurement says what a representation
+*can* carry, not whether training will use that capacity. It ranks designs by
+ceiling. The output of a sweep is always a decision about what to train, never
+a conclusion in its own right.
+
+**The trained-equals-untrained equivalence is itself architecture-specific.**
+The 0.777 against 0.799 result was measured on the rank-one token of §6.3,
+where training genuinely has little room to move. `gene_direction` removes that
+constraint: a head's count term becomes a per-gene weighted sum rather than one
+scalar, so the family of achievable outputs is far larger and there is
+correspondingly more for training to do. **The untrained sweep is therefore less
+predictive for `c1_combined` than it was for `c1_ref`**, and in the direction of
+understating it: an architecture with more room to learn should gain more from
+training, not less.
 
 **Open question:** with all of that in place, what was actually run, and what
 did each one find?
@@ -751,11 +859,12 @@ sweep and a probe are not.
 
 **Nothing in a sweep is trained.** Sweeps measure capacity, not outcome (§6.2).
 
-**The latent column of an untrained sweep is close to meaningless.** An
-untrained aggregation encoder has learned to select nothing, so its 16 numbers
-are a random projection of a random projection. This is why `c1_combined`'s weak
-untrained latent (0.472 against `c1_scale`'s 0.569) is a flag to watch rather
-than a reason not to run it.
+**The latent column of an untrained sweep is close to meaningless.** Sixteen
+dimensions is below the width at which a random map preserves neighbourhood
+structure at all (§6.1), so an untrained latent measures the bottleneck rather
+than the architecture above it. This is why `c1_combined`'s weak untrained
+latent (0.472 against `c1_scale`'s 0.569) is a flag to watch rather than a
+reason not to run it.
 
 **Family is used for model selection.** See §2.5. Declare it.
 
@@ -792,6 +901,8 @@ That ratio is the argument for doing any of this.
 | PCA-16 baseline, all genes, cross-donor family | 0.978 | same |
 | stage probe: input → groups → cell_cls → latent | 0.979, 0.777, 0.819, 0.840 | `outputs/probes/r8_stages` |
 | untrained group encoders | 0.799 | `outputs/probes/r8_untrained` |
+| token mean, i.e. 45 pathway mean counts | 0.876 | `outputs/probes/r8_stages`, `TokenMeanReader` |
+| untrained `cell_cls` and `latent` | 0.512, 0.465 | `outputs/sweeps/c1_ref_tokens`, `base` arm |
 | `n_cls` 1, 2, 4, 8 | 0.691, 0.714, 0.700, 0.708 | `outputs/sweeps/c1_ref_cls`, job 55039884 |
 | diagnostic PCA at 32, 64, 128, 256 per group, kNN | 0.955, 0.916, 0.871, 0.848 | same |
 | the same four, linear probe | 0.996, 0.996, 0.974, 0.945 | same |

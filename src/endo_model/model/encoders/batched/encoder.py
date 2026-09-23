@@ -31,6 +31,8 @@ from endo_model.model.encoders.batched.primitives import (
     BatchedLayerNorm,
     BatchedLinear,
 )
+from endo_model.model.encoders.readouts import build_readout
+from endo_model.model.encoders.readouts.factory import CLS
 
 
 class BatchedSelfAttention(nn.Module):
@@ -157,6 +159,9 @@ class BatchedGroupEncoder(nn.Module):
         n_heads:     Attention heads per group.
         n_layers:    Layers per group.
         dropout:     Dropout probability.
+        readout:     How the encoded block becomes summary vectors. See
+                     encoders/readouts/. "cls" is the learned summary tokens
+                     alone, which is what every run to date used.
     """
 
     def __init__(
@@ -169,6 +174,7 @@ class BatchedGroupEncoder(nn.Module):
         dropout: float = 0.1,
         grad_checkpointing: bool = False,
         n_cls: int = 1,
+        readout: str = CLS,
     ) -> None:
         super().__init__()
         if n_cls < 1:
@@ -176,6 +182,7 @@ class BatchedGroupEncoder(nn.Module):
         self.group_names = list(group_names)
         self.d_token = d_token
         self.n_cls = int(n_cls)
+        self.readout = build_readout(readout)
         self.grad_checkpointing = grad_checkpointing
         n_groups = len(self.group_names)
         self._sizes = [group_sizes[name] for name in self.group_names]
@@ -212,11 +219,17 @@ class BatchedGroupEncoder(nn.Module):
                 key_valid[k, : size + self.n_cls] = True
             self.register_buffer("key_valid", key_valid, persistent=False)
 
+    @property
+    def n_summary(self) -> int:
+        """Summary vectors each group hands on. `n_cls` under the default
+        readout; more when a pooled set is added beside it."""
+        return self.readout.n_summary(self.n_cls)
+
     def forward(self, group_tokens: dict[str, Tensor]) -> dict[str, Tensor]:
         """Args: group_tokens {name: (B, G_k, d_token)}.
 
-        Returns: {name: (B, n_cls, d_token)} — each group's summary tokens
-        after encoding.
+        Returns: {name: (B, n_summary, d_token)} — each group's summary
+        vectors after encoding.
         """
         first = group_tokens[self.group_names[0]]
         B = first.shape[0]
@@ -248,5 +261,6 @@ class BatchedGroupEncoder(nn.Module):
             else:
                 x = layer(x, self.key_valid)
 
-        cls_out = x[:, :, :n_cls, :]                 # (K, B, n_cls, d_token)
-        return {name: cls_out[k] for k, name in enumerate(self.group_names)}
+        summary = self.readout(x, self.key_valid, n_cls)
+        # (K, B, n_summary, d_token)
+        return {name: summary[k] for k, name in enumerate(self.group_names)}

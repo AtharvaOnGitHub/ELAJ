@@ -1,11 +1,15 @@
 """The label probe scores the validation latent on family, every epoch, and
 can be the number that ranks checkpoints.
 
-Planted data first (no torch): a latent that encodes family scores near 1,
-one that does not scores near 0, unlabelled cells are ignored, and a row
-count that does not match the labels is refused. Then the trainer (torch):
-`val_family_knn` lands in the history and, with `stop_metric: family_knn`,
-the checkpoint ranking follows it negated.
+Planted data first: a latent that encodes family scores near 1, one that does
+not scores near 0, unlabelled cells are ignored, and a row count that does not
+match the labels is refused. Then the trainer: `val_family_knn` lands in the
+history and, with `stop_metric: family_knn`, the checkpoint ranking follows it
+negated.
+
+The planted half needs no torch of its own, but `endo_model.training` imports
+the checkpoint manager, which does, so the skip is module-wide rather than on
+the trainer tests alone.
 """
 
 from __future__ import annotations
@@ -13,7 +17,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from endo_model.training.label_probe import FAMILY_METRIC, LabelProbe
+pytest.importorskip("torch")
+
+from endo_model.training.label_probe import FAMILY_METRIC, LabelProbe  # noqa: E402
 
 
 def _labels(n, unlabelled_every=5):

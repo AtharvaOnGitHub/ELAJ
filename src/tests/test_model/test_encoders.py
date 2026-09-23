@@ -7,7 +7,8 @@ torch = pytest.importorskip("torch")
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
-from endo_model.model.embeddings.value_encoder import ValueEncoder
+from endo_model.model.embeddings.counts import RawCounts
+from endo_model.model.embeddings.values import LinearMap, SharedDirectionValue
 from endo_model.model.encoders.aggregation import AggregationEncoder
 from endo_model.model.encoders.group_encoder import GroupEncoder, HierarchicalEncoder
 from endo_model.model.encoders.token_constructor import TokenConstructor
@@ -21,9 +22,9 @@ GROUP_SIZES = {"group_a": 6, "group_b": 8, "group_c": 5}
 
 def _make_token_constructor():
     ge = ModuleGroupEmbedding(GROUP_SIZES, D_TOKEN)
-    ve = ValueEncoder(D_TOKEN)
+    ve = SharedDirectionValue(LinearMap(D_TOKEN))
     dsbn = DSBN(n_studies=2, d_token=D_TOKEN)
-    return TokenConstructor(ge, ve, dsbn, D_TOKEN)
+    return TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN)
 
 
 def _make_fake_batch():
@@ -156,9 +157,9 @@ class TestAggregationEncoder:
                                   n_metadata=3, n_heads=2, n_layers=1)
 
     def _make_inputs(self, enc):
-        # (B, n_cls, d_token): every group hands on its summary TOKENS, one
-        # by default. See encoders/batched/encoder.py.
-        group_cls_dict = {name: torch.randn(B, enc.n_cls, D_TOKEN)
+        # (B, n_summary, d_token): every group hands on its summary
+        # TOKENS, one by default. See encoders/batched/encoder.py.
+        group_cls_dict = {name: torch.randn(B, enc.n_summary, D_TOKEN)
                           for name in GROUP_NAMES}
         meta_tokens = torch.randn(B, 3, D_AGG)
         return group_cls_dict, meta_tokens
@@ -169,11 +170,11 @@ class TestAggregationEncoder:
         whenever d_token == d_agg."""
         enc = self._make_agg()
         flat = {name: torch.randn(B, D_TOKEN) for name in GROUP_NAMES}
-        with pytest.raises(ValueError, match="n_cls"):
+        with pytest.raises(ValueError, match="n_summary"):
             enc(flat, torch.randn(B, 3, D_AGG))
 
     def test_every_summary_token_becomes_its_own_position(self):
-        enc = AggregationEncoder(GROUP_NAMES, D_TOKEN, D_AGG, n_cls=4,
+        enc = AggregationEncoder(GROUP_NAMES, D_TOKEN, D_AGG, n_summary=4,
                                  n_metadata=3, n_heads=2, n_layers=1)
         gcd = {name: torch.randn(B, 4, D_TOKEN) for name in GROUP_NAMES}
         assert enc.seq_len == 1 + len(GROUP_NAMES) * 4 + 3

@@ -54,7 +54,7 @@ class SizeBucket:
 
 
 def plan_buckets(
-    group_sizes: dict[str, int], n_buckets: int
+    group_sizes: dict[str, int], n_buckets: int, n_cls: int = 1
 ) -> list[SizeBucket]:
     """Partition groups into `n_buckets` contiguous runs of similar size.
 
@@ -68,13 +68,15 @@ def plan_buckets(
     Args:
         group_sizes: group name -> gene count.
         n_buckets:   Requested bucket count. Clamped to [1, n_groups].
+        n_cls:       Summary tokens prepended to every group, which occupy
+                     sequence positions and so belong in the padded length.
 
     Returns:
         Buckets ordered smallest to largest.
     """
     ordered = sorted(group_sizes.items(), key=lambda kv: kv[1])
     names = [name for name, _ in ordered]
-    seq = [size + 1 for _, size in ordered]      # +1 for the CLS token
+    seq = [size + n_cls for _, size in ordered]  # summary tokens are positions
     n = len(seq)
     n_buckets = max(1, min(int(n_buckets), n))
 
@@ -144,24 +146,33 @@ class BucketedGroupEncoder(nn.Module):
         n_buckets: int = 4,
         grad_checkpointing: bool = False,
         n_cls: int = 1,
+        readout: str = "cls",
     ) -> None:
         super().__init__()
         self.group_names = list(group_names)
         self.d_token = d_token
         self.buckets = plan_buckets(
-            {name: group_sizes[name] for name in self.group_names}, n_buckets
+            {name: group_sizes[name] for name in self.group_names}, n_buckets,
+            n_cls=int(n_cls),
         )
         self.encoders = nn.ModuleList([
             BatchedGroupEncoder(
                 list(bucket.names), group_sizes, d_token,
                 n_heads=n_heads, n_layers=n_layers, dropout=dropout,
                 grad_checkpointing=grad_checkpointing, n_cls=n_cls,
+                readout=readout,
             )
             for bucket in self.buckets
         ])
         self.grad_checkpointing = grad_checkpointing
         self.n_cls = int(n_cls)
         self._log_plan(group_sizes)
+
+    @property
+    def n_summary(self) -> int:
+        """Summary vectors each group hands on. Identical across buckets: they
+        differ only in which groups they hold."""
+        return self.encoders[0].n_summary
 
     def _log_plan(self, group_sizes: dict[str, int]) -> None:
         """Report the partition and what it saved, once, at build time."""
@@ -178,11 +189,13 @@ class BucketedGroupEncoder(nn.Module):
             bucketed / 1e6, unbucketed / 1e6, ideal / 1e6,
             100.0 * (unbucketed - bucketed) / max(unbucketed - ideal, 1),
         )
-        if self.n_cls != 1:
-            logger.info("Group encoder: %d summary tokens per group; each "
-                        "group hands on %d numbers instead of %d",
-                        self.n_cls, self.n_cls * self.encoders[0].d_token,
-                        self.encoders[0].d_token)
+        if self.n_summary != 1:
+            logger.info("Group encoder: readout %r gives %d summary tokens "
+                        "per group (%d learned, %d pooled); each group hands "
+                        "on %d numbers instead of %d",
+                        self.encoders[0].readout.name, self.n_summary,
+                        self.n_cls, self.n_summary - self.n_cls,
+                        self.n_summary * self.d_token, self.d_token)
         if self.grad_checkpointing:
             logger.info(
                 "Group encoder: gradient checkpointing ON — attention "
@@ -194,7 +207,8 @@ class BucketedGroupEncoder(nn.Module):
     def forward(self, group_tokens: dict[str, Tensor]) -> dict[str, Tensor]:
         """Args: group_tokens {name: (B, G_k, d_token)}.
 
-        Returns: {name: (B, n_cls, d_token)} — each group's summary tokens.
+        Returns: {name: (B, n_summary, d_token)} — each group's summary
+        vectors.
         """
         out: dict[str, Tensor] = {}
         for encoder in self.encoders:

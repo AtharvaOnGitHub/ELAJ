@@ -10,7 +10,7 @@ from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder, N_METADATA
 from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
-from endo_model.model.embeddings.value_encoder import ValueEncoder
+from endo_model.model.embeddings.values import LinearMap
 
 B = 4
 D = 32
@@ -36,17 +36,17 @@ def test_gene_embedding_different_groups_different_tables():
     assert not torch.allclose(out_a, out_b)
 
 
-# ── ValueEncoder ────────────────────────────────────────────────────────────
+# ── LinearMap (the retired ValueEncoder) ────────────────────────────────────
 
-def test_value_encoder_shape():
-    enc = ValueEncoder(D)
+def test_linear_map_shape():
+    enc = LinearMap(D)
     counts = torch.rand(B, 15)
     out = enc(counts)
     assert out.shape == (B, 15, D)
 
 
-def test_value_encoder_linear():
-    enc = ValueEncoder(D)
+def test_linear_map_is_linear():
+    enc = LinearMap(D)
     # Zero input → bias only
     out_zero = enc(torch.zeros(B, 5))
     out_one = enc(torch.ones(B, 5))

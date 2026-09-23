@@ -34,7 +34,8 @@ from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
 from endo_model.model.embeddings.platform_encoder import PlatformEncoder
 from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
-from endo_model.model.embeddings.value_encoder import ValueEncoder
+from endo_model.model.embeddings.counts import build_count_scaler
+from endo_model.model.embeddings.values import build_value_part
 from endo_model.model.encoders.aggregation import AggregationEncoder
 from endo_model.model.encoders.batched import BucketedGroupEncoder
 from endo_model.model.encoders.token_constructor import TokenConstructor
@@ -60,13 +61,26 @@ class EndoFoundationModel(nn.Module):
 
         # ── Embeddings ──────────────────────────────────────────────────────
         self.gene_embedding = ModuleGroupEmbedding(group_sizes, config.d_token)
-        self.value_encoder = ValueEncoder(config.d_token)
+        # How a count is scaled, and how the scaled number becomes a vector.
+        # Independent choices; both default to what every run before September
+        # 2026 did, a raw count through nn.Linear(1, d_token). See
+        # embeddings/counts/ and embeddings/values/.
+        self.count_scaler = build_count_scaler(
+            config.tokens.count_scale, target_sum=config.tokens.target_sum
+        )
+        self.value_encoder = build_value_part(
+            config.tokens.value_part, config.d_token, group_sizes,
+            count_scale=config.tokens.count_scale,
+            n_frequencies=config.tokens.n_frequencies,
+            mlp_hidden=config.tokens.mlp_hidden,
+        )
         self.dsbn = DSBN(config.n_studies, config.d_token)
         self.metadata_encoder = MetadataEncoder(config.d_agg)
 
         # ── Encoders ────────────────────────────────────────────────────────
         self.token_constructor = TokenConstructor(
-            self.gene_embedding, self.value_encoder, self.dsbn, config.d_token
+            self.gene_embedding, self.count_scaler, self.value_encoder,
+            self.dsbn, config.d_token
         )
         # Same 45 independent encoders as before, executed as grouped matmuls
         # rather than 45 Python calls.  Identical parameters and outputs — see
@@ -80,10 +94,14 @@ class EndoFoundationModel(nn.Module):
             n_buckets=config.group_encoder.n_buckets,
             grad_checkpointing=config.group_encoder.grad_checkpointing,
             n_cls=config.group_encoder.n_cls,
+            readout=config.group_encoder.readout,
         )
+        # The group encoder's readout decides how many summary vectors a group
+        # hands on, so the aggregation is sized from it rather than from n_cls:
+        # a pooled readout adds statistics beside the learned summary tokens.
         self.aggregation_encoder = AggregationEncoder(
             vocabulary.group_names, config.d_token, config.d_agg,
-            n_cls=config.group_encoder.n_cls,
+            n_summary=self.hierarchical_encoder.n_summary,
             n_heads=config.aggregation_encoder.n_heads,
             n_layers=config.aggregation_encoder.n_layers,
             dropout=config.aggregation_encoder.dropout,

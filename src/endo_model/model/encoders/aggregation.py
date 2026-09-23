@@ -1,7 +1,7 @@
 """AggregationEncoder: cross-module transformer producing the cell embedding.
 
 Sequence layout (fixed):
-    [CELL_CLS, group_CLS_0, ..., group_CLS_{K-1}, meta_0, ..., meta_{M-1}]
+    [CELL_CLS, summaries of group 0, ..., of group K-1, meta_0 ... meta_M]
     positions:  0            1                   K        K+1          K+M
 
 CELL_CLS at position 0 is the cell-level representation used for the latent
@@ -48,7 +48,7 @@ class AggregationEncoder(nn.Module):
         group_names: list[str],
         d_token: int,
         d_agg: int,
-        n_cls: int = 1,
+        n_summary: int = 1,
         n_metadata: int = N_METADATA,
         n_heads: int = 4,
         n_layers: int = 2,
@@ -57,7 +57,7 @@ class AggregationEncoder(nn.Module):
         super().__init__()
         self.group_names = group_names
         self.d_agg = d_agg
-        self.n_cls = int(n_cls)
+        self.n_summary = int(n_summary)
         n_groups = len(group_names)
 
         # CELL_CLS is a learnable parameter (one vector, no batch dim)
@@ -93,7 +93,7 @@ class AggregationEncoder(nn.Module):
         self.n_groups = n_groups
         self.n_metadata = n_metadata
         # Sequence: CELL_CLS, then every group's summary tokens, then metadata.
-        self.seq_len = 1 + n_groups * self.n_cls + n_metadata
+        self.seq_len = 1 + n_groups * self.n_summary + n_metadata
 
     def forward(
         self,
@@ -103,8 +103,8 @@ class AggregationEncoder(nn.Module):
         """Run cross-module aggregation.
 
         Args:
-            group_cls_dict:  dict mapping group_name → (B, n_cls, d_token) —
-                             from the group encoder. Every summary token
+            group_cls_dict:  dict mapping group_name → (B, n_summary,
+                             d_token) from the group encoder. Every summary
                              becomes its own position here, so a group with
                              four of them contributes four tokens rather than
                              one wider one: the attention that mixes groups
@@ -122,23 +122,24 @@ class AggregationEncoder(nn.Module):
         # (B, K * d_token), which the projection accepts silently whenever
         # d_token == d_agg. Refuse it here instead.
         first = group_cls_dict[self.group_names[0]]
-        if first.dim() != 3 or first.shape[1] != self.n_cls:
+        if first.dim() != 3 or first.shape[1] != self.n_summary:
             raise ValueError(
                 f"AggregationEncoder expects each group's summary as "
-                f"(B, n_cls={self.n_cls}, d_token); got {tuple(first.shape)}"
+                f"(B, n_summary={self.n_summary}, d_token); got "
+                f"{tuple(first.shape)}"
             )
 
         # Groups in canonical order, their summary tokens flattened into
-        # consecutive positions: (B, K * n_cls, d_token).
+        # consecutive positions: (B, K * n_summary, d_token).
         group_cls = torch.cat(
             [group_cls_dict[name] for name in self.group_names], dim=1
         )
-        group_cls_proj = self.proj(group_cls)  # (B, K * n_cls, d_agg)
+        group_cls_proj = self.proj(group_cls)  # (B, K * n_summary, d_agg)
 
         # Assemble sequence: [CELL_CLS, group summaries..., metadata...]
         cell_cls = self.cell_cls.expand(B, -1, -1)          # (B, 1, d_agg)
         seq = torch.cat([cell_cls, group_cls_proj, metadata_tokens], dim=1)
-        # seq shape: (B, 1 + K * n_cls + n_metadata, d_agg)
+        # seq shape: (B, 1 + K * n_summary + n_metadata, d_agg)
 
         out = self.transformer(seq)
 

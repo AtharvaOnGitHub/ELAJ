@@ -18,7 +18,15 @@ logger = logging.getLogger(__name__)
 # Submodule names retired in September 2026 -> their current names. Every
 # checkpoint from r1 to c_ref carries the old ones; renaming the attribute
 # without this would make all of them unloadable.
-_RENAMED_MODULES = {"latent_space.vonmises.": "latent_space.circular."}
+_RENAMED_MODULES = {
+    "latent_space.vonmises.": "latent_space.circular.",
+    # ValueEncoder became one ValuePart among several, and the linear map it
+    # was moved a level down into SharedDirectionValue.scalar_map. The weights
+    # are unchanged, so every checkpoint from r1 to c1_ref still loads.
+    "value_encoder.linear.": "value_encoder.scalar_map.linear.",
+    "token_constructor.value_encoder.linear.":
+        "token_constructor.value_encoder.scalar_map.linear.",
+}
 
 
 def _renamed_keys(state: dict) -> dict:

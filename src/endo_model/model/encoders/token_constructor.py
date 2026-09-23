@@ -2,9 +2,16 @@
 
 For each gene group K, TokenConstructor:
   1. Gathers raw counts for genes in this group (using global vocab indices).
-  2. Replaces DNS positions with a learned dns_embedding vector.
-  3. Adds value-encoded counts to gene identity embeddings.
-  4. Applies DSBN for study-level normalisation.
+  2. Scales those counts (CountScaler: raw, or library-normalised and logged).
+  3. Turns each scaled count into a vector (ValuePart).
+  4. Replaces DNS positions with a learned dns_embedding vector.
+  5. Adds that to the gene identity embedding.
+  6. Applies DSBN for study-level normalisation.
+
+Steps 2 and 3 are the two things the token sweep varies, and they are separate
+because they are independent: how the count is scaled says nothing about how
+the scaled number becomes a vector. See embeddings/counts/ and
+embeddings/values/ for what each choice does and why.
 
 NOTE on index convention:
   batch['group_indices'][group_name] is shape (B, G_k) and contains GLOBAL
@@ -17,9 +24,10 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from endo_model.model.embeddings.counts import CountScaler
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
-from endo_model.model.embeddings.value_encoder import ValueEncoder
+from endo_model.model.embeddings.values import TokenInputs, ValuePart
 
 
 class TokenConstructor(nn.Module):
@@ -27,7 +35,8 @@ class TokenConstructor(nn.Module):
 
     Args:
         group_embedding: ModuleGroupEmbedding with one table per group.
-        value_encoder:   Shared ValueEncoder (scalar → d_token).
+        count_scaler:    CountScaler applied to the raw counts first.
+        value_part:      ValuePart mapping scaled counts to token vectors.
         dsbn:            Domain-Specific Batch Normalisation.
         d_token:         Token embedding dimension.
     """
@@ -35,13 +44,15 @@ class TokenConstructor(nn.Module):
     def __init__(
         self,
         group_embedding: ModuleGroupEmbedding,
-        value_encoder: ValueEncoder,
+        count_scaler: CountScaler,
+        value_part: ValuePart,
         dsbn: DSBN,
         d_token: int,
     ) -> None:
         super().__init__()
         self.group_embedding = group_embedding
-        self.value_encoder = value_encoder
+        self.count_scaler = count_scaler
+        self.value_part = value_part
         self.dsbn = dsbn
         self.d_token = d_token
 
@@ -60,6 +71,7 @@ class TokenConstructor(nn.Module):
         """
         study_id = batch["study_id"]          # (B,)
         counts = batch["counts"]              # (B, vocab_size) — DNS cells are -1
+        library_size = batch["library_size"]  # (B,)
         group_tokens: dict[str, Tensor] = {}
 
         for group_name, global_idxs in batch["group_indices"].items():
@@ -73,6 +85,10 @@ class TokenConstructor(nn.Module):
             counts_safe = counts_k.clone()
             counts_safe[dns_mask] = 0.0                # zero out DNS before encoding
 
+            # Scale before encoding. A DNS gene is at 0.0 here and every scaler
+            # maps 0 to 0, so this needs no DNS special case of its own.
+            counts_scaled = self.count_scaler(counts_safe, library_size)
+
             # Gene identity embedding using WITHIN-GROUP indices [0 … G_k-1]
             within_idxs = (
                 torch.arange(G_k, device=device)
@@ -80,10 +96,15 @@ class TokenConstructor(nn.Module):
                 .expand(B, -1)
             )                                          # (B, G_k)
             identity = self.group_embedding(group_name, within_idxs)   # (B, G_k, D)
-            value_enc = self.value_encoder(counts_safe)                 # (B, G_k, D)
+            value_enc = self.value_part(TokenInputs(
+                group_name=group_name,
+                counts=counts_scaled,
+                identity=identity,
+                within_idxs=within_idxs,
+            ))                                                          # (B, G_k, D)
 
             # DNS genes: identity + dns_embedding (preserves gene identity).
-            # Measured genes: identity + value_encoder(count).
+            # Measured genes: identity + value_part(scaled count).
             # torch.where avoids in-place modification of autograd nodes.
             dns_emb = self.dns_embedding.view(1, 1, -1).expand(B, G_k, -1)  # (B, G_k, D)
             value_or_dns = torch.where(

@@ -5,6 +5,39 @@ from typing import Optional
 
 
 @dataclass
+class TokenConfig:
+    """How a gene's count becomes the value half of its token.
+
+    Two independent choices, and the defaults reproduce every run to date: a
+    raw count through `nn.Linear(1, d_token)`.
+
+    count_scale   "raw" is the count as it arrives. "log" is
+                  log1p(count / library_size * target_sum), what scVI and the
+                  PCA reference see. See model/embeddings/counts/.
+    value_part    "linear", "fourier" or "mlp" map the count the same way for
+                  every gene; "gene_direction" and "gene_table" give each gene
+                  its own direction, which is the form a principal component
+                  takes. See model/embeddings/values/.
+    """
+
+    count_scale: str = "raw"
+    target_sum: float = 1.0e4
+    value_part: str = "linear"
+    n_frequencies: int = 8      # read only by value_part "fourier"
+    mlp_hidden: int = 64        # read only by value_part "mlp"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TokenConfig":
+        return cls(
+            count_scale=str(d.get("count_scale", "raw")),
+            target_sum=float(d.get("target_sum", 1.0e4)),
+            value_part=str(d.get("value_part", "linear")),
+            n_frequencies=int(d.get("n_frequencies", 8)),
+            mlp_hidden=int(d.get("mlp_hidden", 64)),
+        )
+
+
+@dataclass
 class GroupEncoderConfig:
     n_layers: int = 2
     n_heads: int = 4
@@ -28,6 +61,13 @@ class GroupEncoderConfig:
     # positions on a 250-to-494-token sequence; nothing else in the encoder
     # or the aggregation grows. See encoders/batched/encoder.py.
     n_cls: int = 1
+    # How a group's encoded tokens become the vectors it hands on. "cls" is
+    # the learned summary tokens alone, which every run to date used. Adding a
+    # pooled set ("cls+pool8" and friends) appends statistics over the gene
+    # tokens, which are order statistics rather than weighted averages and so
+    # are not reachable by adding heads or summary tokens. No parameters
+    # either way. See encoders/readouts/.
+    readout: str = "cls"
 
     @classmethod
     def from_dict(cls, d: dict) -> "GroupEncoderConfig":
@@ -41,6 +81,7 @@ class GroupEncoderConfig:
             n_buckets=int(d.get("n_buckets", 4)),
             grad_checkpointing=bool(d.get("grad_checkpointing", False)),
             n_cls=n_cls,
+            readout=str(d.get("readout", "cls")),
         )
 
 
@@ -204,6 +245,7 @@ class ModelConfig:
     d_disease: int = 0
     n_groups: Optional[int] = None    # populated from vocabulary at runtime
     n_studies: Optional[int] = None   # populated from data config at runtime
+    tokens: TokenConfig = field(default_factory=TokenConfig)
     group_encoder: GroupEncoderConfig = field(default_factory=GroupEncoderConfig)
     aggregation_encoder: AggregationEncoderConfig = field(
         default_factory=AggregationEncoderConfig
@@ -260,6 +302,7 @@ class ModelConfig:
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),
             n_studies=d.get("n_studies"),
+            tokens=TokenConfig.from_dict(d.get("tokens", {})),
             group_encoder=GroupEncoderConfig.from_dict(d.get("group_encoder", {})),
             aggregation_encoder=AggregationEncoderConfig.from_dict(
                 d.get("aggregation_encoder", {})

@@ -27,6 +27,7 @@ from endo_model.configs.training_config import TrainingConfig
 from endo_model.model.objectives.composite import CompositeLoss
 from endo_model.precision import PrecisionPolicy
 from endo_model.training.callbacks import EarlyStopping, MetricLogger
+from endo_model.training.batch_device import to_device
 from endo_model.training.checkpointing import CheckpointManager
 from endo_model.training.diagnostics import TrainingMonitor
 
@@ -73,6 +74,7 @@ class Trainer:
         cce_enabled: bool = False,
         cce_every: int = 1,
         label_probe=None,
+        drift_probe=None,
         monitor: TrainingMonitor | None = None,
         reporter=None,
         extra_val_metrics=None,
@@ -93,6 +95,10 @@ class Trainer:
         # pass and may rank checkpoints; see label_probe.py.
         self.label_probe = label_probe
         self._probe_rows: list[tuple[np.ndarray, np.ndarray]] = []
+        # Re-encodes a fixed cohort every validation pass and reports how
+        # far the encoder's output moved since last epoch; see drift.py.
+        # It decides when the encoder is settled enough to freeze.
+        self.drift_probe = drift_probe
         self.device = device or torch.device("cpu")
         # Called with the history dict after every epoch. train.py uses it to
         # rewrite metrics.csv, so the per-epoch record survives a run that is
@@ -370,7 +376,7 @@ class Trainer:
         self.logger.reset()
 
         for batch in self.train_loader:
-            batch = _to_device(batch, self.device)
+            batch = to_device(batch, self.device)
             self.optimizer.zero_grad()
             self.monitor.begin_step(self.current_epoch, self.global_step)
 
@@ -437,7 +443,7 @@ class Trainer:
         self._probe_rows = []
 
         for batch in self.val_loader:
-            batch = _to_device(batch, self.device)
+            batch = to_device(batch, self.device)
             with self.precision.autocast(self.device):
                 output = self.model(batch)
                 losses = self.composite_loss(
@@ -460,6 +466,8 @@ class Trainer:
                 ))
 
         metrics = val_logger.epoch_averages()
+        if self.drift_probe is not None:
+            metrics.update(self.drift_probe.measure(self.model, self.device))
         if self.label_probe is not None and self._probe_rows:
             mu = np.concatenate([r[0] for r in self._probe_rows])
             angle = np.concatenate([r[1] for r in self._probe_rows])
@@ -485,19 +493,3 @@ def _record(
         if name == "total":
             continue
         history.setdefault(f"{prefix}_{name}", []).append(value)
-
-
-def _to_device(batch: dict, device: torch.device) -> dict:
-    """Move all tensors in a batch dict to the target device."""
-    out: dict = {}
-    for k, v in batch.items():
-        if isinstance(v, torch.Tensor):
-            out[k] = v.to(device)
-        elif isinstance(v, dict):
-            out[k] = {
-                kk: vv.to(device) if isinstance(vv, torch.Tensor) else vv
-                for kk, vv in v.items()
-            }
-        else:
-            out[k] = v
-    return out

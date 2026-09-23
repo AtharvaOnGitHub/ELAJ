@@ -211,6 +211,13 @@ def main() -> None:
     if label_probe.n_labelled == 0:
         logger.warning("No validation cell carries a family label; the probe "
                        "will report NaN and stop_metric falls back to nb")
+    # How far the encoder's output moves per epoch. Reported alongside the
+    # losses, and the number that says when the encoder is settled enough
+    # to freeze for a latent sweep. See training/drift.py.
+    from endo_model.training.drift import EncoderDriftProbe
+
+    drift_probe = EncoderDriftProbe.from_loader(val_loader)
+
     if train_cfg.stop_metric != "nb":
         logger.info("Checkpoints ranked and early stopping driven by "
                     "val_%s (negated), not val_nb", train_cfg.stop_metric)
@@ -421,6 +428,7 @@ def main() -> None:
         cce_enabled=model_cfg.cce.enabled,
         cce_every=model_cfg.cce.every,
         label_probe=label_probe,
+        drift_probe=drift_probe,
         monitor=monitor,
         reporter=reporter,
         extra_val_metrics=hvg_metric,

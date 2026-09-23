@@ -1,0 +1,197 @@
+# What is left, by part of the paper
+
+Updated 23 September 2026. Companion to
+[`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md), which holds the claims and the
+schedule, and [`EVIDENCE.md`](EVIDENCE.md), which holds what we already have.
+
+Priority runs 1 to 5 within each section. §8 is everything deliberately out of
+scope; nothing there is ever a top-five item.
+
+---
+
+## 1. Blocked on the two running jobs
+
+`c1_scale` and `c1_combined` launched 23 September, about 28 h each.
+
+| | what it is | why it waits |
+|---|---|---|
+| fill the checkpoint path in `f1_epochs_03/05/10` | three lines | needs a checkpoint filename, which carries its own epoch and step |
+| choose which encoder to freeze | read both runs' `val_family_knn` and epoch times | needs both to finish |
+| the three transferability-gate configurations | pick three latent configs as far apart as possible | the gate compares `c1_scale`'s encoder against `c1_combined`'s |
+| score both arms | `score_arm.sh`, needs `c1_baselines` first | the arms |
+
+---
+
+## 2. Ready now, no GPU
+
+**P1. `c1_baselines`.** PCA, scVI, and scANVI fitted on the c1 training donors
+and applied to the held-out ones.
+
+```
+benchmark_baselines.sh c1_ref --no-elaj --fit-split train \
+    --methods pca scvi scanvi --out outputs/benchmarks/c1_baselines
+```
+
+This is a **prerequisite for scoring any c1 arm at all**, including
+`c1_scale` and `c1_combined` when they land in roughly 36 hours. The existing
+benchmark (`r8_inductive`) is on the twelve-study corpus with organoids in, so
+none of its numbers transfer. Running it now takes about two hours off the
+critical path on 25 September rather than adding two hours to it.
+
+Scoring `c1_ref` itself is a separate and weaker question, kept in §8.
+
+**P2. scGPT and Geneformer environments.** Both want their own environment and
+their own tokenisation of the corpus. The plan budgets two days for the
+install alone, and it is on the week-3 critical path today. Login node.
+
+**P3. The licence audit (R3).** See §6 for where to look. It decides what the
+Data Availability statement can say and it can block submission if left late.
+
+**P4. Draft the Methods.** Corpus, vocabulary, model, and validation protocol
+are settled and independent of how the two runs turn out. The thesis Methods
+is the starting point, and
+[`MEASURING_WITHOUT_TRAINING.md`](MEASURING_WITHOUT_TRAINING.md) is most of
+the validation-protocol section already. Lower priority than it looks: two
+architecture bets are pending and the model subsection will move if either
+lands.
+
+---
+
+## 3. Results, by figure
+
+| figure | content | status |
+|---|---|---|
+| Fig. 1 | architecture | not started |
+| Fig. 2 | the diagnosis chain: stage table, `n_cls` flat line, token sweep | **evidence complete**, see EVIDENCE.md 2 to 4 |
+| Fig. 3 | width curve: kNN and linear probe against component count | **evidence complete** |
+| Fig. 4 | the benchmark table, ELAJ against scVI, PCA, Harmony, Scanorama | waits on `c1_baselines` and the two arms |
+| Fig. 5 | ablations: random grouping, DNS removed | not started |
+| Fig. 6 | the demonstration | not chosen |
+
+---
+
+## 4. The latent programme
+
+Sequenced in `PUBLICATION_PLAN.md` §11. Two open decisions:
+
+**Which knobs the sweep covers.** Six candidates and room for about eight
+arms, so this needs a decision rather than a grid. Flagged for discussion:
+`d_gauss` and `n_circular` change what the latent *is*; `free_bits` and
+`beta_max` change how much of it gets used; `kappa_floor` only matters if
+circular dimensions survive at all; `circular_parameterisation` only matters
+if the circular branch is kept.
+
+**What the gate's three configurations should be.** They must be as different
+from each other as possible, not a fine grid: the gate asks whether a ranking
+survives a change of encoder, and a tight cluster would not detect a flip.
+
+---
+
+## 5. Claims with no evidence yet
+
+From `PUBLICATION_PLAN.md` §2. These are the ones a reviewer asks about.
+
+| claim | what it needs | status |
+|---|---|---|
+| C3 DNS sentinel | the DNS-removed ablation | not started |
+| C4 beats scVI on cross-donor biology | the two running arms, scored | running |
+| C7 the latent is usable | one demonstration | not chosen |
+| C2 the grouping carries biology | the random-grouping ablation at equal sizes and parameters | config not written |
+
+C4 is the one the paper cannot be submitted without. C2 is the one a reviewer
+asks for first.
+
+---
+
+## 6. The licence audit: where to look
+
+Everything needed is in `data_collation/configs/datasets.yaml`, which carries
+one entry per study with its source and accession.
+
+| study | source | accession |
+|---|---|---|
+| shih_2022 | GEO | GSE203191 |
+| tan_2022 | GEO | GSE179640 |
+| ferrero_2024 | GEO | GSE247695 |
+| lin_2023 | GEO | GSE214411 |
+| wang_2022 | GEO | GSE218044 |
+| zhang_2022 | GEO | GSE174399 |
+| fonseca_2023 | GEO | GSE213216 |
+| duempelmann_2026 | GEO | GSE266265 |
+| li_2025 | manual download | GSE276193 |
+| marecko_2024 | Reproductive Cell Atlas | E-MTAB-14039 |
+| garcia_alonso_2021_a | CELLxGENE | **not recorded** |
+| garcia_alonso_2021_b | CELLxGENE | **not recorded** |
+| garcia_alonso_2021_c | CELLxGENE | **not recorded**, and excluded from the c1 corpus |
+
+Three things to settle per study:
+
+1. **The licence.** GEO has no single licence: each submission inherits the
+   depositor's terms, so the paper and the submission page both need reading.
+   E-MTAB entries carry an explicit licence on ArrayExpress. CELLxGENE
+   collections state theirs on the collection page.
+2. **Whether processed data may be redistributed.** The distinction that
+   matters for Data Availability is between pointing at an accession, which is
+   always allowed, and shipping our processed AnnData, which often is not.
+3. **Citation requirements.** Several will require citing the original paper
+   rather than only the accession.
+
+Two gaps to close first: the three `garcia_alonso_2021` entries have no
+accession recorded, and `zhang_2022` and `garcia_alonso_2021_c` are in
+`datasets.yaml` but excluded from the c1 corpus, so decide whether they appear
+in the paper at all before auditing them.
+
+---
+
+## 7. Reproducibility (R1 to R5)
+
+From `PUBLICATION_PLAN.md` §8. Runs alongside everything; the NMI Reporting
+Summary enforces it.
+
+- [ ] R1 seeds and environment pinned per reported run
+- [ ] R2 weights of the reported configuration deposited, licence decided
+- [ ] R3 licence audit, see §6
+- [ ] R4 the pipeline runnable end to end from the accession list
+- [ ] R5 every figure regenerable from a committed script
+
+---
+
+## 8. Out of scope, recorded so it is not rediscovered
+
+Nothing here is ever a top-five priority. It is kept so that a question
+already settled is not reopened.
+
+**Scoring `c1_ref` for its own sake.** Its `val_family_knn` of 0.918 is a
+within-donor number from the training loop's label probe, not the cross-donor
+number the paper reports, so it is not comparable to scVI's 0.971 as it
+stands. Scoring it would make it comparable. Worth doing **only if the paper
+carries a "before the token fix" row**, which is a writing decision and not
+yet made. `c1_baselines` is needed regardless and sits in §2.
+
+**The bf16 precision question.** Log round-trip error 0.76% to 1.21%, raw
+counts 0% to 0.27%, against Poisson shot noise of 1.8% to 10%. The noise
+floor dominates, so the number format is not the bottleneck. Parked.
+
+**Super-group encoders.** An abstract grouping of the 45 groups into a few
+super-groups before the cell summary. Held because the `n_cls` sweep showed
+the aggregation is not where the loss is, and the token sweep found the cause
+elsewhere. Revisit only if `c1_combined`'s 405 summary tokens choke the
+aggregation.
+
+**A free direction vector per gene (`gene_table`).** 495,776 parameters and
+it scored **below** the 960-parameter factorised version, 0.794 against
+0.811. Closed by the token sweep.
+
+**Fourier and MLP count maps.** 0.562 and 0.742 against the control's 0.691
+and `scale`'s 0.760. Closed by the token sweep.
+
+**Readout width (`n_cls` above 1).** Eight times the width moved cell family
+from 0.691 to 0.708. Closed by the `n_cls` sweep.
+
+**Deferred code findings.** D3 (`infer.py` rows cannot be joined back to
+cells), B6 (`evaluate.py` drops tails), B7 (`EXCLUDE` against
+`exclude_studies`), A4 (duempelmann fractional counts). None affects a paper
+number.
+
+**The Genome Biology lane.** `PUBLICATION_PLAN.md` §9. Only if the campaign
+cannot bring the latent above scVI.

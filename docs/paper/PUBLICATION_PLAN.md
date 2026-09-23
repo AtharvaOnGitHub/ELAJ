@@ -3,7 +3,13 @@
 Working document. Started 10 September 2026; rewritten 14 September 2026 after
 the baseline benchmark and the decision to target Nature Machine Intelligence.
 
-**Companion:** [`MEASURING_WITHOUT_TRAINING.md`](MEASURING_WITHOUT_TRAINING.md)
+**Companions.** [`EVIDENCE.md`](EVIDENCE.md) lists every result that
+exists, what it supports, and where it came from: a number not in that
+file has no provenance and should not appear in a draft.
+[`OUTSTANDING.md`](OUTSTANDING.md) lists what is left, by part of the
+paper, with what blocks each item and a section for everything
+deliberately out of scope.
+[`MEASURING_WITHOUT_TRAINING.md`](MEASURING_WITHOUT_TRAINING.md)
 explains how the probes, sweeps, and baselines work, why probing is valid when
 the training objective is reconstruction, and what each measurement can and
 cannot support. It carries the provenance table for every number quoted below

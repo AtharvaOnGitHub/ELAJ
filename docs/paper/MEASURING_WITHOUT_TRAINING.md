@@ -342,35 +342,77 @@ whether any of them is any good?
 
 ---
 
-## 5. Why there must be a reference, and why it is PCA
+## 5. The reference
 
 A score of 0.691 is meaningless on its own. It needs something to be measured
 against, and that something must not be another version of our own model.
 
-**Principal component analysis.** Take one group's 344 genes. Each cell is then
-344 numbers. PCA finds 32 particular weighted sums of those 344 numbers, chosen
-so that those 32 sums preserve as much of the variation between cells as any 32
-weighted sums possibly could. It is the optimal linear compression, it has no
-parameters to train, and it has been standard since the 1930s.
+**Principal component analysis.** Given a set of genes, PCA finds a chosen
+number of weighted sums of those genes, ordered so that the first preserves as
+much of the variation between cells as any single weighted sum could, the
+second as much of what is left as any second could, and so on. It is the
+optimal linear compression, it has no parameters to train, and it has been
+standard since the 1930s.
 
-Do that per group: 45 groups × 32 components = 1,440 numbers per cell. **Same
-genes, same cells, same width as what the model hands on.**
+### 5.1 There are two different PCAs in this project
 
-The reference answers: if you did the simplest available thing with this input,
-how much family information would survive? A model with 1.87 million parameters
-and 45 transformers that carries less than that has a problem, and the shortfall
-measures the problem.
+They answer different questions and must never be quoted for each other.
 
-### The trap we fell into, and the row that caught it
+| | genes it sees | components | numbers per cell | what it is for |
+|---|---|---:|---:|---|
+| **baseline** | all 15,495, ungrouped | 16 | 16 | what the paper compares ELAJ against |
+| **diagnostic** | one group's, 45 times | 32 per group | 1,440 | what one group encoder could have had |
 
-We ran the PCA on log-normalised counts, because that is what everyone in the
-field does. The model reads raw counts, because that is what it was built to
-do. For months we compared the two and attributed the whole difference to the
-architecture.
+The document previously described only the second and called it "the
+reference", which is where the confusion came from.
+
+### 5.2 The baseline: all genes, no groupings
+
+`PCABaseline` in `evaluation/baselines/methods.py:297` takes the whole
+201,472 × 15,495 count matrix, log-normalises it, and reduces it to 16
+components. No gene grouping is supplied. 16 is chosen to match ELAJ's latent
+width so the two representations are the same size.
+
+This is the right construction for the reason you would expect: **the 45
+pathway groups are part of our method**, so handing them to a baseline would
+give away the contribution and flatter us if we then won. The baseline must
+solve the problem from the same starting point anyone else would: a count
+matrix.
+
+It scored **0.978** on cross-donor cell family and is the number the manuscript
+compares against.
+
+### 5.3 The diagnostic: one group's genes at a time
+
+The stage probe asks a narrower question: **did group encoder k lose
+information that was present in its own genes?**
+
+To answer that, the reference has to be given exactly what that encoder was
+given, which is that group's 344 genes and nothing else. So the diagnostic PCA
+is run 45 times, once per group, on that group's genes alone.
+
+It is grouped **because the diagnosis is per group**, not because we think that
+is a fair contest. It is not a baseline and is never reported as one.
+
+**On the two 32s, which are unrelated.** `d_token = 32` is the width of a
+gene's token inside the model, and it is also the width of the summary each
+group encoder hands on. The diagnostic PCA keeps 32 components per group. The
+second 32 is chosen to equal the first, so that the reference and the group
+encoder hand on the same quantity of numbers and the comparison is not a
+comparison of widths. They are the same integer for that reason alone. Nothing
+in the mathematics ties them together, and either could be changed without the
+other.
+
+### 5.4 The trap: a reference must receive the same input
+
+We ran the diagnostic PCA on log-normalised counts, because that is what
+everyone in the field does. The model reads raw counts, because that is what it
+was built to do. For months we compared the two and charged the whole
+difference to the architecture.
 
 The token sweep added one free reference row:
 
-| reference, both 1,440 wide | kNN excess |
+| diagnostic reference, both 1,440 wide | kNN excess |
 |---|---:|
 | PCA of log-normalised counts | 0.955 |
 | **PCA of raw counts, the model's actual input** | **0.858** |
@@ -378,34 +420,85 @@ The token sweep added one free reference row:
 **0.097 of the 0.264 gap, 37% of it, was a preprocessing step with no
 architecture in it at all.**
 
-The lesson generalises and belongs in the methods section: a reference must
-receive the **same input** as the thing it references, or the comparison
-measures two differences at once. Reporting both rows is the fix, and the raw
-row is the one that isolates the architecture.
+The lesson belongs in the methods section: a reference must receive the same
+input as the thing it references, or the comparison measures two differences at
+once. Reporting both rows is the fix, and the raw row is the one that isolates
+the architecture. Note that this is a statement about the **diagnostic**
+reference. The baseline in 5.2 is log-normalised and should stay that way,
+because there the question is not "what did the architecture lose" but "how
+does ELAJ compare to what a competent practitioner would do".
 
-### The second trap: matching width handicaps the reference
+### 5.5 Why more components scored worse, and why that is not a loss
 
-The `n_cls` sweep ran PCA at four widths:
+The `n_cls` sweep ran the diagnostic PCA at four widths:
 
-| PCA components per group | total width | kNN excess |
-|---:|---:|---:|
-| 32 | 1,440 | 0.955 |
-| 64 | 2,880 | 0.916 |
-| 128 | 5,760 | 0.871 |
-| 256 | 11,520 | 0.848 |
+| components per group | total width | kNN excess | linear probe |
+|---:|---:|---:|---:|
+| 32 | 1,440 | 0.955 | 0.9959 |
+| 64 | 2,880 | 0.916 | 0.9955 |
+| 128 | 5,760 | 0.871 | 0.9739 |
+| 256 | 11,520 | 0.848 | 0.9446 |
 
-**PCA gets worse as it gets wider.** Beyond the first few dozen components, the
-extra ones are mostly noise, and once noise dimensions outnumber informative
-ones, the distance between two cells is dominated by noise rather than biology.
+**You are right that the information cannot decrease.** PCA components are
+orthogonal and ordered, so the first 32 columns of a 256-component PCA are
+*exactly* the 32-component PCA of the same data. The narrow representation is
+literally a subset of the columns of the wide one. The sweep relies on this:
+it computes one PCA at the widest width and slices it, which is exact rather
+than approximate.
 
-Two consequences, both of which go in the paper:
+So the 11,520-number representation **contains** the 1,440-number one and holds
+strictly more. And yet it scores lower on kNN. Nothing was lost. What changed
+is what the measurement can reach.
+
+**The mechanism.** Squared Euclidean distance is a sum over components:
+
+```
+d²(a, b) = Σ_j (a_j − b_j)²
+```
+
+Every component added contributes a non-negative term to every pairwise
+distance, and **each component contributes with equal weight**, whatever it
+contains.
+
+PCA orders components by variance. In single-cell count data the leading
+components carry cell type, which is the dominant source of variation, and
+components beyond the first few dozen carry low-variance directions that are
+largely technical: dropout, sampling depth, and capture efficiency. This is the
+standard justification for keeping 10 to 50 principal components and discarding
+the rest.
+
+Each of those late components adds a small term to the distance. There are 224
+of them at the widest setting. Individually negligible, and they do not cancel:
+the biological separation between two families is fixed, while the accumulated
+fluctuation from the noise components grows roughly as the square root of their
+number. Once that fluctuation is comparable to the separation, **which cells
+rank as nearest is decided by noise**, and the neighbour test degrades even
+though every bit of the original information is still sitting in the matrix.
+
+**The proof that this is a metric effect and not an information effect is in
+the table above.** From 32 to 64 components the linear probe moves from 0.9959
+to 0.9955, which is nothing, while kNN falls from 0.955 to 0.916. A weighted
+sum can assign the noise components a weight of zero. Distance cannot; it
+weights every component equally by construction. Same representation, two
+readouts, and only the one that cannot downweight anything degrades.
+
+**Why the linear probe does eventually fall.** At 128 and 256 components it
+drops to 0.974 and 0.945, and that is a third effect again: the logistic
+regression is fitted on roughly 1,800 cells with up to 11,520 features, which
+is overfitting, and the solver hit its iteration limit on exactly those fits.
+Also a measurement artefact, also not information loss.
+
+**Three consequences, all for the paper.**
 
 1. Matching a reference to the model's width **handicaps the reference**. The
    fixed 32-component row is the honest comparison and is the number to quote.
-2. This is a real argument for a **compact latent**, not a nuisance. A method
-   producing 16 numbers is not merely more convenient than one producing 12,000;
-   it scores better on every neighbour-based metric. Worth a supplementary
+2. A compact representation is genuinely better **as a deliverable**, even
+   though it holds strictly less information, because everything downstream
+   (clustering, UMAP, neighbour graphs) reads it through distance. That is a
+   real argument for a 16-dimensional latent and is worth a supplementary
    figure.
+3. Any claim of the form "representation A beats representation B" must state
+   their widths, because a width difference alone can produce the result.
 
 **Open question:** we can now score one model against a fair reference. How do
 we score *thirteen candidate architectures* without training thirteen models?
@@ -495,7 +588,7 @@ the benchmark's own cells.
 
 | point | cell family excess |
 |---|---:|
-| PCA of the group's own genes (the input) | 0.979 |
+| diagnostic PCA of the group's own genes (the input) | 0.979 |
 | after the 45 group transformers | 0.777 |
 | after aggregation (`cell_cls`) | 0.819 |
 | the latent | 0.840 |
@@ -710,12 +803,13 @@ Every figure quoted above, and where it came from.
 | labelled cells scored in a sweep | 3,634 of 19,460 | same |
 | scVI cross-donor family, inductive | 0.971 | `outputs/benchmarks/r8_inductive` |
 | scVI cross-donor phase, transductive → inductive | 0.605 → 0.437 | same |
-| PCA-16 cross-donor family | 0.978 | same |
+| PCA-16 baseline, all genes, cross-donor family | 0.978 | same |
 | stage probe: input → groups → cell_cls → latent | 0.979, 0.777, 0.819, 0.840 | `outputs/probes/r8_stages` |
 | untrained group encoders | 0.799 | `outputs/probes/r8_untrained` |
 | `n_cls` 1, 2, 4, 8 | 0.691, 0.714, 0.700, 0.708 | `outputs/sweeps/c1_ref_cls`, job 55039884 |
-| PCA at 32, 64, 128, 256 per group | 0.955, 0.916, 0.871, 0.848 | same |
-| PCA-32 log vs raw | 0.955 vs 0.858 | `outputs/sweeps/c1_ref_tokens`, job 55064282 |
+| diagnostic PCA at 32, 64, 128, 256 per group, kNN | 0.955, 0.916, 0.871, 0.848 | same |
+| the same four, linear probe | 0.996, 0.996, 0.974, 0.945 | same |
+| diagnostic PCA-32, log vs raw counts | 0.955 vs 0.858 | `outputs/sweeps/c1_ref_tokens`, job 55064282 |
 | token sweep, all thirteen arms | see §7.4 | same, `sweep_tokens.csv` |
 | `c1_ref` best validation family kNN | 0.918 at epoch 12 | `outputs/C_series/c1_ref` |
 | ELAJ parameter count | 1,873,416 | `sweep_tokens` shape check |

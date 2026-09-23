@@ -516,79 +516,68 @@ the argument stops.
 
 ### 6.1 Why a random network carries anything
 
-**The information is in the input, not created by the model.** Two cells of the
-same family already have similar count vectors when they arrive. That is a fact
-about endometrial biology. The model does not manufacture that similarity; it
-either preserves it or destroys it.
+The question is how a model with random weights can say anything about cell
+family. The answer is that it does not need to know anything. It needs only to
+**not throw the information away**.
 
-**A random linear map preserves distances.** This is the Johnson-Lindenstrauss
-lemma: project N points from any number of dimensions onto m random directions,
-and every pairwise distance is preserved to within a factor of (1 ± ε) with
-high probability, provided
+**The information is in the data before the model exists.** Two epithelial cells
+have similar gene counts. An epithelial cell and an immune cell have different
+gene counts. That is true of the raw counts on disk, with no model involved.
 
-```
-m  ≳  8 ln(N) / ε²
-```
+**So the model's job in this test is not to find family, it is to not lose it.**
+The model is a series of steps that turn 15,495 counts into 16 numbers. At each
+step, two cells that were different either stay different or stop being
+different. Keeping a difference is the easy thing, and random weights keep
+differences perfectly well. Losing a difference takes something specific.
 
-Nothing in that statement requires the directions to be chosen well. Random is
-enough. Preservation is the default behaviour of a random map, and destroying
-information takes something specific: a bottleneck narrower than the bound
-allows, or a nonlinearity driven into saturation.
+**Two things lose it.**
 
-**The bound, at this project's widths.** With N = 3,634 labelled cells scored,
-ln(N) = 8.2:
+| | |
+|---|---|
+| **averaging** | average 344 genes into one number and you can no longer tell which of them was high |
+| **squeezing** | go from 1,440 numbers down to 16 and most of what made two cells different has to be discarded |
 
-| stage | width m | ε the bound allows | measured untrained excess |
-|---|---:|---:|---:|
-| `groups/concat` | 1,440 | 0.21 | 0.799 |
-| `cell_cls` | 64 | 1.01 | 0.512 |
-| `latent` | 16 | 2.02 | 0.465 |
+Everything an untrained model does or fails to do is one of those two.
 
-At 1,440 dimensions distances survive a random map to within about 20%, which
-is easily enough to keep the 30 nearest cells mostly the same 30 cells. At 64
-the bound permits distortion as large as the distances themselves, and at 16 it
-guarantees nothing. The measured column follows exactly that ordering.
+### 6.2 What an untrained ELAJ passes through
 
-The Johnson-Lindenstrauss bound is loose, and real random projections preserve
-rather better than it promises, so those ε values should be read as an ordering
-rather than as predictions. The ordering is the point: **wide stages of an
-untrained model preserve neighbourhood structure, narrow ones do not.**
+**At the group encoders, attention averages.** The query and key projections
+start small, so every gene receives roughly equal attention, and equal attention
+is an average. Each group therefore passes on roughly **the average expression
+of its 344 genes**: one number per group, 45 numbers in total.
 
-### 6.2 What survives the group encoders specifically
+Writing the token as `identity_i + count_i × w`, the average over a group's
+genes is `mean(identity) + mean(count) × w`. The first term is a constant for
+that group, identical in every cell. The only cell-varying quantity is
+`mean(count)`, one number.
 
-The group encoder is not a random linear map. It is a two-layer transformer, so
-the argument needs to be made about attention.
+**Forty-five pathway averages say a great deal about cell family**, because
+immune cells have different pathway activity from epithelial cells. The stage
+probe measured exactly that quantity, the token mean, and it scored **0.876**,
+higher than the group encoders' own 0.799.
 
-**At initialisation, attention is close to uniform.** The query and key
-projections are drawn small. With `d_token = 32` over 4 heads, each head works
-in 8 dimensions, and the attention logits `q · k / sqrt(8)` come out with a
-standard deviation near 1. A softmax over 344 positions with logits of that
-size is mildly uneven, not peaked. The readout is therefore close to an
-unweighted average of the group's genes.
+That is the concrete answer to how an untrained model reaches 0.799. Not
+because randomness is clever, but because the average expression of a pathway
+survives whatever the weights are, and that summary happens to be biologically
+informative.
 
-**So what reaches the readout is each group's mean expression.** Writing the
-token as `identity_i + count_i × w`, the average over a group's genes is:
+**Further down, squeezing takes over.**
 
-```
-mean(identity)  +  mean(count) × w
-```
+| stage | what an untrained model passes on | excess |
+|---|---|---:|
+| group encoders | the mean expression of each of 45 pathways | 0.799 |
+| `cell_cls`, 64 numbers | an average over those 45 group summaries, which discards which pathway was active | 0.512 |
+| `latent`, 16 numbers | a haphazard 16 directions of what is left | 0.465 |
 
-The first term is a constant for that group, the same in every cell. The only
-cell-varying quantity is **`mean(count)`, one number per group**. Across 45
-groups, an untrained model's readout carries roughly 45 numbers of real
-information, embedded in 1,440 dimensions.
+**The latent's low number is about choosing, not about width.** Sixteen numbers
+is ample for this problem when the sixteen directions are chosen: the PCA-16
+baseline scores **0.978** in exactly sixteen numbers. An untrained model has
+chosen nothing, so it keeps a haphazard sixteen and loses most of the signal.
 
-**Forty-five pathway means are a strong signal.** The stage probe measured this
-directly by scoring the token mean, which is exactly that quantity: it reached
-**0.876** on cell family, higher than the group encoders' own 0.799. Pathway
-activity differs sharply between epithelial, stromal, immune, and endothelial
-cells, so knowing the average expression of 45 pathways is most of the way to
-knowing the family.
-
-That is the concrete answer to how an untrained model scores 0.799. Not because
-randomness is clever, but because the architecture's fixed shape routes a small
-and biologically potent summary through to the readout, whatever the weights
-happen to be.
+At a wide stage, not throwing things away is enough, and random weights manage
+that. At a narrow stage you have to choose what to keep, and choosing is what
+training is for. That is why the untrained group-encoder figure means something
+and the untrained latent figure does not.
 
 ### 6.3 Why training adds nothing at this stage
 
@@ -860,11 +849,11 @@ sweep and a probe are not.
 **Nothing in a sweep is trained.** Sweeps measure capacity, not outcome (§6.2).
 
 **The latent column of an untrained sweep is close to meaningless.** Sixteen
-dimensions is below the width at which a random map preserves neighbourhood
-structure at all (§6.1), so an untrained latent measures the bottleneck rather
-than the architecture above it. This is why `c1_combined`'s weak untrained
-latent (0.472 against `c1_scale`'s 0.569) is a flag to watch rather than a
-reason not to run it.
+numbers is enough for this problem when the sixteen directions are chosen, and
+an untrained model has chosen nothing (§6.2). The number measures the
+bottleneck rather than the architecture above it, which is why
+`c1_combined`'s weak untrained latent (0.472 against `c1_scale`'s 0.569) is a
+flag to watch rather than a reason not to run it.
 
 **Family is used for model selection.** See §2.5. Declare it.
 

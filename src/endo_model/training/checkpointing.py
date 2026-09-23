@@ -24,8 +24,10 @@ _RENAMED_MODULES = {
     # was moved a level down into SharedDirectionValue.scalar_map. The weights
     # are unchanged, so every checkpoint from r1 to c1_ref still loads.
     "value_encoder.linear.": "value_encoder.scalar_map.linear.",
+    # The token constructor's attribute was renamed too: it holds a ValuePart
+    # now, of which the linear map is one, so it is `value_part` there.
     "token_constructor.value_encoder.linear.":
-        "token_constructor.value_encoder.scalar_map.linear.",
+        "token_constructor.value_part.scalar_map.linear.",
 }
 
 

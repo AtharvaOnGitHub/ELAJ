@@ -149,14 +149,26 @@ class TestRetiredModuleNames:
         """`ValueEncoder` became one ValuePart among several, and its linear
         map moved down into `SharedDirectionValue.scalar_map`. The weights are
         unchanged, so r1 through c1_ref must still load."""
-        old = "value_encoder.scalar_map.linear."
-        new = "value_encoder.linear."
-        trainer, model, optimizer = _setup(3, 2, tmp_path)
-        state = {k.replace(old, new): v for k, v in model.state_dict().items()}
         # The module is registered twice, at the top level and inside the
-        # token constructor, so both spellings have to translate.
+        # token constructor, and the two retired spellings differ: the token
+        # constructor's attribute was `value_encoder` then and is `value_part`
+        # now. Both have to translate.
+        retired = {
+            "value_encoder.scalar_map.linear.": "value_encoder.linear.",
+            "token_constructor.value_part.scalar_map.linear.":
+                "token_constructor.value_encoder.linear.",
+        }
+        trainer, model, optimizer = _setup(3, 2, tmp_path)
+        state = {}
+        for key, value in model.state_dict().items():
+            for new, old in retired.items():
+                if key.startswith(new):
+                    key = old + key[len(new):]
+                    break
+            state[key] = value
         assert "value_encoder.linear.weight" in state
         assert "token_constructor.value_encoder.linear.weight" in state
+        assert not any("scalar_map" in k for k in state)
         assert not any("scalar_map" in k for k in state)
         path = tmp_path / "old_value_encoder.pt"
         torch.save({"epoch": 0, "step": 0, "val_loss": 1.0, "model_state": state,

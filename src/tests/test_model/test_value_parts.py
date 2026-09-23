@@ -10,7 +10,12 @@ different directions, which is what makes a head able to act like a principal
 component.
 
 Rank is measured with `torch.linalg.matrix_rank` on the matrix of value
-vectors, which is exactly the quantity the argument is about.
+vectors, which is exactly the quantity the argument is about, under a
+RELATIVE tolerance. The modules compute in float32, so `c * w + b` puts the
+rows about 1e-7 off the plane they belong on, and an absolute cutoff would
+count that round-off as a third direction. Relative to the largest singular
+value the spurious ones sit near 1e-7, which `rtol=1e-5` excludes with room
+to spare.
 """
 
 import pytest
@@ -45,7 +50,12 @@ def value_rank(part, counts) -> int:
     """
     with torch.no_grad():
         values = part(inputs(counts))[0]              # (n_genes, d_token)
-    return int(torch.linalg.matrix_rank(values.double(), tol=1e-6))
+    return matrix_rank(values)
+
+
+def matrix_rank(values) -> int:
+    """Rank under a relative tolerance. See the module docstring."""
+    return int(torch.linalg.matrix_rank(values.double(), rtol=1e-5))
 
 
 SPREAD = torch.linspace(0.0, 9.0, N_GENES).unsqueeze(0)     # log-count range
@@ -66,7 +76,7 @@ class TestTheLinearMapIsRankOne:
         part = SharedDirectionValue(LinearMap(D_TOKEN))
         with torch.no_grad():
             values = part(inputs(SPREAD))[0] - part.scalar_map.linear.bias
-        assert int(torch.linalg.matrix_rank(values.double(), tol=1e-6)) == 1
+        assert matrix_rank(values) == 1
 
     def test_two_genes_at_the_same_count_are_identical(self):
         """No gene identity reaches the value, which is the second half of the

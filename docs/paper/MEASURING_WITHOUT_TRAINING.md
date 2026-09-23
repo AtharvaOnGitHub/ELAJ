@@ -148,81 +148,63 @@ sees the donors it is scored on:
 Family was genuinely learned. Most of the phase score was donor memorisation,
 and it evaporated.
 
-**What this licenses us to claim, stated carefully.** Cross-donor agreement
-prevents donor identity from *helping*. It does not by itself prove that donor
-identity is *absent* from the representation: a set of numbers could encode
-both donor and biology, and the cross-donor rule would simply stop the donor
-half from contributing.
-
-So the claim the project is aiming at has two halves and needs two
-measurements:
-
-| claim | measured by |
-|---|---|
-| biology transfers across donors | cross-donor family and phase kNN |
-| donor identity is not retained | patient kNN (low is good), iLISI, kBET, silhouette batch, and `val_dab` |
-
-Matching or beating scVI on the first **while also** beating it on the second
-is the result worth having, and it is the result the paper should be built
-around. Either half alone is weaker than it looks. `c1_ref` runs the DAB
-classifier at `lambda_dab: 0.0` precisely so that `val_dab` reports how much
-study identity the latent holds without the encoder being pushed to hide it.
-
 ### 3.2 The linear probe
 
-This is the test you asked about, so here it is concretely.
+**The reasoning, in order.**
 
-**What it classifies.** One cell's list of numbers goes in. One of the four
-family labels comes out. That is all it does: it is a four-way classifier
-built on top of a frozen representation.
+We want to know whether the biology survived to this stage. "Survived" means
+the information is present in the numbers. The only way to find out is to try
+to read it out.
 
-**What the rule looks like.** For a 1,440-number representation, the rule holds
-four weight vectors, one per family, each 1,440 long, plus four offsets. For a
-cell with numbers `x`:
+So the question becomes: **read it out with what?**
+
+Suppose we used a powerful reader, say a three-layer network trained on the
+representation. It would find family at every stage of the model, because a
+powerful reader can dig information out of almost any encoding, however buried.
+Every row of the table would read 0.99 and nothing would distinguish one stage
+from another. The measurement would be about the reader, not the
+representation.
+
+So we use the **weakest reader we can write down**: a weighted sum. For a cell
+with numbers `x`, the rule holds one weight vector per family plus an offset:
 
 ```
-score(epithelial)  = w_epi  · x + b_epi
-score(stromal)     = w_str  · x + b_str
-score(immune)      = w_imm  · x + b_imm
-score(endothelial) = w_end  · x + b_end
+score(epithelial)  = w_epi · x + b_epi
+score(stromal)     = w_str · x + b_str
+score(immune)      = w_imm · x + b_imm
+score(endothelial) = w_end · x + b_end
 ```
 
-`w · x` means multiply each of the 1,440 numbers by its weight and add them
-up. The predicted family is whichever score is largest. Nothing else happens:
-no hidden layer, no nonlinearity. This is the simplest classifier there is, by
-design, because we want to know whether the information is *easily* available,
-not whether something clever could dig it out.
+Multiply each number by its weight, add them up, predict whichever family
+scores highest. No hidden layer, no nonlinearity.
 
-**How it is fitted and scored.** Split the **donors** into two halves. Fit the
-weights on the cells of the first half, choosing them so that the correct
-family gets the largest score as often as possible. Then apply the fitted rule,
-unchanged, to the cells of the second half of donors and record how often it is
-right.
+The weights are fitted on the cells of **half the donors** and the rule is then
+applied unchanged to the cells of the **other half**. Donors rather than cells,
+for the same reason the kNN test discards same-donor neighbours: a cell-level
+split would put the same patient on both sides and the rule could lean on
+patient-specific quirks. The score is balanced accuracy, meaning accuracy
+computed within each family and then averaged, so always guessing the commonest
+family scores 0.25 rather than 0.7.
 
-Splitting by donor rather than by cell is the same precaution as step 2 above.
-A cell-level split would put cells from the same patient on both sides, and the
-rule could then exploit patient-specific quirks.
+**What the weak reader buys us.** If even a weighted sum finds family at 0.960,
+then the information is not merely present, it is present in a directly
+accessible form. There is no other way that number can arise.
 
-The score reported is **balanced accuracy**: accuracy computed separately
-within each of the four families and then averaged, so that a rare family
-counts as much as a common one. A rule that always guessed the commonest
-family would score 0.25, not 0.7.
+That is what the probe is for. It is a lower bound on information content,
+measured with a reader too weak to manufacture a good result.
 
-**Why this is useful, which is the part that matters.**
+### 3.3 Why we run it beside kNN
 
-Nearest-neighbour agreement is a **local** question: are cells of the same
-family close together? A representation could split each family into five
-widely separated clumps and still score perfectly, because within each clump
-the neighbours all match.
+The two tests ask different questions, and it took a concrete case to see that
+the difference matters.
 
-The linear probe is a **global** question: can one flat boundary separate the
-families across the entire space? The five-clump representation would fail it.
+**The linear probe asks about content.** Is the information in there?
 
-### 3.3 Why we run both, with the case that proved it necessary
+**kNN asks about geometry.** Is the space arranged so that cells of the same
+family end up close together?
 
-They can disagree, and when they do, the disagreement is the finding.
-
-From the token sweep:
+Those can come apart, because a representation can hold information in a form
+that distance does not respect. From the token sweep:
 
 | arm | linear probe | kNN |
 |---|---:|---:|
@@ -230,29 +212,81 @@ From the token sweep:
 | `pool` | 0.957 | 0.867 |
 
 `extremes` drops the mean and the standard deviation and keeps only order
-statistics (minimum, median, maximum, and so on).
+statistics: minimum, median, maximum, and so on.
 
-Read the row: the family information is **entirely present** and a straight
-line finds it (0.960, among the best in the whole sweep). But cells of the same
-family are **not near each other** (0.626, among the worst).
+Its family information is intact, and a straight line finds it at 0.960, among
+the best numbers in the whole sweep. But cells of the same family are not near
+each other, at 0.626, among the worst.
 
-That combination has a specific meaning. The information is there; the
-**geometry** is wrong. The different statistics live on wildly different scales,
-so Euclidean distance between two cells is dominated by whichever statistic
-happens to have the largest spread, and neighbourhood structure is destroyed.
+The cause is scale. The statistics sit on wildly different ranges, so the
+straight-line distance between two cells is dominated by whichever statistic
+happens to have the largest spread, and the neighbourhood structure is
+swamped. A weighted sum does not care, because it can give each statistic its
+own weight. Distance cannot, because it weights everything equally.
 
-This matters practically. Every downstream use of a latent space, clustering,
-UMAP, neighbour graphs, trajectory inference, depends on local geometry, which
-is the kNN property. So:
+**Why knowing this changed the decision.** With the kNN number alone the
+conclusion would have been "these statistics destroyed the family information",
+and the fix would have been to drop the arm. With both numbers, the diagnosis
+is "the information is fine and the scaling is wrong", which is a different
+problem with a cheaper fix.
 
-| linear | kNN | what it means | is it fixable |
+Generally:
+
+| linear | kNN | diagnosis | fix |
 |---|---|---|---|
-| high | high | the representation is good | nothing to fix |
-| high | low | information present, geometry wrong | often yes: rescaling, whitening |
-| low | low | the information is gone | no: needs an architecture change |
-| low | high | families are locally clustered but globally tangled | possibly, but rare |
+| high | high | the representation is good | none needed |
+| high | low | content present, geometry wrong | rescaling or whitening |
+| low | low | the content is gone | architecture change |
+| low | high | locally clustered, globally tangled | rare; investigate |
 
-One number could not have told us which row we were in. Two could.
+**Which of the two is the deliverable.** kNN. What we ship is a latent space
+that people will cluster, visualise with UMAP, and build neighbour graphs on,
+and all of those depend on local geometry. The linear probe is the instrument
+that explains why kNN moved. It is not a claim in its own right.
+
+### 3.4 What these two tests do not tell us
+
+Four gaps, all of which belong in the manuscript.
+
+**Linear separability is not a goal, and a low score is ambiguous.** A high
+score is strong evidence that the content is there. A low score could mean the
+content is gone, or that it is present but tangled in a way a straight line
+cannot reach. The test is informative in one direction only, which is enough
+for what we use it for and should not be overstated.
+
+**Separability does not crowd out anything, except in the latent.** At
+`groups/concat` the representation is 1,440 numbers and separating four
+families needs three directions, so there is no competition with menstrual
+phase, cycle, or anything else the cell carries. The PCA reference scores 0.996
+on the family probe and simultaneously carries phase, cycle, donor, and enough
+expression structure to reconstruct counts. In the **16-number latent** the
+trade-off is real: three of sixteen directions spent on family genuinely
+competes with phase, and a latent excellent at family and poor at phase is a
+worse latent than one that splits the difference.
+
+**Family is the easy question, so a high family score proves little.** PCA
+reaches 0.955 and scVI reaches 0.971. Any competent method separates the four
+families. What distinguishes a good model here is **menstrual phase**, where
+the fair benchmark put scVI at 0.437, and eventually disease status. No sweep
+so far has tested either, because family is the only label dense enough in a
+3,634-cell subsample to measure. A design chosen on family may not be the best
+design for phase, and that caveat applies to the entire token sweep.
+
+**Cross-donor agreement does not prove donor removal.** It prevents donor
+identity from *helping*; it does not show that donor identity is *absent*. A
+representation could encode both donor and biology, and the cross-donor rule
+would only stop the donor half contributing. The claim the paper is aiming at
+therefore has two halves and needs two measurements:
+
+| claim | measured by |
+|---|---|
+| biology transfers across donors | cross-donor family and phase kNN |
+| donor identity is not retained | patient kNN (low is good), iLISI, kBET, silhouette batch, `val_dab` |
+
+Matching scVI on the first **while also** beating it on the second is the
+result worth building the paper around. `c1_ref` runs the DAB classifier at
+`lambda_dab: 0.0` precisely so that `val_dab` measures the second without the
+encoder being pushed to hide anything.
 
 **Open question:** both tests return a number between 0 and 1. What does a
 given number mean?
@@ -620,8 +654,10 @@ because the next experiment should follow it too.
 
 ## 9. What these measurements cannot say
 
-To be stated in the manuscript's limitations, and to be kept in mind when
-reading any sweep table.
+The limits of the two scoring tests are in §3.4: a low linear score is
+ambiguous, family separability crowds nothing out except in the latent, family
+is the easy label, and cross-donor agreement does not prove donor removal.
+Those four are about the tests. The four below are about how we ran them.
 
 **Only 3,634 labelled cells are scored.** The subsample takes 19,460 cells
 evenly across eleven studies, and only two of those studies carry family
@@ -639,15 +675,9 @@ are a random projection of a random projection. This is exactly why
 `c1_combined`'s weak untrained latent (0.472 against `c1_scale`'s 0.569) is a
 flag to watch rather than a reason not to run it.
 
-**Only one label is used.** Cell family, which is the easy question: PCA
-reaches 0.955 and scVI reaches 0.971. Menstrual phase and disease status are
-the hard ones and no sweep has touched them. A design chosen on family may not
-be the best design for phase.
-
-**Family is used for model selection.** See §2. Declare it.
-
-**Cross-donor agreement does not by itself prove donor removal.** See §3.1. The
-batch metrics are a separate measurement and both are needed.
+**Family is used for model selection.** `stop_metric: family_knn` picks the
+checkpoint by validation family agreement. No gradient sees it and test donors
+are untouched, but it must be declared rather than left implicit. See §2.
 
 ---
 

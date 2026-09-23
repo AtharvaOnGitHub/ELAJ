@@ -3,6 +3,13 @@
 Working document. Started 10 September 2026; rewritten 14 September 2026 after
 the baseline benchmark and the decision to target Nature Machine Intelligence.
 
+**Companion:** [`MEASURING_WITHOUT_TRAINING.md`](MEASURING_WITHOUT_TRAINING.md)
+explains how the probes, sweeps, and baselines work, why probing is valid when
+the training objective is reconstruction, and what each measurement can and
+cannot support. It carries the provenance table for every number quoted below
+and the limitations paragraph the manuscript needs. Read it before drafting
+the methods or the validation section.
+
 ---
 
 ## 0. The decision

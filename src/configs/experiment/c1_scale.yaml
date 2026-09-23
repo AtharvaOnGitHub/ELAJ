@@ -32,7 +32,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_c1.yaml
 
-output_dir: outputs/c1_scale/
+output_dir: outputs/c_series_runs/c1_scale/
 seed: 24
 
 overrides:

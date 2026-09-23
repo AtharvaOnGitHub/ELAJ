@@ -1,0 +1,120 @@
+name: f1_epochs_10
+description: >
+  Frozen-encoder epoch ladder, longest arm. Ten epochs.
+
+  This arm is the reference the other two are read against, and it is
+  the one that can falsify the whole short-budget idea. c1_ref reached
+  0.891 val_family_knn by epoch 4 against a MOVING input, so a latent
+  fitting a fixed one should need no more than this. If ten is clearly
+  ahead of five, the frozen runs need a longer budget than hoped and
+  the latent programme's costing has to be redone at that length.
+
+  WHAT THE LADDER IS FOR. Before any latent configuration is compared, we need
+  to know how long a frozen-encoder run has to be. f1_epochs_03, _05 and _10
+  are identical in every respect except max_epochs, and the question they
+  answer is where val_family_knn and the KL terms stop moving. Whatever that
+  turns out to be is the budget every later latent arm uses.
+
+  WHY THREE SEPARATE RUNS RATHER THAN ONE READ AT THREE POINTS. The scheduler
+  is CosineAnnealingLR with T_max = max_epochs, so each run anneals to zero
+  over its own length. Epoch 3 of a ten-epoch run is still at roughly 0.8 of
+  peak learning rate and has settled nothing. Only a run whose schedule
+  completed can say what that budget achieves.
+
+  WHY A SHORT BUDGET MIGHT BE ENOUGH. Freezing leaves about 127,000 parameters
+  training, against 1,873,416 in the whole model: gene_query at 95,040,
+  dispersion at 15,495, the bilinear decoder at 12,353, the latent heads at
+  about 3,100, and the tissue and platform embeddings. Fifteen times fewer.
+  At 4,570 steps an epoch, 10 epochs is 45,700 steps for
+  127,000 parameters. The stronger reason is that the input distribution
+  stops moving: in joint training the latent chases an encoder that changes
+  every step, and here it fits a fixed target.
+
+  WHAT TO WATCH, AND IT IS NOT ONLY val_family_knn. The decoder should settle
+  quickly; the LATENT'S STRUCTURE may not, and that is what later arms
+  compare. A VAE latent's character is a slow equilibrium between
+  reconstruction and KL pressure, made slower by two things: beta ramps from 0
+  to beta_max over a fraction of the run, so a short run spends few
+  steps at full beta, and a dimension that goes quiet has almost no gradient
+  to climb back with, which is why free_bits exists at all. So compare
+  kl_gauss and the number of active latent dimensions across the three arms as
+  well. If three and ten differ substantially there, they are not measuring
+  the same object however close their family scores look, and three is not a
+  usable budget.
+
+  THE ENCODER. init_from_checkpoint loads a trained model's weights into a
+  fresh run: no optimiser state, no epoch, no history. freeze_encoder then
+  holds everything from the raw counts to cell_cls still, so only the latent
+  and decoder train. Every result from this run, and from every latent arm
+  after it, is conditional on that encoder, both its weights and its
+  architecture, and must be reported that way. Whether the conditioning
+  matters is testable rather than arguable: the transferability gate runs the
+  same configurations against c1_scale's encoder and c1_combined's and checks
+  that the ranking holds.
+
+  BEFORE RUNNING, SET TWO THINGS.
+    1. init_from_checkpoint, to the chosen checkpoint. The filename carries
+       its epoch and step (epoch_0012_step_0054840.pt), so it cannot be
+       written here in advance.
+    2. The model.tokens and model.group_encoder.readout block below, which
+       MUST match the architecture of that checkpoint or the weights will not
+       load. It is written for c1_combined; if c1_scale wins instead, drop
+       value_part and readout back to their defaults.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_c1.yaml
+
+output_dir: outputs/f_series_runs/f1_epochs_10/
+seed: 24
+
+overrides:
+  # ── The ladder's only variable ─────────────────────────────────────────────
+  training.max_epochs: 10
+
+  # ── The frozen encoder ─────────────────────────────────────────────────────
+  # FILL THIS IN. A run with freeze_encoder and no init_from_checkpoint is
+  # refused, because freezing a randomly initialised encoder holds noise still.
+  training.init_from_checkpoint: outputs/c_series_runs/c1_combined/checkpoints/REPLACE_ME.pt
+  training.freeze_encoder: true
+
+  # Nothing to recompute in a backward pass the encoder no longer has. The
+  # group encoder's own `x.requires_grad` guard would disable it anyway; this
+  # says so in the config rather than leaving it to runtime.
+  model.group_encoder.grad_checkpointing: false
+
+  # ── Diagnostics, tuned for a short run ─────────────────────────────────────
+  # At the usual latent_every of 5 the latent panels are too sparse in a
+  # 10-epoch run, and they are what shows the KL behaviour described above.
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 1
+
+  # Early stopping cannot fire inside this ladder (warmup 6 plus patience 7),
+  # which is deliberate: every arm must run its whole schedule for the
+  # comparison between arms to mean anything.
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  # ── Everything below matches c1_ref and c1_combined exactly ────────────────
+  training.batch_size: 256
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 0.0
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  # MUST MATCH THE CHECKPOINT. Written for c1_combined.
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8

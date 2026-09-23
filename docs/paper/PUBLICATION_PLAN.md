@@ -134,8 +134,8 @@ The raw-count tokenisation is a smaller, separate cost (0.951 against
 
 | cause | test | status |
 |---|---|---|
-| A. attention logits are linear in the raw count, so the few highest-count genes take all the weight | c1_log arm | designed |
-| B. the count enters every token along one fixed direction (`e_i + c_i·w`), so a head's count information is one scalar per head | c1_valmlp arm | designed |
+| A. attention logits are linear in the raw count, so the few highest-count genes take all the weight | `scale` arm of the token sweep, then c1_scale | **confirmed**: 0.691 to 0.760 untrained, and the raw/log PCA references differ by 0.097 with no architecture in it |
+| B. the count enters every token along one fixed direction (`e_i + c_i·w`), so a head's count information is one scalar per head | `genedir` arm of the token sweep, then c1_combined | **confirmed**: 0.691 to 0.811 untrained for 960 parameters, and independent of A (`genedir_raw` 0.809) |
 | C. the CLS readout (2 layers, 4 heads, 32 wide over 344 tokens) cannot summarise whatever it is fed | untrained probe (`--untrained`) | built, to run |
 | D. the objective pulled the summaries toward the decoder's needs (high-count genes), away from family | untrained probe | built, to run |
 | E. the adversarial study term removed family along with study | c1_nodab arm | designed |
@@ -183,10 +183,37 @@ sweep.
 
 - [ ] **c1_ref** bare, as above. About 31 h.
 
-**Wave 2, on the probe's finding (the group transformers):**
+**Wave 2, on the token sweep's finding (`outputs/sweeps/c1_ref_tokens`,
+job 55064282). Thirteen arms untrained in 75 minutes chose these two:**
 
-- [ ] **c1_log** library-normalised, log1p counts into the value encoder. Cause A. To build.
-- [ ] **c1_valmlp** log counts through a small nonlinear value encoder. Cause B. To build.
+- [x] **c1_scale** log-normalised counts, nothing else. Cause A alone, and
+      the control that says how much of c1_combined is preprocessing.
+      Launched 23 September.
+- [x] **c1_combined** log counts, a count direction per gene (960
+      parameters), and eight pooled statistics beside the summary token
+      (none). Causes A and B together. The first arm in the project to
+      beat a same-width PCA of the same genes, 0.882 against 0.847 on
+      cell family and 0.964 against 0.945 on the linear probe. Launched 23
+      September.
+
+**Closed by the sweep, no run needed:** a free direction vector per gene
+(495,776 parameters, scored 0.794 against the factorised version's 0.811),
+a Fourier count map (0.562, below the control's 0.691), and a nonlinear
+count map (0.742, below `scale` at a higher cost). The n_cls sweep
+(job 55039884) closed readout width the same way: eight times the width
+moved 0.691 to 0.708.
+
+**Wave 2b, the frozen-encoder latent programme (see §11):**
+
+- [ ] **f1_epochs_03 / _05 / _10** the epoch ladder. What budget a frozen
+      run needs. Configs written; the checkpoint path is filled once wave 2
+      reports.
+- [ ] the transferability gate: three latent configurations against both
+      wave-2 encoders, to test whether a frozen ranking survives a change
+      of encoder.
+- [ ] the latent sweep proper: `d_gauss`, `n_circular`,
+      `circular_parameterisation`, `kappa_floor`, `free_bits`, `beta_max`.
+      Six knobs that would otherwise cost a full run each.
 
 **Wave 3, the components added back one at a time, on the best of wave 2:**
 
@@ -299,20 +326,45 @@ figures, Extended Data for the rest.
 
 ---
 
-## 11. The remaining three weeks (from 20 September)
+## 11. The remaining weeks (from 23 September)
+
+Frozen-encoder runs are costed at 2,100 s an epoch, which is c1_ref's measured
+4,640 s with the encoder's backward pass and its gradient-checkpoint
+recomputation removed. That number is confirmed by the first arm of the epoch
+ladder and everything downstream of it moves if it is wrong.
 
 | dates | GPU 1 | GPU 2 | CPU and analysis | writing |
 |---|---|---|---|---|
-| 20 to 22 Sep | c1_ref (31 h) | untrained probe (6 h), c1_baselines (2 h), then the first wave-2 arm once built | read the untrained probe and the linear-probe columns; build c1_log and c1_valmlp; Geneformer and scGPT environments on the login node | Methods: corpus, model, validation protocol (unchanged by results) |
-| 22 to 25 Sep | c1_log | c1_valmlp | score c1_ref; score wave 2 as it lands | Results 1 and 2; Fig. 1 to 3 |
-| 25 to 28 Sep | c1_dab | c1_circ | decide the base for wave 3 | Results 3 (benchmark), Fig. 4 |
-| 28 Sep to 2 Oct | c1_dx, c1_nocce | second seed of the best | random-grouping ablation config; scGPT and Geneformer zero-shot on the c1 cells | Results 4 (diagnosis and campaign), Fig. 5 |
-| 2 to 5 Oct | random grouping (C-1) | DNS removed (C-2) | ablation table; the demonstration (E1 or E2) | Results 5 and 6; Discussion |
-| 5 to 12 Oct | reruns and seeds as needed | | reproducibility R1 to R5; figures final | full draft; internal review; Extended Data |
+| 23 to 25 Sep | c1_scale (28 h) | c1_combined (28 h) | score c1_ref against c1_baselines; build the per-epoch cell_cls drift diagnostic | Methods: corpus, model, validation protocol |
+| 25 Sep | f1_epochs_10 (6 h) | f1_epochs_03 (2 h), f1_epochs_05 (3 h) | read both training runs, pick the encoder, fill the checkpoint path in the three f1 configs | Results 1: the diagnosis chain, probe to n_cls to tokens |
+| 26 to 27 Sep | transferability gate: 3 latent configs on c1_combined's encoder | the same 3 on c1_scale's encoder | does the ranking agree across two encoders? If not, the frozen route is dead and the latent question goes back to full runs | Results 2: the architecture result |
+| 27 Sep to 1 Oct | latent sweep, 4 arms | latent sweep, 4 arms | scGPT and Geneformer environments on the login node | Results 3: the benchmark table |
+| 1 to 4 Oct | best latent, full joint run | second seed of the best | ablations: random grouping (C-1), DNS removed (C-2) | Results 4 and 5; Fig. 1 to 4 |
+| 4 to 8 Oct | reruns and seeds as needed | zero-shot scGPT and Geneformer on the c1 cells | ablation table; the demonstration (E1 or E2) | Results 6; Discussion |
+| 8 to 12 Oct | spare capacity | | reproducibility R1 to R5; figures final | full draft; internal review; Extended Data |
 
-Every row assumes the arm before it landed. The decision point is 28
-September: if no wave-2 arm has beaten scVI on the fair comparison by then,
-the ablation weeks become campaign weeks and the venue question is reopened.
+**The frozen programme in total.** The epoch ladder is 11 hours, the
+transferability gate is about 18, and an eight-arm latent sweep about 23. Some
+52 GPU hours across two cards, against roughly 400 for the same fourteen
+questions asked as full joint runs. That difference is what makes the latent
+sweep possible at all before submission rather than a cutback.
+
+**Two decision points.**
+
+*25 September, the epoch ladder.* If the 10-epoch arm is clearly ahead of the
+5-epoch arm on val_family_knn or carries a substantially different kl_gauss,
+the short budget is unusable and every frozen row above is recosted at the
+longer length. If ten and five agree, the sweep runs at five.
+
+*27 September, the transferability gate.* If three latent configurations rank
+differently on c1_scale's encoder and c1_combined's, a frozen ranking is
+conditional on an encoder in a way that makes it useless, and the latent
+question returns to full joint runs. The latent sweep is then cut to two arms
+and the ablation weeks absorb them.
+
+**The campaign decision stays where it was.** If no arm has beaten scVI on the
+fair inductive comparison by 1 October, the ablation weeks become campaign
+weeks and the venue question is reopened.
 
 ## 12. Open questions
 

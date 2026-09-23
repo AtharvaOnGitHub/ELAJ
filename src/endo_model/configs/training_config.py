@@ -133,6 +133,17 @@ class TrainingConfig:
     kl_annealing: KLAnnealingConfig = field(default_factory=KLAnnealingConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     resume_from_checkpoint: Optional[str] = None
+    # Load a trained model's weights and start a fresh run from them: no
+    # optimiser state, no epoch, no history. Different from
+    # resume_from_checkpoint, which continues the same run. Required whenever
+    # freeze_encoder is set, since freezing a randomly initialised encoder
+    # would hold noise still rather than a trained representation.
+    init_from_checkpoint: Optional[str] = None
+    # Hold every module between the raw counts and cell_cls still, so that only
+    # the latent and decoder train. Cuts the epoch by roughly half and makes a
+    # sweep over latent configurations affordable. Every result is conditional
+    # on the encoder it was frozen from. See training/freezing.py.
+    freeze_encoder: bool = False
 
     # "off" or "bf16".  bf16 is what puts the group encoder's attention on the
     # FlashAttention kernel, which has no fp32 implementation at all.  The
@@ -160,6 +171,8 @@ class TrainingConfig:
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
             diagnostics=DiagnosticsConfig.from_dict(d.get("diagnostics", {})),
             resume_from_checkpoint=d.get("resume_from_checkpoint"),
+            init_from_checkpoint=d.get("init_from_checkpoint"),
+            freeze_encoder=bool(d.get("freeze_encoder", False)),
             precision=str(d.get("precision", "off")),
             num_workers=(
                 int(d["num_workers"]) if d.get("num_workers") is not None else None

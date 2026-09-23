@@ -127,6 +127,37 @@ class CheckpointManager:
         return fname
 
     @staticmethod
+    def load_weights(
+        path: str,
+        model: torch.nn.Module,
+        map_location: str = "cpu",
+    ) -> dict:
+        """Load a checkpoint's weights only, and start a fresh run from them.
+
+        Different from `load`, which continues a run: this reads no optimiser
+        state, and the caller keeps its own epoch, step, schedule, and
+        history. It is what `training.init_from_checkpoint` does, and what a
+        frozen-encoder run needs, since such a run trains a different set of
+        parameters from the one that wrote the checkpoint and its optimiser
+        state would not apply.
+
+        `strict=True` deliberately. A frozen-encoder run's whole premise is
+        that the encoder carries trained weights, so a key that fails to match
+        means it does not, and that must stop the run rather than leave one
+        module at its random initialisation.
+
+        Returns:
+            The payload, minus the states, so the caller can log where the
+            weights came from.
+        """
+        payload = torch.load(path, map_location=map_location, weights_only=False)
+        model.load_state_dict(_renamed_keys(payload["model_state"]))
+        logger.info("Loaded weights from %s (its epoch %s, step %s)", path,
+                    payload.get("epoch", "?"), payload.get("step", "?"))
+        return {k: v for k, v in payload.items()
+                if k not in ("model_state", "optimizer_state")}
+
+    @staticmethod
     def load(
         path: str,
         model: torch.nn.Module,

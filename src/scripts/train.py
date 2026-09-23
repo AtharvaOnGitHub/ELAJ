@@ -261,10 +261,45 @@ def main() -> None:
             model_cfg.cce.circular_weight,
         )
 
+    # ── Weights from a previous run, and the optional encoder freeze ─────────
+    # Order matters and is the reason these sit above the optimiser. The
+    # weights have to arrive before the freeze, because freezing a random
+    # encoder would hold noise still; and the freeze has to happen before the
+    # optimiser is built, because the optimiser is given only the parameters
+    # that still require gradients.
+    if train_cfg.init_from_checkpoint:
+        from endo_model.training.checkpointing import CheckpointManager
+
+        init_path = Path(root) / train_cfg.init_from_checkpoint
+        logger.info("Initialising weights from %s (fresh run: no optimiser "
+                    "state, no epoch, no history)", init_path)
+        CheckpointManager.load_weights(str(init_path), model,
+                                       map_location=str(device))
+    elif train_cfg.freeze_encoder:
+        raise ValueError(
+            "training.freeze_encoder needs training.init_from_checkpoint. "
+            "Freezing a randomly initialised encoder holds noise still: its "
+            "cell summary scores 0.512 on cell family against a trained "
+            "encoder's 0.819, so the latent would be trained on nothing."
+        )
+
+    if train_cfg.freeze_encoder:
+        from endo_model.training.freezing import EncoderFreezer
+
+        freeze_report = EncoderFreezer().apply(model)
+        logger.info(
+            "Only the latent and decoder train. Gradient checkpointing turns "
+            "itself off in the group encoder because its input no longer "
+            "requires grad. Every result from this run is conditional on the "
+            "encoder it was frozen from."
+        )
+        _ = freeze_report
+
     # ── Optimizer and scheduler, by their config names ───────────────────────
     from endo_model.training.factories import build_optimizer, build_scheduler
+    from endo_model.training.freezing import trainable_parameters
 
-    all_params = list(model.parameters()) + list(composite_loss.parameters())
+    all_params = trainable_parameters(model, composite_loss)
     optimizer = build_optimizer(all_params, train_cfg.optimizer)
     scheduler = build_scheduler(train_cfg.scheduler.name, optimizer,
                                 train_cfg.max_epochs)

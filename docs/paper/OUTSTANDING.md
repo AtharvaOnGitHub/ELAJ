@@ -102,35 +102,63 @@ endometriosis-relevant gene outside every curated pathway cannot be modelled.
 gives every baseline the same 15,495 genes (`201,472 cells x 15,495 genes` in
 the sweep log), so PCA, scVI, and scANVI see exactly what ELAJ sees.
 
-**The EXCLUDE mismatch is real and its cost is unmeasured.**
-`build_vocabulary.sh` ran with `EXCLUDE="wang_2022 zhang_2022"` while
-corpus_c1 excludes `zhang_2022` and `garcia_alonso_2021_c`. wang_2022 trains
-and contributes 1,791 genes no other corpus study measures.
+**The EXCLUDE mismatch costs 11 genes.** Measured, not estimated, by
+`scripts/dry_run_vocabulary.py` running the real builder on the corrected gene
+list: 15,495 genes now against 15,496 rebuilt, **+11 gained and 10 lost**.
 
-**1,791 is not the cost.** Half of every study's genes are already absent, so
-the only genes that matter are those that would actually ENTER a rebuilt
-vocabulary, and that depends on the hierarchical roll-up and on
-`UnionCutStrategy(min_size=250, max_size=500, go_groups=4)` deciding which
-nodes become groups at all. Adding genes can change which nodes clear the
-floor, so it can change group membership, group sizes, and the group COUNT,
-which is the model's architecture. A base rate applied to 1,791 is not an
-answer. `scripts/dry_run_vocabulary.py` runs the real builder on the
-corrected gene list and reports the difference. **Pending.**
+All 11 gained are wang_2022's and measured by no other corpus study, so the
+mismatch is exactly this and no more. 1,791 became 11 because wang's exclusive
+genes are almost entirely absent from Reactome and GO, so they never reach a
+group whatever the gene list says. The 10 lost are olfactory receptors,
+lactalbumin, a keratin-associated protein, and sperm proteins, none of them
+endometrial.
+
+An earlier estimate here put the figure near 900 by applying the 50% pathway
+base rate to 1,791. Wrong by roughly eighty times, because entry is not a coin
+flip: it depends on the hierarchy containing the gene at all.
 
 **Orphaned rows are a non-issue: 10 genes.** `garcia_alonso_2021_c`'s panel is
 almost entirely covered by `_a` and `_b`, so excluding it costs essentially no
 dead embedding rows.
 
-**The rebuild decision waits on that number**, and the number that decides it
-is not the gene count but whether the group structure moves. A few hundred
-genes with the same 45 groups is a Methods footnote. A changed group count is
-a different model, every checkpoint from r1 invalidated, and the architecture
-claims to re-check.
+**Decision: do not rebuild.** Eleven genes, none measured by any study but
+wang, is not worth renumbering every gene index and invalidating every
+checkpoint from r1 onward.
 
 - [x] `EXCLUDE` now derived from the corpus config, so the drift cannot recur
-- [ ] run `scripts/dry_run_vocabulary.py` and decide
+- [x] dry run: 11 genes, decided not to rebuild
 - [ ] Methods: "genes assignable to a curated pathway", with the 15,495 of
       30,962 figure and the database-bias caveat
+
+### 0.2b The grouping is sensitive to which studies are in the corpus
+
+The dry run turned up a separate finding. Changing the input gene list by about
+6% (wang_2022's 1,791 in, garcia_alonso_2021_c's out) took the grouping from
+**45 groups to 43**, with several groups substantially resized: one went 256 to
+503 genes, another 264 to 446, another 270 to 490.
+
+Much of the apparent churn is naming. Group names encode the merge that
+produced them (`..._plus_29_more`), so a group that picked up six more member
+nodes is renamed while holding the same genes:
+`go_dna_alkylation_..._plus_84_more` (384 genes) becomes `..._plus_90_more`
+(384 genes). The resized ones are real.
+
+`UnionCutStrategy` merges hierarchy nodes until each clears `min_size=250`, so
+a small change in gene counts can tip a node over the floor and cascade through
+the merge order.
+
+**Why this matters beyond the rebuild.** C2 claims the grouping carries biology
+rather than only cost. If the partition moves this much on a 6% change of
+corpus, a reviewer can ask how much of it is biology and how much is corpus
+composition. It sharpens the random-grouping ablation rather than undermining
+it: the comparison to beat is not only random groups but the same algorithm on
+a slightly different corpus.
+
+- [ ] re-run the dry run and report the adjusted Rand index between the two
+      partitions, which the script now computes and which separates a renamed
+      group from a genuinely different one
+- [ ] decide whether a grouping-stability panel belongs beside the
+      random-grouping ablation
 
 ### 0.3 Tissue was unknown for 111,036 cells (fixed, not yet run)
 

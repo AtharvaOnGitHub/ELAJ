@@ -166,6 +166,39 @@ def report_genes(current: dict, rebuilt: dict, panels: dict) -> None:
             print(f"    … and {len(lost) - 15} more")
 
 
+def partition_agreement(current: dict, rebuilt: dict) -> tuple[float, list]:
+    """How much the two groupings agree on CONTENT, ignoring group names.
+
+    Necessary because the names encode the merge that produced them
+    (`..._plus_29_more`), so a group whose merge picked up six more member
+    nodes gets a new name while holding the same genes. Comparing names alone
+    reports churn that is not there.
+
+    Returns the adjusted Rand index over the genes both vocabularies hold, and
+    per current group its best content match.
+    """
+    from sklearn.metrics import adjusted_rand_score
+
+    shared = sorted(set(current) & set(rebuilt))
+    a = [current[g]["group"] for g in shared]
+    b = [rebuilt[g]["group"] for g in shared]
+    ari = adjusted_rand_score(a, b)
+
+    now, then = {}, {}
+    for gene in shared:
+        now.setdefault(current[gene]["group"], set()).add(gene)
+        then.setdefault(rebuilt[gene]["group"], set()).add(gene)
+
+    matches = []
+    for name, genes in now.items():
+        best, score = max(
+            ((other, len(genes & og) / len(genes | og))
+             for other, og in then.items()),
+            key=lambda kv: kv[1], default=(None, 0.0))
+        matches.append((name, best, score, len(genes)))
+    return ari, sorted(matches, key=lambda m: m[2])
+
+
 def report_structure(current: dict, rebuilt: dict) -> None:
     now, then = group_sizes(current), group_sizes(rebuilt)
     print(f"\nGROUPS {len(now)} now, {len(then)} rebuilt")
@@ -188,15 +221,32 @@ def report_structure(current: dict, rebuilt: dict) -> None:
     print(f"  Rebuilt group sizes: min {sizes_then[0]}, "
           f"median {sizes_then[len(sizes_then) // 2]}, max {sizes_then[-1]}")
 
+    ari, matches = partition_agreement(current, rebuilt)
+    print(f"\n  PARTITION AGREEMENT (content, ignoring names): "
+          f"adjusted Rand index {ari:.3f}")
+    print("  1.0 is the same partition under different names; 0.0 is no "
+          "more agreement than chance.")
+    intact = sum(1 for _, _, score, _ in matches if score >= 0.9)
+    print(f"  {intact} of {len(matches)} current groups have a rebuilt "
+          f"counterpart holding >=90% of the same genes.")
+    print("  The five that moved most:")
+    for name, best, score, size in matches[:5]:
+        print(f"    {name[:52]:52s} {size:4d} genes, best overlap "
+              f"{score:.2f} with {(best or '-')[:40]}")
+
 
 def verdict(current: dict, rebuilt: dict) -> None:
-    same_groups = set(group_sizes(current)) == set(group_sizes(rebuilt))
     gained = len(set(rebuilt) - set(current))
+    ari, _ = partition_agreement(current, rebuilt)
+    same_groups = ari >= 0.9
     print("\nVERDICT")
     if not same_groups:
-        print("  The group structure changes, so a rebuild is a different "
-              "model and not a data correction. Every checkpoint from r1 is "
-              "invalidated and the architecture claims need re-checking.")
+        print(f"  The partition itself moves (adjusted Rand index {ari:.3f}), "
+              f"so a rebuild is a different model and not a data correction. "
+              f"Every checkpoint from r1 is invalidated and the architecture "
+              f"claims need re-checking. Note this is driven by the grouping "
+              f"algorithm's sensitivity to the gene list, not by the "
+              f"{gained} genes gained.")
     elif gained < 200:
         print(f"  {gained} genes gained with the group structure unchanged. "
               f"Not worth renumbering every gene index before the deadline; "

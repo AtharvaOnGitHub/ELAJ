@@ -16,25 +16,57 @@ Found 24 September by inspection, all three affecting what the paper can
 claim about its own corpus. Ahead of everything else because a number
 computed on wrong metadata is worse than a number not yet computed.
 
-### 0.1 wang_2022 labels every cell adenomyosis unconditionally
+### 0.1 wang_2022 labels are correct, and reveal a three-way confound
 
-`data_collation/configs/datasets.yaml` gives wang_2022 a `status_config` with
-a `default: adenomyosis` and **no `column:` key**, unlike tan_2022 which reads
-a `condition` column and maps `Control` to `PATO:0000461`. So every cell takes
-the default whatever the source said.
+**The label question is closed.** All four GSE218044 samples are adenomyotic
+uterine muscle layer, stratified by symptom rather than by disease:
 
-The collated file confirms the outcome: 49,606 cells, four samples
-(GSM6733366 to GSM6733369), four patients, `disease_status` uniformly
-`adenomyosis`, `tissue_ontology_term_id` uniformly `UBERON:0001296`
-(myometrium). No condition column survives in the processed obs, so the
-processed file cannot say whether one was ever available.
+| sample | characteristics |
+|---|---|
+| GSM6733366 | Uterine muscle layer, Adenomyosis tissue1 (Pain) |
+| GSM6733367 | Uterine muscle layer, Adenomyosis tissue2 (Pain) |
+| GSM6733368 | Uterine muscle layer, Adenomyosis tissue1 (Painfree) |
+| GSM6733369 | Uterine muscle layer, Adenomyosis tissue2 (Painfree) |
 
-**Open:** whether GSE218044 contains control or unaffected samples. If it
-does, they are currently mislabelled, and `include_disease_statuses` carries
-`control`, so nothing downstream would catch it. Settled by reading the four
-GSM sample titles on the GEO series page.
+There are no control samples, so `default: adenomyosis` with no column is the
+correct encoding for a study that is genuinely uniform, and
+`UBERON:0001296` (myometrium) is right. No fix needed.
 
-**Bears on:** C4, which is a claim about disease-relevant structure.
+**What it exposes instead.** Three labels partition the corpus identically:
+
+| label | studies that can produce it |
+|---|---|
+| `disease_status = adenomyosis` | **wang_2022 only** |
+| `UBERON:0001296` (myometrium) | **wang_2022 only** |
+| `study = wang_2022` | itself |
+
+So adenomyosis, myometrium, and one study of four patients are the same set of
+49,606 cells. Nothing in the corpus can separate them.
+
+Four consequences, none of them a bug and all of them things a reviewer will
+find:
+
+1. **No adenomyosis-specific claim is supportable.** Any such claim is a claim
+   about a single study of four donors, and cannot be distinguished from a
+   batch effect.
+2. **The decoder's tissue conditioning for myometrium is study conditioning.**
+   Tissue level 3 exists only in wang_2022's cells.
+3. **`c1_dab` is in direct tension with it.** The adversarial term removes
+   study identity from the latent. Since adenomyosis *is* wang_2022, turning
+   it on removes the adenomyosis signal along with the study. That interaction
+   has to be stated when `c1_dab` is read, and it is a reason its adenomyosis
+   rows will look worse for a reason that is not the model's fault.
+4. **`c1_dx` gives the decoder what is effectively a study indicator** for
+   those cells, which partly defeats holding disease out of the encoder.
+
+**Recommendation:** keep wang_2022, as decided, and treat it as a distinct
+tissue context rather than as evidence about adenomyosis. State the confound
+in Limitations. Do not report an adenomyosis row in any results table without
+it attached.
+
+**Also noted, not a defect.** The Pain / Painfree stratification exists in GEO
+and is not carried into our obs. Nothing in this paper models pain, so it is
+not needed, but it is recorded here in case a later analysis wants it.
 
 ### 0.2 The vocabulary and the corpus disagree about which studies count
 

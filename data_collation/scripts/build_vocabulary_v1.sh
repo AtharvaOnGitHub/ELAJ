@@ -31,4 +31,8 @@ export CORPUS=/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_v1.yaml
 export GENE_LIST=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/gene_list_v1.txt
 export VOCAB_OUT=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_v1.json
 
-exec /rds/homes/a/axw1008/axw1008/data_collation/scripts/build_vocabulary.sh
+# Through `bash`, not `exec` on the path: sbatch READS a job script rather
+# than executing it, so nothing in this directory has ever needed the
+# executable bit and build_vocabulary.sh does not have it. Invoking the
+# interpreter explicitly makes the file mode irrelevant.
+exec bash /rds/homes/a/axw1008/axw1008/data_collation/scripts/build_vocabulary.sh

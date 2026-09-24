@@ -68,27 +68,60 @@ it attached.
 and is not carried into our obs. Nothing in this paper models pain, so it is
 not needed, but it is recorded here in case a later analysis wants it.
 
-### 0.2 The vocabulary and the corpus disagree about which studies count
+### 0.2 The vocabulary is the pathway-annotated half of the transcriptome
 
-`build_vocabulary.sh` was run with `EXCLUDE="wang_2022 zhang_2022"`.
-`corpus_c1.yaml` excludes `zhang_2022` and `garcia_alonso_2021_c`. Nothing
-checks that the two agree.
+Measured by `scripts/audit_vocabulary_coverage.py`
+(`Outputs/vocab_coverage.csv`).
 
-| | consequence |
-|---|---|
-| wang_2022 | trains, but its genes were excluded from the build, so whatever it alone measures has no vocabulary row and is never read |
-| garcia_alonso_2021_c | excluded, but its genes hold embedding rows, decoder outputs and dispersion parameters that can never train |
+| | genes |
+|---:|---|
+| union of what the eleven corpus studies measure | **30,962** |
+| in the vocabulary | **15,495** (50.0%) |
+| dropped | **15,477** (50.0%) |
 
-The gene selection itself is sound and worth stating plainly in Methods: the
-vocabulary is the **union of `var_names`**, the panel each study measured. No
-highly variable gene selection, no differential expression, no cell-level
-filter, and disease status never enters. Union rather than intersection
-because the DNS sentinel lets a study that did not measure a gene mark it
-not-sampled instead of zero, which is C3.
+**The cause is `--drop-unassigned`**, passed at `build_vocabulary.sh:92`. The
+builder assigns genes to MSigDB Hallmark sets, then to Enrichr supplementary
+libraries, and **discards every gene that matched no pathway**. It is not
+study exclusion: `duempelmann_2026` was in the build and still lost 10,667 of
+its 25,225 genes, and per-study coverage runs 58% to 80% across the board.
 
-**Measured by** `scripts/audit_vocabulary_coverage.py`. A rebuild renumbers
-every gene index and invalidates every checkpoint from r1 onward, so the count
-decides whether to rebuild or to write the Methods sentence accurately.
+**This is an architectural requirement, not a defect.** Every gene must belong
+to a group the group encoder can attend over coherently. A 15,000-gene
+"unassigned" group would carry no biological structure and would dominate the
+attention cost, which is quadratic in group size.
+
+**But it is an inclusion criterion and the Methods must say so.** The accurate
+sentence is *"genes assignable to a curated pathway"*, not *"the union of
+genes across the corpus"*. It carries the bias of the pathway databases:
+well-studied protein-coding genes are over-represented, and long non-coding
+RNAs, novel open reading frames, and pseudogenes are largely absent. An
+endometriosis-relevant gene outside every curated pathway cannot be modelled.
+
+**The baseline comparison is unaffected and fair.** `extract_corpus_matrix`
+gives every baseline the same 15,495 genes (`201,472 cells x 15,495 genes` in
+the sweep log), so PCA, scVI, and scANVI see exactly what ELAJ sees.
+
+**The EXCLUDE mismatch is real and second-order.**
+`build_vocabulary.sh` ran with `EXCLUDE="wang_2022 zhang_2022"` while
+corpus_c1 excludes `zhang_2022` and `garcia_alonso_2021_c`. wang_2022 trains
+and contributes 1,791 genes no other corpus study measures, all currently
+unreadable. At the 50% base rate roughly 900 of those would have survived the
+pathway filter, so a corrected build would add about 5% to the vocabulary.
+
+**Orphaned rows are a non-issue: 10 genes.** `garcia_alonso_2021_c`'s panel is
+almost entirely covered by `_a` and `_b`, so excluding it costs essentially no
+dead embedding rows.
+
+**Recommendation: do not rebuild.** A rebuild renumbers every gene index and
+invalidates every checkpoint from r1 onward, for about 900 genes, while two
+architecture arms are mid-flight and the deadline is 12 October. Fix the
+EXCLUDE line so the next build from scratch is right, state both facts
+accurately in Methods, and move on.
+
+- [ ] correct `EXCLUDE` in `build_vocabulary.sh` to match `exclude_studies`
+- [ ] Methods: "genes assignable to a curated pathway", with the 15,495 of
+      30,962 figure and the database-bias caveat
+- [ ] Limitations: wang_2022's 1,791 exclusive genes are not in the vocabulary
 
 ### 0.3 Tissue was unknown for 111,036 cells (fixed, not yet run)
 

@@ -122,6 +122,21 @@ def _platform_code_matrix(obs, study_name: str, platform=None) -> np.ndarray:
     return out
 
 
+def _column_is_usable(obs, column: str, study_name: str) -> bool:
+    """Is `column` present AND numeric enough to read a tissue level from?
+
+    A column of free text is worth no more than a missing one, and treating
+    it as present suppresses the UBERON fallback. `tissue_type` is the case
+    that matters: CELLxGENE uses that name for "tissue" / "organoid" /
+    "cell culture".
+    """
+    import pandas as pd
+
+    if column not in obs.columns:
+        return False
+    return not pd.to_numeric(obs[column], errors="coerce").isna().all()
+
+
 def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
     """Build an (n_cells, N_TISSUE_LEVELS) int64 matrix of tissue hierarchy codes.
 
@@ -140,14 +155,24 @@ def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
     # never have — nothing in collation ever wrote them, so every cell read 0
     # and the decoder's tissue conditioning was inert. What is populated, in
     # all 13 studies, is the UBERON term. Derive the levels from that when the
-    # numeric columns are absent; a study that does carry them still wins, so
+    # numeric columns are unusable; a study that does carry them still wins, so
     # this is a fallback rather than a replacement.
-    if hierarchy is not None and not any(c in obs.columns for c in _TISSUE_LEVEL_COLUMNS):
+    #
+    # USABLE, not merely present. CELLxGENE's schema has a column called
+    # `tissue_type` holding "tissue" / "organoid" / "cell culture", which
+    # collides by name with this model's level 2. Testing presence alone let
+    # that collision suppress the UBERON route for all three garcia_alonso
+    # studies: the loop below then found one column it could not coerce and
+    # left every level at 0, so 111,036 cells (about 9% of the c1 corpus)
+    # trained with no tissue at all while their UBERON term sat unread.
+    if hierarchy is not None and not any(
+        _column_is_usable(obs, c, study_name) for c in _TISSUE_LEVEL_COLUMNS
+    ):
         if ONTOLOGY_COLUMN in obs.columns:
             return hierarchy.matrix_for(obs[ONTOLOGY_COLUMN].to_numpy(), study_name)
         logger.warning(
-            "Study '%s': no tissue level columns and no '%s' either — tissue "
-            "reads as unknown for every cell.",
+            "Study '%s': no usable tissue level columns and no '%s' either — "
+            "tissue reads as unknown for every cell.",
             study_name, ONTOLOGY_COLUMN,
         )
         return matrix

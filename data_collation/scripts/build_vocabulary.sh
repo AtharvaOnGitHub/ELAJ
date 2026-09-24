@@ -41,8 +41,17 @@ export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
 export PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
-export GENE_LIST=${PROCESSED}/gene_list.txt
-export VOCAB_OUT=${PROCESSED}/vocabulary.json
+export GENE_LIST=${GENE_LIST:-${PROCESSED}/gene_list.txt}
+export VOCAB_OUT=${VOCAB_OUT:-${PROCESSED}/vocabulary.json}
+
+# A vocabulary in use is read by every running job and by every checkpoint
+# that was trained against it, so overwriting one silently breaks both.
+# Write to a new path, or set OVERWRITE=1 deliberately.
+if [[ -e "${VOCAB_OUT}" && "${OVERWRITE:-0}" != "1" ]]; then
+  echo "REFUSING: ${VOCAB_OUT} exists." >&2
+  echo "Write to a new path (VOCAB_OUT=...) or set OVERWRITE=1." >&2
+  exit 1
+fi
 # Which corpus this vocabulary is for. Its exclude_studies is the one that
 # counts, so point this at the config the runs actually load.
 export CORPUS=${CORPUS:-/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_c1.yaml}

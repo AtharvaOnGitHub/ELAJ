@@ -1,0 +1,119 @@
+name: v1_combined
+description: >
+  THE ARCHITECTURE ARM. Read against v1_scale, which differs from it in the
+  three token changes and nothing else. That comparison is the paper's
+  architecture result; it is not comparable to any c-series run, because the
+  vocabulary partition differs.
+
+  THE V SERIES is the c1 series re-run against a rebuilt vocabulary. See
+  configs/data/corpus_v1.yaml for what the rebuild changes and why a v run
+  cannot be compared with a c run.
+
+  c1_ref with the three changes the token sweep found worked, together:
+  log-normalised counts, a count direction per gene, and order statistics
+  beside the learned summary token. 960 added parameters, about 10% more
+  compute per epoch.
+
+  WHAT THE SWEEP FOUND (outputs/sweeps/c1_ref_tokens, untrained, cell-family
+  agreement on groups/concat):
+
+      base       raw counts, one shared direction, cls only       0.691
+      scale      log counts                                       0.760
+      genedir    log counts, a direction per gene                 0.811
+      pool       log counts, eight pooled statistics              0.867
+      combined   all three                                        0.882
+      pcaW_log   PCA at the same width, the reference             0.847
+
+  `combined` is the first arm in this project to beat a PCA of the same
+  genes at the same width, on both cell-family agreement (0.882 to 0.847)
+  and a cross-donor linear probe (0.964 to 0.945).
+
+  THE THREE CHANGES, AND WHY EACH ONE.
+
+  count_scale log. Raw counts span zero to several thousand inside a cell,
+  which lengthens a few tokens enormously and saturates the attention
+  softmax. Worth 0.069 on its own, for no parameters. See c1_scale, which
+  is this change alone and is the control for this run.
+
+  value_part gene_direction. A gene's token was `e_i + c_i * w` with one
+  direction w shared by the whole corpus, so an attention head's
+  count-dependent output was `(sum_i alpha_i c_i) * V w`: one number times
+  one fixed vector, however many heads or summary tokens read it. Here the
+  direction is `A e_i`, derived from the gene's own identity embedding
+  through one 32x32 matrix, so a head's count term becomes a per-gene
+  weighted sum, which is the form a principal component takes. Worth 0.118,
+  for 960 net parameters. The sweep also ran a free vector per gene
+  (495,776 parameters) and it scored WORSE, 0.794, so the identity
+  embedding is a good enough basis and the expensive version is closed.
+
+  readout cls+pool8. Every attention readout is a weighted average, and
+  averaging 344 genes destroys variation, which is why the n_cls sweep came
+  out flat across an eightfold widening. The eight statistics here include
+  order statistics, which select a different gene in each dimension and are
+  not reachable by any set of attention weights. No parameters. The sweep's
+  `extremes` arm shows both halves are needed: dropping the mean and the
+  standard deviation holds the linear probe at 0.960 but collapses
+  neighbour agreement to 0.626, so the averages carry the geometry and the
+  order statistics carry the information.
+
+  THE RISK THIS RUN CARRIES. Each group now hands on nine summary tokens
+  instead of one, so the aggregation encoder's sequence goes from 49
+  positions to 409 and it must summarise 405 group tokens into one 64-number
+  cell vector. Untrained, that dilutes: this arm's latent scored 0.472
+  against c1_scale's 0.569 even though its group output is far better. An
+  untrained aggregation has learned to select nothing, so this is not
+  predictive, but it is the thing to watch. If val_family_knn here lags
+  c1_scale, the next arm is c1_scaledir (log plus gene directions, no
+  pooling), which keeps the group output at 1,440 wide and leaves the
+  aggregation untouched.
+
+  EPOCH BUDGET. The group encoders still dominate the arithmetic; the
+  aggregation's share of the feedforward cost goes from about 1% to about
+  10%, so expect roughly 5,500 s/epoch against c1_ref's 5,000. CHECK THE
+  FIRST EPOCH TIME; above 7,800 s the run will not anneal before the wall
+  and needs `train.sh <yaml> --resume`.
+
+  Everything else is c1_ref exactly: same corpus, same seed, same epoch
+  budget, same stop metric.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/v_series_runs/v1_combined/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.0
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.025
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  # The three changes. See model/embeddings/counts/, model/embeddings/values/
+  # and model/encoders/readouts/.
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8

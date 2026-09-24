@@ -255,21 +255,94 @@ def require_seen_studies(fit: CorpusMatrix, corpus: CorpusMatrix, name: str) -> 
         )
 
 
-def log_normalise(adata, target_sum: float = 1e4) -> None:
-    """In place: counts -> log1p(counts per ``target_sum``). Raw kept in a layer."""
+def log_normalise(adata, target_sum: float = 1e4,
+                  keep_counts: bool = False) -> None:
+    """In place: counts -> log1p(counts per ``target_sum``).
+
+    ``keep_counts`` copies the raw matrix into ``layers["counts"]`` first.
+    It defaults to OFF because nothing reads that layer: PCA, Harmony and
+    Scanorama all work from the log-normalised X, and scVI never calls this
+    function at all, building its own AnnData of raw counts and registering X
+    directly. The copy was 18 GB on the 1.2 M-cell training corpus, paid on
+    every baseline, for no reader. Pass True if a future method wants both
+    matrices at once.
+    """
     import scanpy as sc
 
-    adata.layers["counts"] = adata.X.copy()
+    if keep_counts:
+        adata.layers["counts"] = adata.X.copy()
     sc.pp.normalize_total(adata, target_sum=target_sum)
     sc.pp.log1p(adata)
 
 
-def pca(adata, n_comps: int, seed: int) -> np.ndarray:
-    """PCA on ``adata.X`` (assumed log-normalised). Returns ``(n, n_comps)``."""
+# `sc.pp.pca` densifies the whole matrix to centre it. On the 1.2 M-cell
+# training corpus that is 1,195,264 x 15,496 x 4 bytes = 74 GB, on top of two
+# sparse copies at 18 GB each, which is what killed job 55184824 inside a
+# 180 GB allocation. r8_inductive did the same thing at 784,896 cells and
+# peaked at 101.88 GB; the corpus grew 52% when the controls came in and the
+# allocation did not.
+#
+# The exact decomposition is worth keeping when it fits, so the choice is made
+# against the job's OWN allocation rather than a number typed here.
+DENSE_FRACTION = 0.35
+"""How much of the job's memory the densified matrix may take. The rest holds
+two sparse copies of the corpus, the query corpus, and the SVD workspace."""
+
+FALLBACK_DENSE_GB = 8.0
+"""Used when SLURM_MEM_PER_NODE is unset, i.e. off the cluster."""
+
+
+def dense_budget_gb() -> float:
+    """The largest dense matrix this job should build, from its allocation."""
+    import os
+
+    mem_mb = os.environ.get("SLURM_MEM_PER_NODE")
+    if not mem_mb:
+        return FALLBACK_DENSE_GB
+    try:
+        return max(FALLBACK_DENSE_GB, DENSE_FRACTION * int(mem_mb) / 1024)
+    except ValueError:
+        return FALLBACK_DENSE_GB
+
+
+def pca(adata, n_comps: int, seed: int,
+        max_dense_gb: float | None = None) -> np.ndarray:
+    """PCA on ``adata.X`` (assumed log-normalised). Returns ``(n, n_comps)``.
+
+    Chunks when the densified matrix would exceed ``max_dense_gb``, which
+    swaps the exact decomposition for sklearn's IncrementalPCA: it centres
+    and decomposes a chunk at a time and never holds the dense matrix. The
+    leading components agree closely with the exact ones, which is what a
+    baseline needs, and the alternative on a corpus this size is not an exact
+    answer but no answer.
+
+    The path taken is logged, because two runs that took different paths are
+    not exactly comparable and the log is the only record of which was which.
+    """
     import scanpy as sc
 
+    if max_dense_gb is None:
+        max_dense_gb = dense_budget_gb()
     n = min(n_comps, adata.n_obs - 1, adata.n_vars - 1)
-    sc.pp.pca(adata, n_comps=n, random_state=seed)
+    dense_gb = adata.n_obs * adata.n_vars * 4 / 1e9
+
+    if dense_gb <= max_dense_gb:
+        logger.info("PCA: exact, %d x %d densifies to %.1f GB (budget %.1f)",
+                    adata.n_obs, adata.n_vars, dense_gb, max_dense_gb)
+        sc.pp.pca(adata, n_comps=n, random_state=seed)
+        return np.asarray(adata.obsm["X_pca"], dtype=np.float32)
+
+    # A chunk holds chunk_size x n_vars floats. Sized to ~1 GB, which keeps
+    # the peak far below the allocation while staying well above n_comps
+    # (IncrementalPCA needs at least n_comps rows per chunk).
+    chunk_size = max(n + 1, int(1e9 / (adata.n_vars * 4)))
+    logger.info(
+        "PCA: chunked at %d cells, because %d x %d would densify to %.1f GB "
+        "(limit %.1f). IncrementalPCA, not the exact decomposition.",
+        chunk_size, adata.n_obs, adata.n_vars, dense_gb, max_dense_gb,
+    )
+    sc.pp.pca(adata, n_comps=n, random_state=seed,
+              chunked=True, chunk_size=chunk_size)
     return np.asarray(adata.obsm["X_pca"], dtype=np.float32)
 
 

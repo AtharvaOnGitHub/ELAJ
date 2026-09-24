@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=180G
+#SBATCH --mem=256G
 #SBATCH --job-name=elaj_bench
 #SBATCH --output=logs/bench_%j.log
 
@@ -35,7 +35,19 @@
 # checkpoint exists for).
 #
 # GPU: scVI and scANVI train on it; the rest are CPU. One A100 is plenty.
-# MEMORY: 180 G because --fit-split train holds the ~1.2 M-cell training
+# MEMORY: 256 G. At 180 G, job 55184824 was OOM-killed fitting PCA on the
+# 1,195,264-cell training corpus: sc.pp.pca densifies to centre, which is
+# 74 GB, on top of two sparse copies at 18 GB each. r8_inductive did the
+# same at 784,896 cells and peaked at 101.88 GB, so the headroom went when
+# the controls came in and the corpus grew 52%. An A100-80 node holds
+# 512 GB across four GPUs, so 256 G for one GPU is half the memory for a
+# quarter of the cards: it may queue a little longer on the shared
+# partition, and it is well inside the node.
+#
+# methods.py sizes its own dense-matrix budget from SLURM_MEM_PER_NODE, so
+# lowering this does not fail, it switches PCA to IncrementalPCA.
+#
+# ORIGINAL NOTE: 180 G because --fit-split train holds the ~1.2 M-cell training
 # corpus beside the scored one, plus scVI's own copy.
 # WALLTIME: 12 h is generous. scVI on ~240k cells is under an hour on an
 # A100, scANVI similar, Scanorama the slowest of the CPU methods at tens of

@@ -208,11 +208,75 @@ a priority.
 
 ---
 
+## 6b. `c1_scale`: log-normalised counts, trained
+
+`outputs/C_series/c1_scale`, job 55120177. Fourteen epochs, 18.7 h,
+early-stopped. One line changed against `c1_ref`, zero parameters added.
+
+| | `c1_ref` | `c1_scale` |
+|---|---:|---:|
+| best `val_family_knn` | 0.9183 | **0.9292** |
+| epoch it peaked | 12 | **6** |
+| best `val_nb` | 0.3782 | 0.3780 |
+| seconds per training epoch | 4,388 | 4,470 |
+
+**Supports:** that count scaling is worth having on its own, and the token
+sweep's `scale` arm predicting it. Reconstruction is unchanged to four decimal
+places, so the gain is not bought from the likelihood, and the epoch cost is
+the same.
+
+**It also halves the epochs to peak**, which is independent evidence for the
+short frozen-run budget: 0.9260 was already reached at epoch 4.
+
+**Status:** solid as a within-run comparison, **provisional as a number**.
+`val_family_knn` is the training loop's within-donor probe, not the
+cross-donor metric the paper reports. `c1_baselines` and `score_arm.sh` are
+needed before it can sit beside scVI's 0.971.
+
+**Read with the sweep, not against it.** The untrained sweep put `scale` +0.069
+ahead at `groups/concat`. The trained latent gains +0.011. The two are
+consistent: the stage probe showed every stage below the group encoders
+recovers part of what they lose, so a gain at the group outputs is expected to
+shrink by the time it reaches a 16-number latent.
+
+**Neither run completed its schedule.** Both early-stopped on `family_knn`
+before the cosine annealed (`T_max` 22, stopped at 14 and 20). Comparable to
+each other, not to a run that anneals.
+
+### What the latent UMAP shows
+
+`figures/best/latent_umap_epoch006.png`, 19,460 validation cells.
+
+Six studies mix well: shih_2022, tan_2022, ferrero_2024, fonseca_2023,
+duempelmann_2026, lin_2023. **Five separate**, with `lambda_dab: 0.0` so
+nothing is pushing study identity out, which makes this the baseline `c1_dab`
+will be read against:
+
+| study | what it looks like | plausible cause |
+|---|---|---|
+| garcia_alonso_2021_a | its own lobe at the top | **no tissue conditioning** (§0.3 in OUTSTANDING), plus CELLxGENE chemistry |
+| garcia_alonso_2021_b | scattered, furthest from everything | the same |
+| wang_2022 | its own cluster | **the adenomyosis / myometrium / one-study confound** (§0.1) |
+| marecko_2024 | its own cluster | unexplained |
+| li_2025 | its own cluster | unexplained |
+
+**Two of these are the defects we found by reading configs, now visible in a
+figure.** The garcia_alonso studies are exactly the two whose tissue read as
+unknown, so the decoder could explain none of their anatomy and the latent had
+to carry it. That gives the tissue fix a **testable prediction**: the first run
+carrying `482dc69` should show those two less separated. Not proof either way
+until it runs, since chemistry differs too.
+
+The wang_2022 cluster is the confound made visible, and is the figure for
+Limitations: nothing in this corpus can say whether it is adenomyosis biology
+or wang_2022 batch, because they are the same cells.
+
+---
+
 ## 7. Pending
 
 | | what it will settle | expected |
 |---|---|---|
-| `c1_scale` | how much of any gain is preprocessing alone | 25 Sep |
 | `c1_combined` | whether §4b survives training | 25 Sep |
 | `f1_epochs_03/05/10` | what budget a frozen run needs | 25 Sep |
 | transferability gate | whether a frozen latent ranking survives a change of encoder | 27 Sep |

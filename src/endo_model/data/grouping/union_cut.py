@@ -144,24 +144,51 @@ def merge_undersized(
     Stops when the smallest group clears `min_size`, or when a single group
     remains — a floor larger than the whole universe cannot be satisfied, and
     collapsing to one group is the honest outcome rather than an error.
+
+    THE TWO BOUNDS CAN CONFLICT, AND THE CEILING WINS. An undersized group
+    whose every partner would push the result past `max_size` cannot satisfy
+    both. It is left below the floor and recorded, rather than merged into an
+    oversized group. `min_size` exists to bound the group count, and so the
+    parameter count; `max_size` bounds attention memory, which is quadratic in
+    group size, and the bucketed encoder pads every group in a bucket to its
+    longest member, so one overflow is paid by all of them. A group slightly
+    under the floor costs one extra small transformer. Ranking overflow as
+    merely the first sort key let a 249-gene leftover merge into a 254-gene
+    group and produce 503 against a ceiling of 500.
     """
     work = {gid: set(genes) for gid, genes in groups.items()}
     parts = {gid: [gid] for gid in work}
+    stuck: set[str] = set()
 
     ancestry: Optional[dict[str, set[str]]] = None
     if hierarchy is not None:
         ancestry = {gid: ancestors(hierarchy, gid) for gid in work}
 
     while len(work) > 1:
-        smallest = min(work, key=lambda g: (len(work[g]), g))
+        movable = [g for g in work if g not in stuck]
+        if not movable:
+            break
+        smallest = min(movable, key=lambda g: (len(work[g]), g))
         if len(work[smallest]) >= min_size:
             break
 
         partner = _pick_partner(
             work, smallest, ancestry, hierarchy, universe, max_size
         )
+        if partner is None:
+            # Every partner would overflow. Merges only ever grow a group, so
+            # this one can never become mergeable later: park it for good.
+            stuck.add(smallest)
+            logger.info(
+                "union_cut: %d-gene group left below min_size=%s; every merge "
+                "would exceed max_size=%s", len(work[smallest]), min_size,
+                max_size,
+            )
+            continue
+
         work[partner] |= work.pop(smallest)
         parts[partner] = parts.pop(partner) + parts.pop(smallest)
+        stuck.discard(smallest)
         if ancestry is not None:
             ancestry[partner] &= ancestry.pop(smallest)
 
@@ -177,35 +204,43 @@ def _pick_partner(
     hierarchy: Optional[Hierarchy],
     universe: Optional[set[str]],
     max_size: Optional[int],
-) -> str:
-    """Choose which group `smallest` merges into.
+) -> Optional[str]:
+    """Which group `smallest` merges into, or None if none may take it.
 
-    Ranked, in order:
-      1. keeps the result within `max_size` — the ceiling is a hard memory
-         constraint, relatedness is a quality preference, so this outranks it;
-      2. shares an ancestor with `smallest` at all;
-      3. that shared ancestor is as specific as possible;
-      4. is itself small, keeping the size distribution tight;
-      5. node id, for determinism.
+    `max_size` is a FILTER, not a preference. A candidate that would overflow
+    is not a candidate, and when that leaves none the caller is told so and
+    leaves the group undersized. It used to be the first sort key, which means
+    `min` still returned an overflowing partner whenever every partner
+    overflowed, and the ceiling the docstring called hard was not.
+
+    Among the candidates that fit, ranked in order:
+      1. shares an ancestor with `smallest` at all;
+      2. that shared ancestor is as specific as possible, so a merged group
+         stays a coherent branch and can be named after it;
+      3. is itself small, keeping the size distribution tight;
+      4. node id, for determinism.
     """
-    candidates = [g for g in work if g != smallest]
+    room = len(work[smallest])
+    candidates = [
+        g for g in work
+        if g != smallest
+        and (max_size is None or len(work[g]) + room <= max_size)
+    ]
+    if not candidates:
+        return None
 
     if ancestry is None or hierarchy is None or universe is None:
         return min(candidates, key=lambda g: (len(work[g]), g))
 
     def rank(candidate: str) -> tuple:
-        merged_size = len(work[candidate]) + len(work[smallest])
-        overflows = max_size is not None and merged_size > max_size
-
         shared = ancestry[smallest] & ancestry[candidate]
         if not shared:
             # Unrelated: sorts after every relative, and its ancestor slot is
             # inert since the flag before it already decided the comparison.
-            return (overflows, True, 0, len(work[candidate]), candidate)
+            return (True, 0, len(work[candidate]), candidate)
 
         nca = min(shared, key=lambda n: (node_size(hierarchy, n, universe), n))
         return (
-            overflows,
             False,
             node_size(hierarchy, nca, universe),
             len(work[candidate]),

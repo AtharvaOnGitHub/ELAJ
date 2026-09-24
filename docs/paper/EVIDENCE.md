@@ -299,4 +299,7 @@ or wang_2022 batch, because they are the same cells.
 | group encoder share | 1,144,800 (61%) | 45 × 25,440 |
 | trainable set under an encoder freeze | ~127,000 (7%) | `training/freezing.py` report |
 | `c1_ref` epoch time | 4,640 s (4,388 train, 252 val) | `metrics.csv` |
-| studies in the c1 corpus | 11 | `configs/data/corpus_c1.yaml` |
+| studies in the c1 and v1 corpora | 11 | `configs/data/corpus_c1.yaml` |
+| **v1 vocabulary genes** | **15,496** | `build_vocabulary_v1_55184585.log` |
+| **v1 groups, and their sizes** | **44, from 247 to 493 genes** | same |
+| c1 vocabulary genes and groups | 15,495 in 45 groups | `vocabulary.json` |

@@ -49,7 +49,7 @@ description: >
   after it, is conditional on that encoder, both its weights and its
   architecture, and must be reported that way. Whether the conditioning
   matters is testable rather than arguable: the transferability gate runs the
-  same configurations against c1_scale's encoder and c1_combined's and checks
+  same configurations against v1_scale's encoder and v1_combined's and checks
   that the ranking holds.
 
   BEFORE RUNNING, SET TWO THINGS.
@@ -58,11 +58,11 @@ description: >
        written here in advance.
     2. The model.tokens and model.group_encoder.readout block below, which
        MUST match the architecture of that checkpoint or the weights will not
-       load. It is written for c1_combined; if c1_scale wins instead, drop
+       load. It is written for v1_combined; if v1_scale wins instead, drop
        value_part and readout back to their defaults.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
-data:     configs/data/corpus_c1.yaml
+data:     configs/data/corpus_v1.yaml
 
 output_dir: outputs/f_series_runs/f1_epochs_10/
 seed: 24
@@ -74,7 +74,7 @@ overrides:
   # ── The frozen encoder ─────────────────────────────────────────────────────
   # FILL THIS IN. A run with freeze_encoder and no init_from_checkpoint is
   # refused, because freezing a randomly initialised encoder holds noise still.
-  training.init_from_checkpoint: outputs/c_series_runs/c1_combined/checkpoints/REPLACE_ME.pt
+  training.init_from_checkpoint: outputs/v_series_runs/v1_combined/checkpoints/REPLACE_ME.pt
   training.freeze_encoder: true
 
   # Nothing to recompute in a backward pass the encoder no longer has. The
@@ -113,7 +113,7 @@ overrides:
   model.d_platform: 16
   model.d_disease: 0
 
-  # MUST MATCH THE CHECKPOINT. Written for c1_combined.
+  # MUST MATCH THE CHECKPOINT. Written for v1_combined.
   model.tokens.count_scale: log
   model.tokens.target_sum: 1.0e4
   model.tokens.value_part: gene_direction

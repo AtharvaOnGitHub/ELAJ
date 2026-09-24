@@ -1,11 +1,81 @@
 # What is left, by part of the paper
 
-Updated 23 September 2026. Companion to
+Updated 24 September 2026. Companion to
 [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md), which holds the claims and the
 schedule, and [`EVIDENCE.md`](EVIDENCE.md), which holds what we already have.
 
-Priority runs 1 to 5 within each section. §8 is everything deliberately out of
-scope; nothing there is ever a top-five item.
+Priority runs 1 to 5 within each section. §0 comes first: a number computed
+on wrong metadata is worse than a number not yet computed. §8 is everything
+deliberately out of scope; nothing there is ever a top-five item.
+
+---
+
+## 0. Data provenance defects
+
+Found 24 September by inspection, all three affecting what the paper can
+claim about its own corpus. Ahead of everything else because a number
+computed on wrong metadata is worse than a number not yet computed.
+
+### 0.1 wang_2022 labels every cell adenomyosis unconditionally
+
+`data_collation/configs/datasets.yaml` gives wang_2022 a `status_config` with
+a `default: adenomyosis` and **no `column:` key**, unlike tan_2022 which reads
+a `condition` column and maps `Control` to `PATO:0000461`. So every cell takes
+the default whatever the source said.
+
+The collated file confirms the outcome: 49,606 cells, four samples
+(GSM6733366 to GSM6733369), four patients, `disease_status` uniformly
+`adenomyosis`, `tissue_ontology_term_id` uniformly `UBERON:0001296`
+(myometrium). No condition column survives in the processed obs, so the
+processed file cannot say whether one was ever available.
+
+**Open:** whether GSE218044 contains control or unaffected samples. If it
+does, they are currently mislabelled, and `include_disease_statuses` carries
+`control`, so nothing downstream would catch it. Settled by reading the four
+GSM sample titles on the GEO series page.
+
+**Bears on:** C4, which is a claim about disease-relevant structure.
+
+### 0.2 The vocabulary and the corpus disagree about which studies count
+
+`build_vocabulary.sh` was run with `EXCLUDE="wang_2022 zhang_2022"`.
+`corpus_c1.yaml` excludes `zhang_2022` and `garcia_alonso_2021_c`. Nothing
+checks that the two agree.
+
+| | consequence |
+|---|---|
+| wang_2022 | trains, but its genes were excluded from the build, so whatever it alone measures has no vocabulary row and is never read |
+| garcia_alonso_2021_c | excluded, but its genes hold embedding rows, decoder outputs and dispersion parameters that can never train |
+
+The gene selection itself is sound and worth stating plainly in Methods: the
+vocabulary is the **union of `var_names`**, the panel each study measured. No
+highly variable gene selection, no differential expression, no cell-level
+filter, and disease status never enters. Union rather than intersection
+because the DNS sentinel lets a study that did not measure a gene mark it
+not-sampled instead of zero, which is C3.
+
+**Measured by** `scripts/audit_vocabulary_coverage.py`. A rebuild renumbers
+every gene index and invalidates every checkpoint from r1 onward, so the count
+decides whether to rebuild or to write the Methods sentence accurately.
+
+### 0.3 Tissue was unknown for 111,036 cells (fixed, not yet run)
+
+CELLxGENE's schema has a column named `tissue_type` holding "tissue" /
+"organoid" / "cell culture". The model's four-level hierarchy uses the same
+name for level 2. The UBERON fallback was gated on a level column being
+*present*, so the collision suppressed it and every level stayed at 0 for all
+three garcia_alonso studies: about 9% of the c1 corpus trained with the
+decoder's tissue conditioning inert and its own "unknown" split stratum, while
+the UBERON term sat unread in the same obs.
+
+Fixed in `482dc69`: the gate now asks whether a level column is *usable*,
+meaning present and coercible to a number. Verified both ways on the planted
+case, `[1 1 1 0]` after and `[0 0 0 0]` before.
+
+**Not yet in any run.** `c1_scale` and `c1_combined` were launched before it.
+Changing tissue codes for 111,036 cells changes the decoder's conditioning, so
+the first run carrying this differs from `c1_ref` in one more respect than the
+token change, and that has to be stated wherever the two are compared.
 
 ---
 

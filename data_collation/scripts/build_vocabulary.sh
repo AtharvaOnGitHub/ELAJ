@@ -33,9 +33,17 @@
 
 module purge
 module load bear-apps/2024a
+module load PyTorch/2.7.1-foss-2024a-CUDA-12.6.0
+module load R/4.5.0-gfbf-2024a
+module load PyYAML/6.0.2-GCCcore-13.3.0
+module load SciPy-bundle/2024.05-gfbf-2024a
+module load tqdm/4.66.5-GCCcore-13.3.0
 module load anndata/0.10.9-foss-2024a
 module load h5py/3.12.1-foss-2024a
-module load SciPy-bundle/2024.05-gfbf-2024a
+module load Pillow/10.4.0-GCCcore-13.3.0
+module load matplotlib/3.9.2-gfbf-2024a
+export R_LIBS_USER=/rds/projects/a/acharjea-multi-omics/Atharva/R_libs
+export R_MAX_VSIZE=180Gb
 
 export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
@@ -55,14 +63,25 @@ fi
 # Which corpus this vocabulary is for. Its exclude_studies is the one that
 # counts, so point this at the config the runs actually load.
 export CORPUS=${CORPUS:-/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_c1.yaml}
-export EXCLUDE=$(python - <<'PYEOF'
-import os, yaml
-cfg = yaml.safe_load(open(os.environ["CORPUS"])) or {}
-print(" ".join(sorted(cfg.get("exclude_studies") or [])))
-PYEOF
-)
+
+# Derived, never typed, and derived so that a FAILURE STOPS THE BUILD.
+#
+# The first version ran `python - <<EOF` inside $(...), which discards the exit
+# status. PyYAML was missing from the module block above, the traceback went to
+# stderr, EXCLUDE came out empty, and the build used all thirteen studies while
+# printing "Excluding: (nothing)". An exclusion list that cannot be read and a
+# corpus that excludes nothing must never look the same.
+EXCLUDE_FILE=$(mktemp)
+trap 'rm -f "${EXCLUDE_FILE}"' EXIT
+if ! python /rds/homes/a/axw1008/axw1008/src/scripts/corpus_exclusions.py \
+        "${CORPUS}" > "${EXCLUDE_FILE}"; then
+  echo "FATAL: could not read exclude_studies from ${CORPUS}." >&2
+  echo "Refusing to build a vocabulary from an unknown study set." >&2
+  exit 1
+fi
+export EXCLUDE=$(tr '\n' ' ' < "${EXCLUDE_FILE}")
 echo "Corpus ${CORPUS}"
-echo "Excluding: ${EXCLUDE:-(nothing)}"
+echo "Excluding: ${EXCLUDE:-(nothing, and the config says so)}"
 
 # ── Step 1: extract gene union from all processed h5ad files ──────────────
 echo "Extracting gene union from processed studies ..."

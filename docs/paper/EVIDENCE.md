@@ -1,6 +1,6 @@
 # What we have that could go in the paper
 
-Updated 23 September 2026. Every result that exists, what it supports, and
+Updated 24 September 2026. Every result that exists, what it supports, and
 where it came from. A number that is not in this file has no provenance and
 should not appear in a draft.
 
@@ -227,6 +227,10 @@ a priority.
 | labelled validation cells | 91,598 of 201,472 | `c1_ref_tokens` log |
 | labelled cells scored in a sweep | 3,634 of 19,460 | same |
 | gene groups and their sizes | 45, from 253 to 493 genes | `configs/data/vocabulary.json` |
+| genes measured across the corpus | 30,962 | `scripts/audit_vocabulary_coverage.py` |
+| genes in the vocabulary, i.e. assignable to a curated pathway | 15,495 (50.0%) | same |
+| genes wang_2022 alone measures, none of them readable | 1,791 | same |
+| vocabulary rows no corpus study can fill | 10 | same |
 | ELAJ parameter count | 1,873,416 | `sweep_tokens` shape check |
 | group encoder share | 1,144,800 (61%) | 45 × 25,440 |
 | trainable set under an encoder freeze | ~127,000 (7%) | `training/freezing.py` report |

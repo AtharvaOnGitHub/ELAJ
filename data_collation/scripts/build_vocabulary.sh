@@ -12,10 +12,24 @@
 # because the model uses a DNS sentinel for genes not measured in a given
 # study's panel.
 #
-# EXCLUDE must match data.exclude_studies in configs/data/corpus.yaml.  A gene
-# contributed only by an excluded study would sit in the vocabulary as DNS in
-# every study that actually trains — a wasted embedding row and a wasted
-# decoder output.
+# The excluded studies are READ FROM THE CORPUS CONFIG rather than typed here.
+# They used to be typed, and the two drifted: the vocabulary in use was built
+# with wang_2022 excluded while corpus_c1 trains on it, so the 1,791 genes
+# only wang measures have no vocabulary row and are never read. Meanwhile
+# garcia_alonso_2021_c was excluded from the corpus and not from the build.
+# One source of truth removes the whole class of mistake.
+#
+# WHY EXCLUDE AT ALL. A gene contributed only by an excluded study sits in
+# the vocabulary as DNS in every study that actually trains: a wasted
+# embedding row, a wasted decoder output, and a dispersion parameter that
+# never receives a gradient.
+#
+# NOTE the larger filter, which is NOT this one. --drop-unassigned below
+# discards every gene that matched no curated pathway, which is half the
+# transcriptome: 15,495 genes kept of 30,962 measured. That is deliberate,
+# because the group encoder needs every gene to sit in a coherent group,
+# but it means the vocabulary is the pathway-annotated transcriptome and
+# the Methods section has to say so.
 
 module purge
 module load bear-apps/2024a
@@ -29,7 +43,17 @@ source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 export PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
 export GENE_LIST=${PROCESSED}/gene_list.txt
 export VOCAB_OUT=${PROCESSED}/vocabulary.json
-export EXCLUDE="wang_2022 zhang_2022"
+# Which corpus this vocabulary is for. Its exclude_studies is the one that
+# counts, so point this at the config the runs actually load.
+export CORPUS=${CORPUS:-/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_c1.yaml}
+export EXCLUDE=$(python - <<'PYEOF'
+import os, yaml
+cfg = yaml.safe_load(open(os.environ["CORPUS"])) or {}
+print(" ".join(sorted(cfg.get("exclude_studies") or [])))
+PYEOF
+)
+echo "Corpus ${CORPUS}"
+echo "Excluding: ${EXCLUDE:-(nothing)}"
 
 # ── Step 1: extract gene union from all processed h5ad files ──────────────
 echo "Extracting gene union from processed studies ..."

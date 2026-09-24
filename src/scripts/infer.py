@@ -22,6 +22,8 @@ from pathlib import Path
 # See train.py — the script's directory goes on sys.path, not the cwd.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from endo_model.training.batch_device import to_device  # noqa: E402
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -119,7 +121,7 @@ def main() -> None:
 
     with torch.no_grad():
         for batch in loader:
-            batch_dev = _to_device(batch, device)
+            batch_dev = to_device(batch, device)
             out = model(batch_dev)
             for key in args.keys:
                 if key in out:
@@ -143,22 +145,6 @@ def main() -> None:
     logger.info("Saved embeddings to %s", out_path)
     for key, arr in save_dict.items():
         logger.info("  %-20s shape=%s  dtype=%s", key, arr.shape, arr.dtype)
-
-
-def _to_device(batch: dict, device: "torch.device") -> dict:
-    import torch
-    out: dict = {}
-    for k, v in batch.items():
-        if isinstance(v, torch.Tensor):
-            out[k] = v.to(device)
-        elif isinstance(v, dict):
-            out[k] = {
-                kk: (vv.to(device) if isinstance(vv, torch.Tensor) else vv)
-                for kk, vv in v.items()
-            }
-        else:
-            out[k] = v
-    return out
 
 
 if __name__ == "__main__":

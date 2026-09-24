@@ -213,14 +213,14 @@ def main() -> None:
     print(f"\ndevice={device}  mode={'eval' if args.eval_mode else 'train'}  "
           f"batch_size={train_cfg.batch_size}")
 
-    from endo_model.training.trainer import _to_device
+    from endo_model.training.batch_device import to_device
 
     id_to_name = {s["id"]: s["name"] for s in study_configs}
 
     def test(batch, label: str, verbose: bool) -> bool:
         """Run one batch through the hooked model. True if a fault appeared."""
         batch_bad = report_batch(batch, label) if verbose else False
-        moved = _to_device(batch, device)
+        moved = to_device(batch, device)
 
         with NaNGuard(model) as guard, torch.no_grad():
             try:

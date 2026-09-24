@@ -99,13 +99,13 @@ class StageCollector:
         """
         import torch
 
-        from endo_model.training.trainer import _to_device
+        from endo_model.training.batch_device import to_device
 
         parts: dict[str, list[np.ndarray]] = {r.name: [] for r in self.readers}
         model.eval()
         with torch.no_grad():
             for batch in loader:
-                batch = _to_device(batch, device)
+                batch = to_device(batch, device)
                 stages = model.encode_stages(batch)
                 for reader in self.readers:
                     got = reader.read(stages, batch)

@@ -37,10 +37,10 @@ def collect_latents(model, loader, device, collector) -> dict | None:
     # dicts (group_indices, group_dns_mask) and a flat comprehension silently
     # leaves those on the CPU, which fails deep inside the encoder rather than
     # here.
-    from endo_model.training.trainer import _to_device
+    from endo_model.training.batch_device import to_device
 
     with torch.no_grad():
         for batch in loader:
-            moved = _to_device(batch, device)
+            moved = to_device(batch, device)
             collector.add(model(moved), moved)
     return collector.stacked()

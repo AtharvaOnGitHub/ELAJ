@@ -144,7 +144,7 @@ def collect(model, loader, device, order_len: int, reservoir=None,
     # silently leaves them on the CPU and the first embedding lookup dies with
     # "expected all tensors to be on the same device". _to_device recurses one
     # level, which is exactly what the Batch schema needs.
-    from endo_model.training.trainer import _to_device
+    from endo_model.training.batch_device import to_device
 
     mu_gauss, mu_angle, kappa, study = [], [], [], []
     # Collected here because they are BATCH TENSOR fields, not obs columns.
@@ -169,7 +169,7 @@ def collect(model, loader, device, order_len: int, reservoir=None,
             # decoder is conditioned on, which is what makes them controls.
             tissue.append(batch["tissue_levels"][:, 2].cpu().numpy())
             platform.append(batch["platform_codes"][:, 0].cpu().numpy())
-            batch = _to_device(batch, device)
+            batch = to_device(batch, device)
             out = model.encode(batch)
             mu_gauss.append(out["mu_gauss"].float().cpu().numpy())
             mu_angle.append(out["mu_angle"].float().cpu().numpy())

@@ -79,10 +79,11 @@ Measured by `scripts/audit_vocabulary_coverage.py`
 | in the vocabulary | **15,495** (50.0%) |
 | dropped | **15,477** (50.0%) |
 
-**The cause is `--drop-unassigned`**, passed at `build_vocabulary.sh:92`. The
-builder assigns genes to MSigDB Hallmark sets, then to Enrichr supplementary
-libraries, and **discards every gene that matched no pathway**. It is not
-study exclusion: `duempelmann_2026` was in the build and still lost 10,667 of
+**The cause is `emit_vocabulary`**, which drops every gene in no group,
+unconditionally. The build runs `--grouping hierarchical`, where
+`--drop-unassigned` is not even read: the drop is structural. Genes reach a
+group through the Reactome and GO roll-up, and whatever the roll-up does not
+place is gone. It is not study exclusion: `duempelmann_2026` was in the build and still lost 10,667 of
 its 25,225 genes, and per-study coverage runs 58% to 80% across the board.
 
 **This is an architectural requirement, not a defect.** Every gene must belong
@@ -101,27 +102,35 @@ endometriosis-relevant gene outside every curated pathway cannot be modelled.
 gives every baseline the same 15,495 genes (`201,472 cells x 15,495 genes` in
 the sweep log), so PCA, scVI, and scANVI see exactly what ELAJ sees.
 
-**The EXCLUDE mismatch is real and second-order.**
+**The EXCLUDE mismatch is real and its cost is unmeasured.**
 `build_vocabulary.sh` ran with `EXCLUDE="wang_2022 zhang_2022"` while
 corpus_c1 excludes `zhang_2022` and `garcia_alonso_2021_c`. wang_2022 trains
-and contributes 1,791 genes no other corpus study measures, all currently
-unreadable. At the 50% base rate roughly 900 of those would have survived the
-pathway filter, so a corrected build would add about 5% to the vocabulary.
+and contributes 1,791 genes no other corpus study measures.
+
+**1,791 is not the cost.** Half of every study's genes are already absent, so
+the only genes that matter are those that would actually ENTER a rebuilt
+vocabulary, and that depends on the hierarchical roll-up and on
+`UnionCutStrategy(min_size=250, max_size=500, go_groups=4)` deciding which
+nodes become groups at all. Adding genes can change which nodes clear the
+floor, so it can change group membership, group sizes, and the group COUNT,
+which is the model's architecture. A base rate applied to 1,791 is not an
+answer. `scripts/dry_run_vocabulary.py` runs the real builder on the
+corrected gene list and reports the difference. **Pending.**
 
 **Orphaned rows are a non-issue: 10 genes.** `garcia_alonso_2021_c`'s panel is
 almost entirely covered by `_a` and `_b`, so excluding it costs essentially no
 dead embedding rows.
 
-**Recommendation: do not rebuild.** A rebuild renumbers every gene index and
-invalidates every checkpoint from r1 onward, for about 900 genes, while two
-architecture arms are mid-flight and the deadline is 12 October. Fix the
-EXCLUDE line so the next build from scratch is right, state both facts
-accurately in Methods, and move on.
+**The rebuild decision waits on that number**, and the number that decides it
+is not the gene count but whether the group structure moves. A few hundred
+genes with the same 45 groups is a Methods footnote. A changed group count is
+a different model, every checkpoint from r1 invalidated, and the architecture
+claims to re-check.
 
-- [ ] correct `EXCLUDE` in `build_vocabulary.sh` to match `exclude_studies`
+- [x] `EXCLUDE` now derived from the corpus config, so the drift cannot recur
+- [ ] run `scripts/dry_run_vocabulary.py` and decide
 - [ ] Methods: "genes assignable to a curated pathway", with the 15,495 of
       30,962 figure and the database-bias caveat
-- [ ] Limitations: wang_2022's 1,791 exclusive genes are not in the vocabulary
 
 ### 0.3 Tissue was unknown for 111,036 cells (fixed, not yet run)
 

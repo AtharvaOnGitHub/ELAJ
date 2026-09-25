@@ -54,3 +54,4 @@ htmlcov/
 
 # Doc files
 *.docx
+.preview/

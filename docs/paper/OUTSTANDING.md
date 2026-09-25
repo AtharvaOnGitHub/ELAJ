@@ -181,7 +181,39 @@ token change, and that has to be stated wherever the two are compared.
 
 ---
 
-## 1. Blocked on the two running jobs
+## 1. Next, in order
+
+**P1. Launch `v1_combined`.** `c1_combined` settled it: 0.9466 peak family
+against `c1_scale`'s 0.9292, and better reconstruction too. The architecture
+arm is worth its 26 hours.
+
+**P2. A transductive baseline pass on v1.** C5 is the claim that cross-donor
+agreement separates biology from donor identity, and its evidence was scVI's
+phase falling 0.605 to 0.437 when refitted inductively on the r8 corpus. On
+v1, inductive scVI reaches **0.7013**. Without a transductive pass on the same
+corpus there is no comparison to make, and the claim cannot be written. This
+is a two-hour job and it may cost us a claim, which is a reason to run it now
+rather than in October.
+
+**P3. Score both v1 arms** against `v1_baselines` once they land. Until then
+no ELAJ number is comparable to the table in EVIDENCE.md §7.
+
+**P4. The f1 epoch ladder**, once `v1_combined` has a checkpoint.
+
+---
+
+## 1b. Done since 23 September
+
+| | |
+|---|---|
+| vocabulary rebuilt | 15,496 genes, 44 groups, 247 to 493 |
+| `v1_baselines` | PCA, scVI, scANVI, inductive, on the v1 corpus |
+| v1 token sweep | thirteen arms; every c1 conclusion replicates |
+| `c1_scale`, `c1_combined` | both complete on the c1 vocabulary |
+
+---
+
+## 1c. Blocked
 
 `c1_scale` and `c1_combined` launched 23 September, about 28 h each.
 

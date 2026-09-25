@@ -273,17 +273,112 @@ or wang_2022 batch, because they are the same cells.
 
 ---
 
-## 7. Pending
+## 6c. `c1_combined`: the architecture arm, trained
+
+`outputs/C_series/c1_combined`. All 22 epochs, 30.9 h, no early stop.
+
+| | `c1_ref` | `c1_scale` | `c1_combined` |
+|---|---:|---:|---:|
+| peak `val_family_knn` | 0.9183 | 0.9292 | **0.9466** |
+| epoch it peaked | 12 | 6 | 14 |
+| best `val_nb` | 0.3782 | 0.3780 | **0.3732** |
+| `val_family_knn` at epoch 0 | 0.5622 | 0.5791 | **0.8650** |
+| seconds per training epoch | 4,388 | 4,470 | 4,850 |
+
+**Supports:** the architecture claim. The three token changes are worth +0.017
+over log scaling alone and +0.028 over the raw-count reference, and they are
+**not a trade against reconstruction**: `val_nb` is better too, by more than
+either other arm managed. The epoch-0 figure is the clearest single line: a
+single epoch of `c1_combined` already beats `c1_ref`'s best of twenty.
+
+**Cost:** +8.5% per epoch, close to the 10% predicted from the aggregation's
+sequence going from 49 positions to 409.
+
+**Status:** solid as a within-run comparison, **provisional as a number**, on
+the c1 vocabulary and so not quotable beside a v-series figure.
+
+---
+
+## 7. `v1_baselines`: the bar, on the corpus the paper reports
+
+`outputs/v_series/v1_baselines`, job 55185548. All three fitted on the 1.2 M
+training donors and applied to the 382,464 held-out cells. 4.1 h, 166.7 GB of
+256 GB, PCA exact (74.1 GB densified against an 89.6 GB budget).
+
+| | PCA-16 | scVI | scANVI |
+|---|---:|---:|---:|
+| cross-donor cell family | **0.9866** | 0.9822 | 0.9835 |
+| cross-donor menstrual phase | 0.6477 | **0.7013** | 0.6903 |
+| kNN cell family | **0.9897** | 0.9870 | 0.9873 |
+| kNN menstrual phase | 0.8611 | 0.8645 | 0.8662 |
+| kNN patient identity (low is good) | 0.6628 | 0.6488 | 0.6507 |
+
+**This is the number to beat, and it is much higher than the r8 figures the
+plan was written against.** scVI's cross-donor phase is **0.7013 here against
+0.437 on the r8 corpus**. The corpus is not the same one: controls in,
+organoids out, eleven studies, 1.2 M training cells against 785 K, and 74
+query donors. More donors and more data make the baselines better.
+
+**Two consequences, both uncomfortable.**
+
+**C5 no longer has its evidence on this corpus.** The claim that cross-donor
+agreement separates learned biology from learned donor identity rested on
+scVI's phase falling from 0.605 to 0.437 when refitted inductively. Every
+baseline here is inductive, so there is no transductive comparison to make
+that claim from, and the inductive number is now 0.70. A transductive pass on
+the v1 corpus is needed before C5 can be written, and it may not survive.
+
+**ELAJ is still behind on family.** `c1_combined`'s 0.9466 is the training
+loop's within-donor probe, whose nearest counterpart here is kNN cell family
+at 0.9897. Different split and a different chance level (0.673 against 0.694),
+so it is indicative rather than exact, but the gap is roughly 0.04 and it is
+not closed. No ELAJ phase number exists yet at all.
+
+**Status:** solid.
+
+---
+
+## 7b. The token sweep replicates on the v1 vocabulary
+
+`outputs/sweeps/v1_scale_tokens`. Same thirteen arms, 44 groups instead of 45.
+
+| arm, at `groups/concat` | v1 kNN | c1 kNN |
+|---|---:|---:|
+| `base` | 0.687 | 0.691 |
+| `scale` | 0.759 | 0.760 |
+| `genedir` | 0.806 | 0.811 |
+| `pool` | 0.898 | 0.867 |
+| **`combined`** | **0.898** | 0.882 |
+| `pcaW_log`, the width-matched reference | 0.854 | 0.847 |
+| `pca32_log` | 0.957 | 0.955 |
+| `pca32_raw` | 0.854 | 0.858 |
+
+**Supports:** that every conclusion from the c1 sweep holds on the rebuilt
+vocabulary. `combined` beats the width-matched reference by 0.044 here against
+0.035 before, and on the linear probe by 0.989 against 0.949.
+
+**One difference worth noting.** On v1, `pool` and `combined` are
+indistinguishable (0.8976 and 0.8979), where on c1 `combined` was clearly
+ahead. Untrained, the gene directions now add nothing on top of the pooled
+statistics. Trained, `c1_combined` beat `c1_scale` by 0.017, so the untrained
+sweep **understates** what training does with them, exactly as
+`MEASURING_WITHOUT_TRAINING.md` §6.5 predicted it would for an architecture
+with more room to learn.
+
+**Status:** solid.
+
+---
+
+## 8. Pending
 
 | | what it will settle | expected |
 |---|---|---|
-| `c1_combined` | whether §4b survives training | 25 Sep |
 | `f1_epochs_03/05/10` | what budget a frozen run needs | 25 Sep |
 | transferability gate | whether a frozen latent ranking survives a change of encoder | 27 Sep |
 
 ---
 
-## 8. Numbers that recur, with their provenance
+## 9. Numbers that recur, with their provenance
 
 | quantity | value | source |
 |---|---:|---|

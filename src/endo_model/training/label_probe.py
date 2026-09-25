@@ -42,6 +42,21 @@ Given patient ids this probe reports both halves and their difference:
 The two bounds bracket the truth; the drop and patient_knn say whether the
 gap between them is the model's fault.
 
+TWO CAVEATS ON THE DROP, both in docs/paper/SCOREBOARD.md §1.
+
+This probe uses the SAME k for both bounds, where the benchmark uses k=30
+within and k=100 across (`BaselineSettings.k_cross_donor`, sized so that
+discarding same-donor neighbours still leaves something to average). So this
+cross-donor number will not match the benchmark's, and should be read for
+direction within a run rather than quoted. score_arm.sh is the authority.
+
+And the drop is comparable ACROSS METHODS for one label, never ACROSS LABELS.
+Each donor contributes one menstrual phase, so within-donor neighbours match
+on phase by construction and the within-donor test has a shortcut the
+cross-donor test removes; a donor contributes many cell families, so no such
+shortcut exists there. That produces a large phase drop and a tiny family drop
+for every method, whatever the representation does.
+
 The labels arrive aligned to the validation loader's sampler order, because
 that is the order the latents are collected in; the caller builds them from
 the dataset's `extra_obs` over `sampler_order(loader)`.

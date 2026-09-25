@@ -54,60 +54,86 @@ the benchmark is the number quoted.
 
 ---
 
-## 2. The main table: the v1 corpus
+## 2. The main table
 
-`outputs/v_series/v1_baselines`, job 55185548. All inductive: fitted on the
-1,195,264 training donors, applied to 382,464 held-out cells. ELAJ is not yet
-scored on this corpus.
+Baselines from `outputs/v_series/v1_baselines` (v1 corpus, inductive, fitted on
+1,195,264 training donors, applied to 382,464 held-out cells). ELAJ from
+`outputs/C_series/c1_combined/validation`, job 55238504, on the **c1**
+vocabulary: same cells, same donors, same scorer, eleven genes and one group
+apart. Treat the ELAJ column as accurate to about that much.
 
-Arrows mark the direction that is good.
+| | | PCA-16 | scVI | scANVI | **ELAJ** |
+|---|---|---:|---:|---:|---:|
+| **Cell family** | kNN, k=30 ↑ | **0.9897** | 0.9870 | 0.9873 | 0.9506 |
+| | cross-donor, k=100 ↑ | **0.9866** | 0.9822 | 0.9835 | 0.9115 |
+| | drop ↓ | **0.0031** | 0.0048 | 0.0038 | 0.0391 |
+| | neighbours kept of 100 | 51 | 50 | 49 | **67** |
+| **Menstrual phase** | kNN, k=30 ↑ | 0.8611 | 0.8645 | **0.8662** | 0.7002 |
+| | cross-donor, k=100 ↑ | 0.6477 | **0.7013** | 0.6903 | 0.5413 |
+| | drop ↓ | 0.2134 | 0.1632 | 0.1759 | **0.1589** |
+| | neighbours kept of 100 | 50 | 49 | 47 | **66** |
+| **Other biology** | cell cycle phase, kNN ↑ | 0.4435 | **0.4612** | 0.4581 | 0.5854 * |
+| | fine cell type, kNN ↑ | 0.5091 | 0.5303 | **0.5323** | 0.4426 |
+| | disease stage, cross-donor ↑ | 0.1317 | 0.3317 | **0.3390** | 0.0976 |
+| | disease grade, cross-donor ↑ | **−0.0077** | −0.0548 | −0.0568 | −0.0641 |
+| **Donor identity** | patient kNN ↓ | 0.6628 | 0.6488 | 0.6507 | **0.3674** |
+| **Study mixing** | kBET ↑ | 0.0000 | 0.0189 | **0.0250** | *pending* |
+| | silhouette batch ↑ | 0.4943 | 0.8497 | **0.8647** | *pending* |
+| | graph connectivity ↑ | 0.7244 | 0.9842 | **0.9845** | 0.9505 |
+| | PC regression ↑ | 0.5711 | 0.9181 | 0.9302 | **1.0000** |
+| **Biology, scIB** | cLISI ↑ | 1.0000 | 1.0000 | 1.0000 | **1.0000** |
+| | silhouette bio ↑ | 0.6199 | 0.6339 | **0.6454** | 0.5441 |
+| | isolated labels ↑ | 0.6165 | 0.6107 | **0.6299** | 0.5443 |
+| | NMI ↑ | 0.2413 | 0.4358 | **0.4545** | 0.0159 |
+| | ARI ↑ | 0.1968 | **0.3438** | 0.3407 | 0.0005 |
 
-| | | PCA-16 | scVI | scANVI | **ELAJ** | cells |
-|---|---|---:|---:|---:|---:|---:|
-| **Cell family** | kNN, k=30 ↑ | **0.9897** | 0.9870 | 0.9873 | *not scored* | 176,803 |
-| | cross-donor, k=100 ↑ | **0.9866** | 0.9822 | 0.9835 | *not scored* | 154,526 |
-| | drop ↓ | 0.0031 | 0.0048 | 0.0038 | *not scored* | |
-| **Menstrual phase** | kNN, k=30 ↑ | 0.8611 | 0.8645 | **0.8662** | *not scored* | 190,419 |
-| | cross-donor, k=100 ↑ | 0.6477 | **0.7013** | 0.6903 | *not scored* | 161,597 |
-| | drop ↓ | 0.2134 | **0.1632** | 0.1759 | *not scored* | |
-| **Cell cycle phase** | kNN, k=30 ↑ | 0.4435 | **0.4612** | 0.4581 | *not scored* | 74,496 |
-| **Fine cell type** | kNN, k=30 ↑ | 0.5091 | 0.5303 | **0.5323** | *not scored* | 132,261 |
-| **Disease stage** | cross-donor, k=100 ↑ | 0.1317 | 0.3317 | **0.3390** | *not scored* | 29,167 |
-| **Disease grade** | cross-donor, k=100 ↑ | **-0.0077** | -0.0548 | -0.0568 | *not scored* | 125,444 |
-| **Donor identity** | kNN, k=30 ↓ | 0.6628 | **0.6488** | 0.6507 | *not scored* | 382,464 |
-| **Study mixing** | iLISI ↑ | 0.0000 | 0.0000 | 0.0000 | *not scored* | 176,803 |
-| | kBET ↑ | 0.0000 | 0.0189 | **0.0250** | *not scored* | |
-| | silhouette batch ↑ | 0.4943 | 0.8497 | **0.8647** | *not scored* | |
-| | graph connectivity ↑ | 0.7244 | 0.9842 | **0.9845** | *not scored* | |
-| | PC regression ↑ | 0.5711 | 0.9181 | **0.9302** | *not scored* | |
-| **Biology, scIB** | cLISI ↑ | 1.0000 | 1.0000 | 1.0000 | *not scored* | 176,803 |
-| | silhouette bio ↑ | 0.6199 | 0.6339 | **0.6454** | *not scored* | |
-| | isolated labels ↑ | 0.6165 | 0.6107 | **0.6299** | *not scored* | |
-| | NMI ↑ | 0.2413 | 0.4358 | **0.4545** | *not scored* | |
-| | ARI ↑ | 0.1968 | **0.3438** | 0.3407 | *not scored* | |
+\* ELAJ's cell-cycle row is on a different label set (3 labels against the
+baselines' 3 on different cells), so it is indicative rather than a
+head-to-head. scANVI is supervised on cell family, so its family rows are not
+a fair comparison either.
 
-scANVI is supervised on cell family, so its family rows are not a fair
-comparison. Its phase and donor rows are.
+### What the column says
 
-**Disease grade is negative for every method**, which means no method places
-cells of the same grade near each other across donors any better than chance.
-Nobody can currently do this task.
+**ELAJ loses on biology and wins donor-blindness by a wide margin.**
 
-### Where the contest is
+Patient identity, **0.3674 against 0.6488 to 0.6628**. The baselines encode
+who the cell came from roughly twice as strongly. That is the one column ELAJ
+has ever won and it is still the clearest result in the table.
 
-**Not cell family.** Every baseline is above 0.98 and transfers almost
-perfectly. There is no room to win.
+**It keeps far more neighbours.** 67 of 100 survive the same-donor exclusion
+against the baselines' 49 to 51, which is the same fact seen from the other
+side: their nearest neighbours are their own donor's, ELAJ's are not.
 
-**Menstrual phase.** Every method loses 0.16 to 0.21 moving to an unseen
-donor. scVI transfers it best and is the number to beat.
+**Phase transfers best, proportionally.** ELAJ's drop of 0.1589 is the
+smallest in the table, below scVI's 0.1632. It starts 0.16 lower and loses
+less, which is consistent with a representation that never leaned on donor in
+the first place.
 
-**Donor identity.** All three baselines sit at 0.65, heavily encoding who the
-cell came from. **This is the column ELAJ has won before**: `r8_direction`
-scored 0.24 against their 0.69 to 0.82. The clearest opening.
+**Family is the weak spot.** A drop of 0.0391 against 0.0031 to 0.0048: ten
+times more of ELAJ's family signal fails to cross to a new donor. It is the
+one place ELAJ's drop is worst.
 
-**Study mixing.** PCA has no batch correction and shows it (kBET 0.000,
-PC regression 0.571). scVI and scANVI correct hard. ELAJ's DSBN and optional
-adversarial term put it in this contest, and it is unmeasured.
+**NMI 0.0159 and ARI 0.0005 are near zero.** Leiden clustering of ELAJ's
+latent does not recover the annotated cell types at all, where scANVI reaches
+0.45 and 0.34. The neighbourhoods carry family (cross-donor 0.91) but do not
+partition into it. Worth understanding before the paper claims the latent is
+usable for cell typing.
+
+**PC regression 1.0** means study identity explains none of the variance in
+the principal components, against scVI's 0.918 and PCA's 0.571. Same story as
+patient kNN.
+
+### The trend, and what it costs
+
+| | cross-donor family ↑ | patient kNN ↓ |
+|---|---:|---:|
+| r8_direction | 0.75 | **0.24** |
+| c1_combined | **0.9115** | 0.3674 |
+
+Family gained 0.16 and donor-blindness gave up 0.13. **ELAJ is moving along
+the same trade-off the baselines sit on**, from a much more donor-blind
+starting point. Whether the next arm can gain biology without spending more of
+that lead is the question the campaign now turns on.
 
 ---
 

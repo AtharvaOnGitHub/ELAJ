@@ -4,7 +4,8 @@ Updated 24 September 2026. Every result that exists, what it supports, and
 where it came from. A number that is not in this file has no provenance and
 should not appear in a draft.
 
-Companions: [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md) for the claims and
+Companions: [`SCOREBOARD.md`](SCOREBOARD.md) for the head-to-head table,
+[`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md) for the claims and
 schedule, [`OUTSTANDING.md`](OUTSTANDING.md) for what is left,
 [`MEASURING_WITHOUT_TRAINING.md`](MEASURING_WITHOUT_TRAINING.md) for why these
 measurements are valid and what they cannot support.

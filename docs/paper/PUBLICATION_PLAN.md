@@ -3,7 +3,10 @@
 Working document. Started 10 September 2026; rewritten 14 September 2026 after
 the baseline benchmark and the decision to target Nature Machine Intelligence.
 
-**Companions.** [`EVIDENCE.md`](EVIDENCE.md) lists every result that
+**Companions.** [`SCOREBOARD.md`](SCOREBOARD.md) is the live table of ELAJ
+against the baselines, organised around the only two questions that matter
+after a run: has the baseline moved, and has ELAJ improved.
+[`EVIDENCE.md`](EVIDENCE.md) lists every result that
 exists, what it supports, and where it came from: a number not in that
 file has no provenance and should not appear in a draft.
 [`OUTSTANDING.md`](OUTSTANDING.md) lists what is left, by part of the

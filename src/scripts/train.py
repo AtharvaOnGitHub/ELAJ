@@ -204,10 +204,16 @@ def main() -> None:
     # ── Label probe: cell family on the validation latent, every epoch ──────
     # Labels are aligned to the validation sampler's order, which is fixed
     # (shuffle=False), so the latents collected in `_val_epoch` line up.
-    from endo_model.training.label_probe import LabelProbe, family_labels_in_order
+    from endo_model.training.label_probe import (
+        LabelProbe, family_labels_in_order, patients_in_order,
+    )
     val_order = [i for batch in val_sampler for i in batch]
+    # Donor ids as well as labels, so every epoch reports both bounds on the
+    # biology (with and without same-donor neighbours), the drop between
+    # them, and donor identity itself. See training/label_probe.py.
     label_probe = LabelProbe(family_labels_in_order(val_dataset, val_order),
-                             k=30, seed=exp_cfg.seed)
+                             k=30, seed=exp_cfg.seed,
+                             patients=patients_in_order(val_dataset, val_order))
     if label_probe.n_labelled == 0:
         logger.warning("No validation cell carries a family label; the probe "
                        "will report NaN and stop_metric falls back to nb")

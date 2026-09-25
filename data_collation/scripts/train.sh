@@ -16,7 +16,15 @@
 
 # Trains ELAJ from an experiment YAML.
 #
-#   sbatch data_collation/scripts/train.sh configs/experiment/first_run.yaml
+#   sbatch data_collation/scripts/train.sh v1_combined
+#   sbatch data_collation/scripts/train.sh configs/experiment/v1_combined.yaml
+#   sbatch data_collation/scripts/train.sh src/configs/experiment/v1_combined.yaml
+#
+# All three work. The bare arm name is the short form; the two paths are
+# what you get from tab completion at the repo root and from `cd src` -- this
+# script cds to src itself and passes --root ., so a repo-root path used to
+# fail with a FileNotFoundError naming a file that plainly exists, which is
+# a wasted queue slot for a path prefix.
 #
 # Defaults to first_run.yaml, which is full_model with batch_size 128.
 #
@@ -77,6 +85,22 @@ export PYTHONNOUSERSITE=1
 source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
 cd /rds/homes/a/axw1008/axw1008/src
+
+# Resolve the config against src, accepting an arm name, a src-relative
+# path, or a repo-root path. Checked here, after the cd, so the error names
+# every form that was tried rather than only the one that was typed.
+for candidate in "${CONFIG}" "configs/experiment/${CONFIG}.yaml" \
+                 "configs/experiment/${CONFIG}" "../${CONFIG}"; do
+    if [ -f "${candidate}" ]; then CONFIG="${candidate}"; break; fi
+done
+if [ ! -f "${CONFIG}" ]; then
+    echo "No experiment config found for '${1:-}'. Tried, from $(pwd):" >&2
+    echo "  ${1:-}" >&2
+    echo "  configs/experiment/${1:-}.yaml" >&2
+    echo "  configs/experiment/${1:-}" >&2
+    echo "  ../${1:-}" >&2
+    exit 2
+fi
 
 nvidia-smi
 echo ""

@@ -379,7 +379,7 @@ floor dominates, so the number format is not the bottleneck. Parked.
 **Super-group encoders.** An abstract grouping of the 45 groups into a few
 super-groups before the cell summary. Held because the `n_cls` sweep showed
 the aggregation is not where the loss is, and the token sweep found the cause
-elsewhere. Revisit only if `c1_combined`'s 405 summary tokens choke the
+elsewhere. Revisit only if `c1_combined`'s 396 summary tokens choke the
 aggregation.
 
 **A free direction vector per gene (`gene_table`).** 495,776 parameters and

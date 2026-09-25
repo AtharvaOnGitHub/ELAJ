@@ -205,13 +205,34 @@ def _tissue_level_matrix(obs, study_name: str, hierarchy=None) -> np.ndarray:
     return matrix
 
 
-def _age_vector(obs) -> np.ndarray:
-    """Per-cell age as float64, NaN where missing or non-numeric."""
+def _age_vector(obs, study_name: str = "?") -> np.ndarray:
+    """Per-cell age as float64, NaN where missing or non-numeric.
+
+    Coverage is logged because an all-NaN age is INVISIBLE downstream:
+    `AgeEncoder` maps NaN to a zero vector, so the metadata token the
+    aggregation encoder reads becomes a constant for every cell. The model
+    trains, nothing warns, and one of the 398 sequence positions carries
+    nothing. No study in datasets.yaml supplies an age mapping, so this is the
+    likely state and it should be visible in the log rather than inferred from
+    the source.
+    """
     import pandas as pd
 
     if "age" not in obs.columns:
+        logger.info("Study %r: no 'age' column; the metadata token is a "
+                    "constant for all %d cells", study_name, len(obs))
         return np.full(len(obs), np.nan, dtype=np.float64)
-    return pd.to_numeric(obs["age"], errors="coerce").to_numpy(dtype=np.float64)
+    ages = pd.to_numeric(obs["age"], errors="coerce").to_numpy(dtype=np.float64)
+    known = int(np.isfinite(ages).sum())
+    if known == 0:
+        logger.info("Study %r: 'age' is present but empty for all %d cells; "
+                    "the metadata token is a constant", study_name, len(ages))
+    else:
+        logger.info("Study %r: age known for %d of %d cells (%.1f%%), "
+                    "range %.0f to %.0f", study_name, known, len(ages),
+                    100 * known / len(ages),
+                    float(np.nanmin(ages)), float(np.nanmax(ages)))
+    return ages
 
 
 def _uncategorise(column):
@@ -468,7 +489,7 @@ def load_corpus(
             study_id=study_id, name=name, adata=adata, patients=patients,
             tissue=_tissue_level_matrix(adata.obs, name, tissue_hierarchy),
             platform=_platform_code_matrix(adata.obs, name, platform),
-            age=_age_vector(adata.obs),
+            age=_age_vector(adata.obs, name),
             disease=_disease_status_codes(adata.obs, name),
         ))
 

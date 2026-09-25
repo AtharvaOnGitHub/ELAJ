@@ -49,7 +49,7 @@ description: >
 
   THE RISK THIS RUN CARRIES. Each group now hands on nine summary tokens
   instead of one, so the aggregation encoder's sequence goes from 49
-  positions to 409 and it must summarise 405 group tokens into one 64-number
+  positions to 398 and it must summarise 396 group tokens into one 64-number
   cell vector. Untrained, that dilutes: this arm's latent scored 0.472
   against c1_scale's 0.569 even though its group output is far better. An
   untrained aggregation has learned to select nothing, so this is not

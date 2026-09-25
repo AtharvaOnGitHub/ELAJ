@@ -293,7 +293,7 @@ either other arm managed. The epoch-0 figure is the clearest single line: a
 single epoch of `c1_combined` already beats `c1_ref`'s best of twenty.
 
 **Cost:** +8.5% per epoch, close to the 10% predicted from the aggregation's
-sequence going from 49 positions to 409.
+sequence going from 46 positions to 398.
 
 **Status:** solid as a within-run comparison, **provisional as a number**, on
 the c1 vocabulary and so not quotable beside a v-series figure.

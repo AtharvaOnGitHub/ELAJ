@@ -23,7 +23,7 @@ description: >
   which adds gene-specific count directions and a pooled readout on top. If
   c1_combined wins, the difference between the two says how much of the win
   was preprocessing rather than architecture, which is a question a reviewer
-  will ask. If c1_combined's aggregation chokes on its 405 summary tokens
+  will ask. If c1_combined's aggregation chokes on its 396 summary tokens
   per cell, this is the working fallback.
 
   Everything else is c1_ref exactly: same corpus, same seed, same epoch

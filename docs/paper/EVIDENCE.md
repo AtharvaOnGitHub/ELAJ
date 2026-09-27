@@ -580,33 +580,90 @@ cells, not a question this sweep answers.
 
 ---
 
-## 7g. The group sweep: incomplete, and how it failed
+## 7g. The group sweep: nothing on this level moves the funnel
 
-`outputs/sweeps/v1_combined_group`, job 55396737. **CUDA OOM on the third arm**,
-`grp_heads16`, asking for 8.88 GiB in one allocation. Two arms completed:
+`outputs/sweeps/v1_combines_group_new`, job 55412735, untrained, batch 64,
+19,972 cells of which 3,636 carry a family label. The first attempt, job
+55396737, died of CUDA OOM on `grp_heads16`; see the note at the end.
 
-| arm | groups/concat | cell_cls | latent |
-|---|---:|---:|---:|
-| `base` | 0.8953 | 0.5223 | 0.4171 |
-| `grp_heads8` | 0.8951 | 0.5216 | 0.4200 |
+| arm | groups/concat | cell_cls | latent | params |
+|---|---:|---:|---:|---:|
+| `base` | 0.9015 | 0.5245 | 0.4213 | 1,844,745 |
+| `grp_heads8` | 0.9016 | 0.5226 | 0.4229 | 1,844,745 |
+| `grp_heads16` | 0.9016 | 0.5195 | 0.4192 | 1,844,745 |
+| **`grp_depth1`** | 0.9012 | 0.5095 | **0.4223** | **1,285,769** |
+| `grp_pool4` | 0.9022 | **0.5312** | **0.4474** | 1,844,745 |
+| `grp_pool16` | 0.8548 | 0.5009 | 0.4022 | 1,844,745 |
 
-**The head split does nothing at group level**, within 0.001 on every stage.
+**Nothing here is worth a training run on its own.** The best arm, `grp_pool4`,
+is +0.0067 at the cell summary against `agg_pool`'s +0.2280 (§7f). The
+producer is not the constraint; the consumer is.
 
-The failure is worth recording because the arm's own description asserted the
-opposite. Head count is free in parameters and free in arithmetic: QKV is
-`d_token` to `3*d_token` whatever the split, and QK^T costs
-`batch * L * L * d_model` however it is divided. It is **not** free in
-activation memory. The score tensor is `(batch, heads, L, L)` and its size does
-not depend on `d_head`, so sixteen heads materialise four times what four do.
-At batch 256 over a 494-padded bucket, that exceeds an 80 GB card.
+**The head split is closed, at both levels.** −0.0019 at eight heads and
+−0.0050 at sixteen, against +0.0105 for eight aggregation heads. Three splits
+of the same width, nothing to choose between them. This also settles the
+question that prompted the arm: heads cost nothing in parameters or arithmetic
+and buy nothing either.
 
-The shape check missed it because it runs at batch 2, which is the right size
-for a shape check and the wrong size for a memory check. `--batch-size` now
-exists for the rerun.
+**The second group block is doing almost nothing, and it is 30% of the model.**
+`grp_depth1` leaves the group output where it was, 0.9012 against 0.9015, and
+the latent where it was, 0.4223 against 0.4213. It costs 0.0150 at the cell
+summary and saves **558,976 parameters**. Untrained, so depth may earn its keep
+once trained, but the prior is not good: the r8 stage probe found training the
+group encoders was worth **−0.02**, a trained encoder scoring below a random
+one at that point (§2).
 
-**Incidentally it confirms batch-independence.** `base` reads 0.5223 here and
-0.522 on the other card in a separate job, so the two families share a control
-and the rerun at a smaller batch is comparable to both.
+**pool8 has saturated at group level.** `grp_pool16` is worse everywhere,
+including at the group output itself. Seventeen statistics per group are worse
+than nine, so the readout that was worth +0.211 does not keep paying.
+
+*The group-output column is confounded and the other two are not.* The
+interface width changes with the operator count — 7,040, 12,672 and 23,936 —
+and wider representations score worse on neighbour agreement for reasons that
+are not information (§5). But `cell_cls` is 64 wide and the latent 16 wide
+whatever the interface, and both give the same ranking: `pool4` above `base`
+above `pool16`. The effect survives the confound where it matters.
+
+**One direction runs through both families: fewer positions to summarise is
+better.** 221 beats 397 beats 749 through a fixed bottleneck, and order
+statistics beat an average over any of them. Both are the same statement about
+what an attention-weighted average does to several hundred tokens.
+
+**Status:** solid as an untrained architecture reading, with the depth result
+flagged as the one most likely to change under training.
+
+### The batch size changed the sample, not the model
+
+The rerun dropped the batch from 256 to 64 to fit `grp_heads16`. `base` moved
+0.8953 → 0.9015 at the group output, 0.5223 → 0.5245 at the cell summary, and
+0.4171 → 0.4213 at the latent.
+
+The claim that untrained scoring is batch-independent was right about the model
+and wrong about the sample. The model is in eval mode, so DSBN uses running
+statistics and computes the same thing at any batch size. But the loader drops
+incomplete per-study batches, and a larger batch drops more: the corpus was
+**186,880 cells at batch 256 and 187,840 at batch 64**. The seeded subsample
+takes row indices into that corpus, so a different corpus length selects
+different rows. Both jobs scored 19,972 cells with 3,636 labels; they were not
+the same 19,972.
+
+**Consequence:** within a family every arm shares one sample and the
+comparisons are exact. Across the two families there is an offset of 0.002 to
+0.006, which is the noise floor on 3,636 labelled cells and is two orders of
+magnitude below the effect in §7f. Do not quote a cross-family difference
+smaller than 0.01.
+
+### Why the first attempt died
+
+`grp_heads16` asked for 8.88 GiB in one allocation. Head count is free in
+parameters and free in arithmetic — QKV is `d_token` to `3*d_token` whatever
+the split, and QK^T costs `batch * L * L * d_model` however it is divided — but
+it is **not** free in activation memory. The score tensor is
+`(batch, heads, L, L)` and its size does not depend on `d_head`, so sixteen
+heads materialise four times what four do. At batch 256 over a 494-padded
+bucket that exceeds an 80 GB card. The shape check missed it because it runs at
+batch 2, which is the right size for a shape check and the wrong size for a
+memory check.
 
 ---
 

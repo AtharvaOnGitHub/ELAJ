@@ -524,6 +524,92 @@ so, which is what `data/split_fingerprint.py` now enforces.
 
 ---
 
+## 7f. The aggregation sweep: the funnel is the readout, not the capacity
+
+`outputs/sweeps/v1_combined_aggregation`, job 55396736, untrained, 20,000
+cells, k=30. Six arms varying the aggregation encoder from `v1_combined`.
+
+Every arm hands the aggregation the same thing, so `groups/concat` reads 0.895
+in all six and the only quantity that moves is how much of it survives.
+
+| arm | cell_cls | funnel ↓ | latent | added params | gain per 100k params |
+|---|---:|---:|---:|---:|---:|
+| `base` | 0.522 | 0.373 | 0.417 | — | — |
+| **`agg_pool`** | **0.750** | **0.145** | 0.653 | **36,864** | **0.62** |
+| `agg_wide` | 0.592 | 0.304 | 0.468 | 309,952 | 0.02 |
+| `agg_pool_wide` | **0.803** | **0.092** | **0.689** | 457,408 | 0.06 |
+| `agg_deep` | 0.522 | 0.373 | 0.443 | 49,984 | 0.00 |
+| `agg_heads8` | 0.533 | 0.362 | 0.397 | 0 | — |
+
+**Order statistics at cell level close most of the funnel.** `agg_pool` takes
+the drop from 0.373 to 0.145, recovering 61% of what was being lost, for 36,864
+parameters, which is 2% more model. It is the same remedy that was worth +0.211
+one level down, applied one level up, and it works for the same reason: the
+cell summary token is an attention-weighted average of 396 positions, and an
+average over 396 things destroys variation whatever weights it uses.
+
+**Capacity is not the constraint.** `agg_wide` doubles `d_agg` for 309,952
+parameters and buys 0.070, less than a third of what pooling buys at a
+twenty-fifth of the cost. Per 100,000 parameters, pooling is **27 times** more
+efficient than width.
+
+**Depth does nothing at all**, 0.522 to 0.522. A third round of mixing is a
+third round of averaging, so the arm that adds one is the cleanest statement of
+what the problem is not.
+
+**Head count does nothing either**, +0.011 for free. Together with `grp_heads8`
+at −0.001 one level down, the head split is closed on both levels.
+
+**Width and pooling are close to additive.** 0.070 + 0.228 predicts 0.298
+against 0.281 observed, so `agg_pool_wide` is the two effects with a little
+overlap rather than a new one. It is the best arm and it costs 457,408
+parameters, 25% more model, for 0.053 over `agg_pool` alone.
+
+**The second funnel is untouched and roughly constant.** cell_cls to latent
+loses 0.105, 0.097, 0.114 and 0.124 across the arms. That is the 64 to 16
+projection, which is random here, and nothing in this family addresses it.
+
+**Status:** solid as an untrained architecture reading. It ranks what the
+architecture can carry, not what training will make of it; the caveat and its
+licence are in `MEASURING_WITHOUT_TRAINING.md` §6.
+
+**What it decides.** `agg_pool` goes into the next training arm on its own
+merits. `agg_pool_wide` is the version to take if the parameter budget allows,
+and that is a judgement about 457,000 parameters against 1.58 million training
+cells, not a question this sweep answers.
+
+---
+
+## 7g. The group sweep: incomplete, and how it failed
+
+`outputs/sweeps/v1_combined_group`, job 55396737. **CUDA OOM on the third arm**,
+`grp_heads16`, asking for 8.88 GiB in one allocation. Two arms completed:
+
+| arm | groups/concat | cell_cls | latent |
+|---|---:|---:|---:|
+| `base` | 0.8953 | 0.5223 | 0.4171 |
+| `grp_heads8` | 0.8951 | 0.5216 | 0.4200 |
+
+**The head split does nothing at group level**, within 0.001 on every stage.
+
+The failure is worth recording because the arm's own description asserted the
+opposite. Head count is free in parameters and free in arithmetic: QKV is
+`d_token` to `3*d_token` whatever the split, and QK^T costs
+`batch * L * L * d_model` however it is divided. It is **not** free in
+activation memory. The score tensor is `(batch, heads, L, L)` and its size does
+not depend on `d_head`, so sixteen heads materialise four times what four do.
+At batch 256 over a 494-padded bucket, that exceeds an 80 GB card.
+
+The shape check missed it because it runs at batch 2, which is the right size
+for a shape check and the wrong size for a memory check. `--batch-size` now
+exists for the rerun.
+
+**Incidentally it confirms batch-independence.** `base` reads 0.5223 here and
+0.522 on the other card in a separate job, so the two families share a control
+and the rerun at a smaller batch is comparable to both.
+
+---
+
 ## 8. Pending
 
 | | what it will settle | expected |

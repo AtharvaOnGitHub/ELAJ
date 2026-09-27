@@ -1,0 +1,121 @@
+name: v1_pool
+description: >
+  THE FUNNEL ARM. c1_combined's architecture with order statistics added at
+  the CELL level, a latent of 32 Gaussian dimensions instead of 16, DAB turned
+  on, and CCE weighted up. Read against v1_baselines, not against any earlier
+  ELAJ run.
+
+  WHY THIS ARM EXISTS. Two measurements said the same thing from opposite
+  ends. Untrained, the token changes were worth +0.211 at the group outputs
+  and only +0.066 by the cell summary. Trained, the per-group PCA of the input
+  reaches cross-donor cell-family agreement of 0.944 where the latent keeps
+  0.9115. Both locate the loss in the funnel from 396 group tokens into 64
+  numbers, not in the encoder failing to find structure.
+
+  THE AGGREGATION SWEEP (outputs/sweeps/v1_combined_aggregation, untrained,
+  cell-family agreement at the cell summary):
+
+      base            the funnel as it stands                 0.522
+      agg_pool        order statistics over the group tokens  0.750   +36,864
+      agg_wide        d_agg 64 -> 128                         0.592  +309,952
+      agg_pool_wide   both                                    0.803  +457,408
+      agg_deep        3 aggregation layers                    0.522   +49,984
+      agg_heads8      8 heads of 8 instead of 4 of 16         0.533        +0
+
+  Pooling recovers 61% of what the funnel was losing for 2% more model.
+  Doubling d_agg buys a third as much for eight times the cost. A third layer
+  buys nothing at all, which is the cleanest statement of what the problem is
+  not: more mixing is more averaging.
+
+  WHY NOT d_agg 128 DESPITE IT SCORING HIGHER. The aggregation projects each
+  group token from d_token=32 to d_agg with `nn.Linear(32, d_agg, bias=False)`
+  (encoders/aggregation.py:72). A linear map cannot raise rank, so each token's
+  image spans at most 32 dimensions however wide d_agg is; widening it gives
+  the transformer more room to compute but hands it nothing new to compute
+  with. The sweep's +0.069 is that extra room, and 309,952 parameters is a
+  high price for it when the readout is the actual constraint.
+
+  THE GROUP SWEEP CLOSED THE OTHER LEVEL (outputs/sweeps/v1_combines_group_new).
+  Head splits of 4x8, 8x4 and 16x2 lie within 0.005 of each other. Seventeen
+  pooled statistics per group are worse than nine, everywhere, so the group
+  readout has saturated. Nothing on that level is worth a training run.
+
+  d_gauss 16 -> 32. The latent now carries three claims at once: everything
+  biological, minus whatever DAB deletes, and stable under CCE's two dropout
+  views. Sixteen dimensions is what is left AFTER an adversary takes directions
+  away, and that is too few. PCA-16 reaches cross-donor family 0.9866 in
+  sixteen, but with no adversary and no prior pulling it to the origin. 32 is
+  also this model config's own default; the runs to date overrode it down.
+
+  Note the interaction: free_bits is per dimension, so 0.25 over 32 dimensions
+  is an 8-nat floor where 16 dimensions gave 4. The KL term is weaker here
+  than the number alone suggests.
+
+  DAB at 0.01 and CCE at 0.05. Both shape the latent and neither can be ranked
+  without training, so they go in on judgement rather than on a sweep. DAB is
+  the one to watch: donor-blindness is the one column ELAJ already wins by a
+  factor of two, and the r8-to-c1 trend shows family and donor-blindness
+  trading against each other, so this may cost cell family. cce.every stays at
+  4: the second encoder pass is the expensive part and this run needs to reach
+  twenty epochs, not eight.
+
+  PARAMETERS. About 1,884,713 against base's 1,844,745, so +2.2%. CHECK THE
+  FIRST LINE OF THE TRAINING LOG. If it is not close to that figure the arm is
+  not what this file describes and the run should be killed.
+
+  EPOCH BUDGET. Expect roughly 5,500 s an epoch, as c1_combined did, since the
+  pooling operators hold no parameters and the merge is one 576x64 matmul per
+  cell. Twenty-two epochs is about 34 h against a 48 h wall.
+
+  THE PROBE IS FIXED. val_family_knn scores all 91,598 labelled cells again;
+  it was capped at 20,000 for v1_combined, which lowered it, made it noisy, and
+  early-stopped that run at epoch 8 of 22 on a spike. Checkpoints carry a split
+  fingerprint, so this arm cannot be scored against a split it did not train
+  on.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/v_series_runs/v1_pool/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # On, at the low end of the range worth trying. See the caveat above.
+  model.dab.lambda_dab: 0.01
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.05
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  # Room for DAB to delete directions without taking the biology with them.
+  model.d_gauss: 32
+  model.n_circular: 0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  # The token changes, unchanged from v1_combined.
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+
+  # THE CHANGE THIS ARM IS FOR. Order statistics over the group tokens beside
+  # the cell summary token, merged back to d_agg. See encoders/cell_readout.py.
+  model.aggregation_encoder.readout: cls+pool8

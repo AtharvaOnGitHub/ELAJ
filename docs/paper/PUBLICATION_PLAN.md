@@ -2,6 +2,9 @@
 
 Working document. Started 10 September 2026; rewritten 14 September 2026 after
 the baseline benchmark and the decision to target Nature Machine Intelligence.
+**Status and schedule brought current 27 September 2026: see §1.1b for where the
+work stands and §11.2 for the calendar. §1.1 and §11.1 are kept as the record of
+what was planned.**
 
 **Companions.** [`SCOREBOARD.md`](SCOREBOARD.md) is the live table of ELAJ
 against the baselines, organised around the only two questions that matter
@@ -77,6 +80,45 @@ quoted in the paper:
   already beats ELAJ, so width is not the explanation, but the widths must
   be matched or stated.
 
+### 1.1b Status, 27 September 2026 (15 days to the deadline)
+
+This supersedes §1.1, which is the 11 September benchmark on a corpus the paper
+no longer uses. Read this first.
+
+**What is established and will go in the paper**
+
+| | the result | where |
+|---|---|---|
+| the diagnosis chain | probe → n_cls → token sweep located the loss in the group encoders and named its cause | EVIDENCE §2 to §4 |
+| the token fix | +0.028 cell family and +0.005 `val_nb` over `c1_scale`, on one ruler | EVIDENCE §6c |
+| most of it is structural | `c1_combined` reads 0.8650 at epoch 0 where `c1_ref` reads 0.5622 and needs four epochs to catch up | `metrics.csv` |
+| log-normalising | +0.011 family end to end, +0.067 per group in the input space | EVIDENCE §6b, §7d |
+| **the fairness question, settled** | transductive fitting moves cross-donor family by ≤0.0012 and phase *down*; what it buys the neural baselines is donor identity, +0.069 | EVIDENCE §7c |
+| the bar | `v1_baselines`, inductive, on the corpus the paper reports | EVIDENCE §7 |
+
+**What failed, and what it cost**
+
+| | what happened | cost |
+|---|---|---|
+| the ELAJ column | trained pre-`482dc69`, scored post: measured partly on cells it had learnt | the main table has no ELAJ column |
+| `v1_combined` | void; three variables moved at once, two measurement bugs | one 13-hour run, and the v1-against-c1 comparison |
+| `probes/c1_combined` | cancelled at the 12 h wall before the encoder stages | the localisation, still unmeasured on a current arm |
+
+**What has not started**, all of it scheduled for 25 September or earlier: the
+frozen-encoder epoch ladder, the transferability gate, the latent sweep, and all
+three required ablations (C-1 random grouping, C-2 DNS removed, C-3
+Gaussian-only). scGPT and Geneformer environments, the licence audit, and the
+demonstration are also at zero.
+
+**The one finding that redirects the plan.** The per-group PCA of the input, with
+no attention at all, reaches cross-donor family **0.944**; the trained latent
+keeps **0.9115**. Family structure is not missing from the input, it is being
+discarded in the compression to 16 dimensions. §4's wave 3 was aimed at the
+encoder and the loss terms. The measurement points at the latent and the decoder,
+which is what the frozen programme in §4.3 was built to sweep cheaply. That
+programme is now the main line rather than an efficiency, and §11 is rewritten
+around it.
+
 ### 1.2 What this means
 
 Every transformer single-cell model published so far has lost to scVI and to
@@ -98,16 +140,24 @@ comes out.
 
 | # | claim | evidence required | status |
 |---|---|---|---|
-| C1 | Pathway-grouped attention is an inductive bias that lets a transformer run over 15,495 genes at D/G = 45 times less cost than flat attention at matched effective gene space | the cost argument (thesis App. D.8, §4.3.2); flat attention shown infeasible at this vocabulary | done |
-| C2 | The grouping carries biology, not only cost | the per-group probe (§3.1); the random-grouping ablation (§5.1) at equal sizes and parameters | probe running |
+| C1 | Pathway-grouped attention is an inductive bias that lets a transformer run over 15,495 genes at D/G = 45 times less cost than flat attention at matched effective gene space | the cost argument (thesis App. D.8, §4.3.2); flat attention shown infeasible at this vocabulary | **done** |
+| C2 | The grouping carries biology, not only cost | the per-group probe (§3.1); the random-grouping ablation (§5.1) at equal sizes and parameters | probe done for the input space (EVIDENCE §7d); **the ablation has not run** |
 | C3 | The DNS sentinel lets one model read studies with different panels without imputation | the DNS-removed ablation (§5.1) | not started |
-| C4 | A donor-blind latent can be trained that matches or beats scVI on cross-donor biology | the c_ training campaign (§4) scored against the inductive scVI | not started |
-| C5 | Cross-donor agreement with a permutation null separates learned biology from learned donor identity, and standard metrics do not | the benchmark table: baselines score 0.7 to 0.8 on patient identity while scoring at the ceiling on scIB | done, needs writing |
+| C4 | A donor-blind latent can be trained that matches or beats scVI on cross-donor biology | the campaign (§4) scored against the inductive scVI | **blocked, and it is the blocking item.** No ELAJ column exists: the one that did was contaminated (OUTSTANDING §0.4). On the withdrawn figures ELAJ was behind on cross-donor family, 0.91 against 0.98 |
+| C5 | Cross-donor agreement with a permutation null separates learned biology from learned donor identity, and standard metrics do not | the benchmark table, plus the transductive pass | **done, evidence complete.** `v1_baselines_transductive` shows transductive fitting raises donor identity 0.069 while leaving cross-donor transfer flat. Ready to write |
 | C6 | The circular branch: what it was for, and what happened | Gaussian-only ablation (§5.1); the R7/R8 collapse history | partly done |
-| C7 | The latent is usable: one demonstration a reader can picture | §6 | not started |
+| C7 | The latent is usable: one demonstration a reader can picture | §7 | not started |
 
-C4 is the one the paper cannot be submitted without. C2 is the one a
-reviewer asks for first.
+C4 is the one the paper cannot be submitted without, and it is the one with no
+evidence at all right now. C2 is the one a reviewer asks for first, and its
+ablation has not run either.
+
+**Two claims are finished and both are about the protocol, not the model.** C1 and
+C5 are the validation-methodology contribution. If C4 does not land, those two
+plus the diagnosis chain are a Genome Biology paper about how to measure
+multi-study embeddings, not an NMI paper about a model. That is the fallback in
+§0, and 15 days is the window in which it stops being a fallback and becomes the
+decision.
 
 ---
 
@@ -190,7 +240,7 @@ sweep.
 
 **Reference:**
 
-- [ ] **c1_ref** bare, as above. About 31 h.
+- [x] **c1_ref** bare, as above. 20 epochs, peak family 0.9183, `val_nb` 0.3782.
 
 **Wave 2, on the token sweep's finding (`outputs/sweeps/c1_ref_tokens`,
 job 55064282). Thirteen arms untrained in 75 minutes chose these two:**
@@ -215,8 +265,8 @@ moved 0.691 to 0.708.
 **Wave 2b, the frozen-encoder latent programme (see §11):**
 
 - [ ] **f1_epochs_03 / _05 / _10** the epoch ladder. What budget a frozen
-      run needs. Configs written; the checkpoint path is filled once wave 2
-      reports.
+      run needs. Configs written. **Not launched:** the checkpoint path needs an
+      encoder trained on the current split, and none exists (OUTSTANDING §0.4).
 - [ ] the transferability gate: three latent configurations against both
       wave-2 encoders, to test whether a frozen ranking survives a change
       of encoder.
@@ -342,15 +392,49 @@ Frozen-encoder runs are costed at 2,100 s an epoch, which is c1_ref's measured
 recomputation removed. That number is confirmed by the first arm of the epoch
 ladder and everything downstream of it moves if it is wrong.
 
+### 11.1 What the 23 September schedule assumed, and what happened
+
+Kept because the gap is the useful part.
+
+| planned for | planned | actual |
+|---|---|---|
+| 23 to 25 Sep | c1_scale, c1_combined, score c1_ref | both runs landed and are usable. Scoring produced a contaminated column |
+| 25 Sep | the f1 epoch ladder, 11 h | **not launched.** Needs a checkpoint safe to freeze, and no checkpoint on disk is |
+| 26 to 27 Sep | the transferability gate, 18 h | **not launched.** Needs two clean encoders |
+| 27 Sep | latent sweep begins | **not begun** |
+
+Two days lost to the diagnosis, and the frozen programme's base moved from "any
+wave-2 checkpoint" to "a run that does not exist yet". The rest of the calendar
+shifts by that much, and the ablations absorb it.
+
+### 11.2 The schedule from 27 September
+
+One rule, from OUTSTANDING §0.5: **one variable per arm against a named
+predecessor on the same split**, or the arm is not evidence. There is no budget
+for a second unattributable run.
+
+Arms run on the **v1 vocabulary**, because `v1_baselines` is the bar and fitting a
+second baseline set for c1 would buy nothing (OUTSTANDING §2).
+
 | dates | GPU 1 | GPU 2 | CPU and analysis | writing |
 |---|---|---|---|---|
-| 23 to 25 Sep | c1_scale (28 h) | c1_combined (28 h) | score c1_ref against c1_baselines; build the per-epoch cell_cls drift diagnostic | Methods: corpus, model, validation protocol |
-| 25 Sep | f1_epochs_10 (6 h) | f1_epochs_03 (2 h), f1_epochs_05 (3 h) | read both training runs, pick the encoder, fill the checkpoint path in the three f1 configs | Results 1: the diagnosis chain, probe to n_cls to tokens |
-| 26 to 27 Sep | transferability gate: 3 latent configs on c1_combined's encoder | the same 3 on c1_scale's encoder | does the ranking agree across two encoders? If not, the frozen route is dead and the latent question goes back to full runs | Results 2: the architecture result |
-| 27 Sep to 1 Oct | latent sweep, 4 arms | latent sweep, 4 arms | scGPT and Geneformer environments on the login node | Results 3: the benchmark table |
-| 1 to 4 Oct | best latent, full joint run | second seed of the best | ablations: random grouping (C-1), DNS removed (C-2) | Results 4 and 5; Fig. 1 to 4 |
-| 4 to 8 Oct | reruns and seeds as needed | zero-shot scGPT and Geneformer on the c1 cells | ablation table; the demonstration (E1 or E2) | Results 6; Discussion |
-| 8 to 12 Oct | spare capacity | | reproducibility R1 to R5; figures final | full draft; internal review; Extended Data |
+| 27 to 29 Sep | **v2_ref: the clean arm.** `c1_combined`'s architecture, v1 vocabulary, current split, fingerprinted, fixed probe. ~30 h | **C-1 random grouping**, same configuration, membership shuffled. Its answer does not depend on which latent wins, so it is safe to run in parallel with an unknown | `probe_stages` re-run with a >20 h wall and the per-group stages dropped; the encoder stages are the point | Methods: corpus, vocabulary, model, validation protocol. C1 and C5 are writable now |
+| 29 to 30 Sep | **score v2_ref** (~3 h), then **f1 epoch ladder** off its encoder, 11 h | **C-2 DNS removed** | the first defensible ELAJ column. Decision point 1 below | Results 1: the diagnosis chain. Results 2: the architecture result |
+| 30 Sep to 2 Oct | transferability gate, 3 latent configs on v2_ref's encoder | the same 3 on C-1's encoder, which doubles as the gate's second encoder | does the ranking survive a change of encoder? Decision point 2 | Results 3: the benchmark table |
+| 2 to 5 Oct | latent sweep, 4 arms frozen | latent sweep, 4 arms frozen | scGPT and Geneformer environments; the licence audit (R3) | Results 4: the ablations |
+| 5 to 8 Oct | best latent, full joint run | **c1_dab** at λ 0.005 to 0.025, plus a slightly raised λ_CCE | zero-shot scGPT and Geneformer on the v1 cells | Results 5 and 6; Fig. 1 to 4 |
+| 8 to 10 Oct | second seed of the best | C-3 Gaussian-only (C6) | ablation table; the demonstration | Discussion |
+| 10 to 12 Oct | spare, and it will be used | | reproducibility R1 to R5; figures final | full draft; internal review; Extended Data |
+
+**Both cards are busy from the first day.** The old schedule had a single serial
+chain through the frozen programme, which idled a card. The ablations are the
+parallel work: C-1 and C-2 depend on the architecture, which is settled, not on
+the latent, which is not.
+
+**The frozen programme is now the main line, not an efficiency.** EVIDENCE §7d
+says the family signal is discarded in the compression to 16 dimensions rather
+than missing from the input. That is precisely the part the frozen sweep varies,
+at a fifteenth of the cost of full runs.
 
 **The frozen programme in total.** The epoch ladder is 11 hours, the
 transferability gate is about 18, and an eight-arm latent sweep about 23. Some
@@ -358,22 +442,37 @@ transferability gate is about 18, and an eight-arm latent sweep about 23. Some
 questions asked as full joint runs. That difference is what makes the latent
 sweep possible at all before submission rather than a cutback.
 
-**Two decision points.**
+**Three decision points.**
 
-*25 September, the epoch ladder.* If the 10-epoch arm is clearly ahead of the
-5-epoch arm on val_family_knn or carries a substantially different kl_gauss,
-the short budget is unusable and every frozen row above is recosted at the
-longer length. If ten and five agree, the sweep runs at five.
+*30 September, the first honest column.* `v2_ref` scored against `v1_baselines`,
+trained and scored on one split with a matching fingerprint. This is the first
+number in the project that can be defended, and it decides whether C4 is within
+reach. The withdrawn figures had cross-donor family at 0.91 against the
+baselines' 0.98, so the gap to close is about 0.07 and the question is whether
+the latent programme can close it in ten days.
 
-*27 September, the transferability gate.* If three latent configurations rank
-differently on c1_scale's encoder and c1_combined's, a frozen ranking is
-conditional on an encoder in a way that makes it useless, and the latent
-question returns to full joint runs. The latent sweep is then cut to two arms
-and the ablation weeks absorb them.
+*30 September, the epoch ladder.* If the 10-epoch arm is clearly ahead of the
+5-epoch arm on `val_family_knn` or carries a substantially different `kl_gauss`,
+the short budget is unusable and every frozen row is recosted at the longer
+length. If ten and five agree, the sweep runs at five.
 
-**The campaign decision stays where it was.** If no arm has beaten scVI on the
-fair inductive comparison by 1 October, the ablation weeks become campaign
-weeks and the venue question is reopened.
+*2 October, the transferability gate.* If three latent configurations rank
+differently on `v2_ref`'s encoder and C-1's, a frozen ranking is conditional on
+its encoder in a way that makes it useless, and the latent question returns to
+full joint runs. The sweep is then cut to two arms and the remaining days absorb
+them.
+
+**The venue decision, and it is now close.** If no arm has beaten scVI on
+cross-donor family or phase by **5 October**, there is not enough time left for
+another full campaign cycle and the paper becomes the Genome Biology one: C1, C5,
+and the diagnosis chain, which are finished and are a real contribution about how
+to measure multi-study embeddings. That is a decision to take deliberately on the
+5th rather than discover on the 11th.
+
+Stated plainly, because the schedule above does not say it on its own: **the
+project has 15 days and zero publishable ELAJ numbers.** Everything that is
+finished is about the measurement protocol. The model result is one run away from
+existing and about ten days away from being good enough for the venue in §0.
 
 ## 12. Open questions
 

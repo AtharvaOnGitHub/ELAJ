@@ -1,12 +1,28 @@
 # What is left, by part of the paper
 
-Updated 24 September 2026. Companion to
-[`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md), which holds the claims and the
+Updated **27 September 2026**, 15 days from the 12 October deadline. Companion
+to [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md), which holds the claims and the
 schedule, and [`EVIDENCE.md`](EVIDENCE.md), which holds what we already have.
 
 Priority runs 1 to 5 within each section. §0 comes first: a number computed
 on wrong metadata is worse than a number not yet computed. §8 is everything
 deliberately out of scope; nothing there is ever a top-five item.
+
+> ## Where we actually are, in three sentences
+>
+> **The architecture result is solid and the fairness question is settled.** The
+> c-series established that the token fix is worth +0.028 cell family and
+> +0.005 `val_nb` on one consistent ruler, and `v1_baselines_transductive`
+> showed the inductive baselines are not a handicap, which is C5's evidence.
+>
+> **No ELAJ number can be published today.** The one scored column was
+> contaminated by a moved split (§0.4), and the arm that was meant to replace it
+> is void (§0.5). This is the single blocking defect and it is one training run
+> plus one scoring job away from fixed.
+>
+> **Nothing on the latent programme has run.** The frozen-encoder ladder, the
+> transferability gate, the latent sweep, and all three required ablations are
+> at zero, and they were scheduled for 25 September.
 
 ---
 
@@ -202,6 +218,42 @@ honest about what can and cannot be checked for them.
 split, with the corrected probe. No other arm's numbers can be quoted until one
 exists.
 
+**It also blocks the frozen-encoder programme.** Freezing means initialising from
+an existing checkpoint, and every checkpoint on disk trained on the pre-`482dc69`
+split. A frozen run would train its latent and decoder on the new split using an
+encoder that had already seen some of those cells, so the leakage would carry
+straight through into the latent sweep's rankings. The clean run is the frozen
+programme's base, not a parallel task.
+
+### 0.5 `v1_combined` is void, and moved three variables at once (closed as a run, open as a lesson)
+
+Its numbers cannot be used: scored on 20,000 cells against `c1_combined`'s
+91,598, cross-donor block silently off, early-stopped at epoch 8 of 22 on a
+subsampling spike. Full diagnosis in EVIDENCE.md §7e.
+
+Two measurement bugs are fixed in code. The part that is not a bug is the
+sequencing error, and it is the one worth keeping:
+
+`v1_combined` differs from `c1_combined` in **three** respects simultaneously.
+The vocabulary (44 groups and 15,496 genes against 45 and 15,495), the split,
+and the tissue conditioning for 111,036 cells, which `482dc69` turned from inert
+to real. A residual gap of about one percentage point on reconstruction survives
+both bug fixes and the matched-epoch check, so something real is there:
+
+| | val_nb | own model-free baseline | better than model-free |
+|---|---:|---:|---:|
+| `c1_combined` @ ep 8 | 0.3753 | 0.4088 | +8.19% |
+| `v1_combined` @ ep 8 | 0.4016 | 0.4332 | +7.29% |
+
+**It cannot be attributed to any of the three.** The likeliest candidate is the
+tissue conditioning, because `val_nb` is the decoder's own metric and tissue
+conditions the decoder, and OUTSTANDING §0.3 flagged the risk before the run
+went out. But that is a guess, and a guess is what moving three variables buys.
+
+**The rule this sets for the remaining runs:** one variable per arm against a
+named predecessor on the same split, or the arm is not evidence. With 15 days
+left there is no budget for a second unattributable run.
+
 ---
 
 ## 1. Next, in order
@@ -237,43 +289,70 @@ baselines gain is donor identity, +0.069 for scVI. C5 can be written.
 
 | | |
 |---|---|
-| vocabulary rebuilt | 15,496 genes, 44 groups, 247 to 493 |
+| vocabulary rebuilt | 15,496 genes, 44 groups, 247 to 493, the 500-gene ceiling honoured |
 | `v1_baselines` | PCA, scVI, scANVI, inductive, on the v1 corpus |
 | v1 token sweep | thirteen arms; every c1 conclusion replicates |
-| `c1_scale`, `c1_combined` | both complete on the c1 vocabulary |
+| `c1_scale`, `c1_combined` | both complete on the c1 vocabulary, one ruler, usable |
+
+### Done 25 to 27 September
+
+| | | status of the result |
+|---|---|---|
+| `v1_baselines_transductive` | the baselines fitted the conventional way | **solid**, and it settles C5 |
+| tissue-column fix (`482dc69`) | 111,036 cells gained a real tissue level | in code, in no scored run yet |
+| split fingerprint (`abff13c`) | a checkpoint records its held-out donors; scorers refuse a mismatch | in code |
+| probe budget split (`abff13c`) | headline metric uncapped, cross-donor capped, drop on one sample | in code |
+| donor accessor fix (`abff13c`) | `patient_ids`, plus a test that checks the name against the dataset class | in code |
+| `v1_combined` | **void**, three confounded variables and two measurement bugs | §0.5 |
+| `probes/c1_combined` | **timed out** at the 12 h wall; input stages only, no encoder stages | EVIDENCE.md §7d |
+| ELAJ column of the main table | **withdrawn**, split contamination | §0.4 |
 
 ---
 
-## 1c. Blocked
+## 1c. Blocked, and on what
 
-`c1_scale` and `c1_combined` launched 23 September, about 28 h each.
+Everything below waits on **one clean trained-and-scored arm**. That is the
+whole blocking set; there is no second independent chain.
 
 | | what it is | why it waits |
 |---|---|---|
-| fill the checkpoint path in `f1_epochs_03/05/10` | three lines | needs a checkpoint filename, which carries its own epoch and step |
-| choose which encoder to freeze | read both runs' `val_family_knn` and epoch times | needs both to finish |
-| the three transferability-gate configurations | pick three latent configs as far apart as possible | the gate compares `c1_scale`'s encoder against `c1_combined`'s |
-| score both arms | `score_arm.sh`, needs `c1_baselines` first | the arms |
+| the ELAJ column of the main table | `score_arm.sh` on a checkpoint whose fingerprint matches | the run |
+| `f1_epochs_03/05/10` | fill in the checkpoint path, three lines | an encoder that is safe to freeze, which means one trained on the current split |
+| the transferability gate | three latent configurations against two encoders | two clean encoders, so it is two runs away, not one |
+| the latent sweep | six knobs, eight arms | the gate |
+| C-1 random grouping | the reviewer's first question | wants the best clean configuration to ablate against |
+| C-2 DNS removed, C-3 Gaussian-only | claims C3 and C6 | same |
+
+**The one-run bottleneck is the thing to fix about the plan, not just about the
+data.** Two GPUs and a single serial chain means one card is idle. The second
+card should carry an arm that is useful whichever way the first goes: C-1 random
+grouping is the candidate, since it ablates the grouping rather than the latent
+and its answer does not depend on which latent configuration wins.
 
 ---
 
 ## 2. Ready now, no GPU
 
-**P1. `c1_baselines`.** PCA, scVI, and scANVI fitted on the c1 training donors
-and applied to the held-out ones.
+**`c1_baselines` is no longer wanted, and that settles which vocabulary the
+clean arm uses.** The baselines that exist are `v1_baselines`, on the v1
+vocabulary, and they are the bar the paper quotes. Fitting a second set against
+the c1 vocabulary would cost two hours to make the c-series absolutely
+comparable, and the c-series' value is its internal ranking, which needs no
+baselines at all. **So the clean arm runs on the v1 vocabulary**, where the bar
+is already measured. One decision removed from the critical path.
 
-```
-benchmark_baselines.sh c1_ref --no-elaj --fit-split train \
-    --methods pca scvi scanvi --out outputs/benchmarks/c1_baselines
-```
+**P1. Re-run `probe_stages`, with the wall it actually needs.** Job 55326180 was
+cancelled at 12 hours having completed the 90 input-space stages at 4.5 minutes
+each (6.8 hours) and none of the encoder stages, which were the point. Two ways
+to fix it and they can both be taken: raise the wall past 20 hours, and drop the
+per-group input stages, which are now measured and recorded (EVIDENCE.md §7d) so
+re-running them buys nothing.
 
-This is a **prerequisite for scoring any c1 arm at all**, including
-`c1_scale` and `c1_combined` when they land in roughly 36 hours. The existing
-benchmark (`r8_inductive`) is on the twelve-study corpus with organoids in, so
-none of its numbers transfer. Running it now takes about two hours off the
-critical path on 25 September rather than adding two hours to it.
-
-Scoring `c1_ref` itself is a separate and weaker question, kept in §8.
+This also carries the finding that most changes the plan. The input space, before
+any attention, reaches **cross-donor family 0.944** where the latent keeps
+**0.9115**. The signal is being discarded in the compression from 1,440 numbers
+to 16, not missing from the input. The encoder stages are what would say exactly
+where, and they have never been run on a current arm.
 
 **P2. scGPT and Geneformer environments.** Both want their own environment and
 their own tokenisation of the corpus. The plan budgets two days for the

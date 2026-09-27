@@ -176,7 +176,6 @@ class TestEndoFoundationModel:
             "gene_embedding",       # both as encoder input and decoder gene side
             "value_encoder",
             "dsbn",
-            "metadata_encoder",
             "hierarchical_encoder",
             "aggregation_encoder",
             "latent_space",

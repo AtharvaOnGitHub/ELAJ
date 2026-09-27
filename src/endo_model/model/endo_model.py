@@ -3,7 +3,6 @@
 Forward pass (one call):
   1. TokenConstructor  → per-group gene tokens  (B, G_k, d_token) per group
   2. BatchedGroupEncoder → group CLS dict       (B, d_token) per group
-  3. MetadataEncoder   → metadata token seq     (B, 1, d_agg) — age only
   4. AggregationEncoder → cell_cls  (the only per-cell tensor it returns)
   5. BifurcatedLatentSpace → z, z_proj, ...
   6. _build_gene_queries → per-gene decoder queries (G_meas, d_dec)
@@ -31,7 +30,6 @@ from endo_model.model.decoder.dispersion import PerGeneDispersion
 from endo_model.model.embeddings.disease_encoder import DiseaseStatusEncoder
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
-from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
 from endo_model.model.embeddings.platform_encoder import PlatformEncoder
 from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
 from endo_model.model.embeddings.counts import build_count_scaler
@@ -75,7 +73,6 @@ class EndoFoundationModel(nn.Module):
             mlp_hidden=config.tokens.mlp_hidden,
         )
         self.dsbn = DSBN(config.n_studies, config.d_token)
-        self.metadata_encoder = MetadataEncoder(config.d_agg)
 
         # ── Encoders ────────────────────────────────────────────────────────
         self.token_constructor = TokenConstructor(
@@ -175,14 +172,11 @@ class EndoFoundationModel(nn.Module):
         # ── Hierarchical encoding ─────────────────────────────────────────────
         group_cls_dict = self.hierarchical_encoder(group_tokens)  # {name: (B,D)}
 
-        # ── Metadata encoding ─────────────────────────────────────────────────
-        # Age only.  disease_status is held out of the model entirely (it is the
-        # thing the atlas is meant to reveal, so feeding it in would make any
-        # separation circular) and tissue now conditions the decoder instead.
-        meta_tokens = self.metadata_encoder(batch["age"])           # (B, 1, d_agg)
-
         # ── Aggregation ───────────────────────────────────────────────────────
-        cell_cls = self.aggregation_encoder(group_cls_dict, meta_tokens)
+        # No metadata token. disease_status is held out of the model entirely
+        # (it is the thing the atlas is meant to reveal), tissue conditions the
+        # decoder instead, and age is not measured: see metadata_encoder.py.
+        cell_cls = self.aggregation_encoder(group_cls_dict)
         # cell_cls: (B, d_agg) — the only per-cell tensor leaving the encoder
 
         return EncoderStages(

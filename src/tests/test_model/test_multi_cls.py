@@ -104,7 +104,7 @@ class TestThroughTheModel:
         config = make_config(vocab)
         config.group_encoder.n_cls = 4
         model = EndoFoundationModel(vocab, config)
-        expected = 1 + len(vocab.group_names) * 4 + model.aggregation_encoder.n_metadata
+        expected = 1 + len(vocab.group_names) * 4
         assert model.aggregation_encoder.seq_len == expected
 
     def test_group_reader_flattens_the_summary(self):

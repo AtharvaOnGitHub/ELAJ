@@ -26,18 +26,15 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from endo_model.model.embeddings.metadata_encoder import N_METADATA
-
 
 class AggregationEncoder(nn.Module):
-    """Cross-module transformer that aggregates group and metadata tokens.
+    """Cross-module transformer that aggregates every group's summary tokens.
 
     Args:
         group_names: Ordered list of group names (determines group ordering).
         d_token:     Input token dimension from HierarchicalEncoder.
         d_agg:       Aggregation (output) dimension.  If d_token != d_agg,
                      a linear projection is applied to all input tokens first.
-        n_metadata:  Number of metadata tokens (default 3: tissue/age/disease).
         n_heads:     Attention heads.
         n_layers:    Transformer encoder layers.
         dropout:     Dropout probability.
@@ -49,7 +46,6 @@ class AggregationEncoder(nn.Module):
         d_token: int,
         d_agg: int,
         n_summary: int = 1,
-        n_metadata: int = N_METADATA,
         n_heads: int = 4,
         n_layers: int = 2,
         dropout: float = 0.1,
@@ -91,15 +87,13 @@ class AggregationEncoder(nn.Module):
         )
 
         self.n_groups = n_groups
-        self.n_metadata = n_metadata
-        # Sequence: CELL_CLS, then every group's summary tokens, then metadata.
-        self.seq_len = 1 + n_groups * self.n_summary + n_metadata
+        # Sequence: CELL_CLS, then every group's summary tokens. Nothing else.
+        # A metadata token used to sit at the end carrying age, and age is not
+        # measured anywhere in this corpus: all twelve studies report it for
+        # zero cells, so the token was a learned constant plus a NaN path.
+        self.seq_len = 1 + n_groups * self.n_summary
 
-    def forward(
-        self,
-        group_cls_dict: dict[str, Tensor],
-        metadata_tokens: Tensor,
-    ) -> Tensor:
+    def forward(self, group_cls_dict: dict[str, Tensor]) -> Tensor:
         """Run cross-module aggregation.
 
         Args:
@@ -109,13 +103,11 @@ class AggregationEncoder(nn.Module):
                              four of them contributes four tokens rather than
                              one wider one: the attention that mixes groups
                              sees each readout separately.
-            metadata_tokens: (B, n_metadata, d_agg) — from MetadataEncoder.
-
         Returns:
             cell_cls_out: (B, d_agg) — updated CELL_CLS, the latent's input and
             the only per-cell tensor that leaves this encoder.
         """
-        B = metadata_tokens.shape[0]
+        B = group_cls_dict[self.group_names[0]].shape[0]
 
         # A 2-D summary would be concatenated along the wrong axis rather
         # than rejected: torch.cat on (B, d_token) tensors with dim=1 yields
@@ -136,10 +128,10 @@ class AggregationEncoder(nn.Module):
         )
         group_cls_proj = self.proj(group_cls)  # (B, K * n_summary, d_agg)
 
-        # Assemble sequence: [CELL_CLS, group summaries..., metadata...]
+        # Assemble sequence: [CELL_CLS, group summaries...]
         cell_cls = self.cell_cls.expand(B, -1, -1)          # (B, 1, d_agg)
-        seq = torch.cat([cell_cls, group_cls_proj, metadata_tokens], dim=1)
-        # seq shape: (B, 1 + K * n_summary + n_metadata, d_agg)
+        seq = torch.cat([cell_cls, group_cls_proj], dim=1)
+        # seq shape: (B, 1 + K * n_summary, d_agg)
 
         out = self.transformer(seq)
 

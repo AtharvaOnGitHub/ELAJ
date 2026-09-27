@@ -54,7 +54,6 @@ ENCODER_MODULES: tuple[str, ...] = (
     "value_encoder",
     "dsbn",
     "token_constructor",
-    "metadata_encoder",
     "hierarchical_encoder",
     "aggregation_encoder",
 )

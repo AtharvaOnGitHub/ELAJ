@@ -6,7 +6,6 @@ torch = pytest.importorskip("torch")
 
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
-from endo_model.model.embeddings.metadata_encoder import MetadataEncoder
 from endo_model.model.embeddings.counts import RawCounts
 from endo_model.model.embeddings.values import LinearMap, SharedDirectionValue
 from endo_model.model.encoders.aggregation import AggregationEncoder
@@ -154,15 +153,13 @@ class TestHierarchicalEncoder:
 class TestAggregationEncoder:
     def _make_agg(self):
         return AggregationEncoder(GROUP_NAMES, D_TOKEN, D_AGG,
-                                  n_metadata=3, n_heads=2, n_layers=1)
+                                  n_heads=2, n_layers=1)
 
     def _make_inputs(self, enc):
         # (B, n_summary, d_token): every group hands on its summary
         # TOKENS, one by default. See encoders/batched/encoder.py.
-        group_cls_dict = {name: torch.randn(B, enc.n_summary, D_TOKEN)
-                          for name in GROUP_NAMES}
-        meta_tokens = torch.randn(B, 3, D_AGG)
-        return group_cls_dict, meta_tokens
+        return {name: torch.randn(B, enc.n_summary, D_TOKEN)
+                for name in GROUP_NAMES}
 
     def test_two_dimensional_summary_is_refused(self):
         """A (B, d_token) summary would be concatenated along the wrong axis
@@ -171,19 +168,20 @@ class TestAggregationEncoder:
         enc = self._make_agg()
         flat = {name: torch.randn(B, D_TOKEN) for name in GROUP_NAMES}
         with pytest.raises(ValueError, match="n_summary"):
-            enc(flat, torch.randn(B, 3, D_AGG))
+            enc(flat)
 
     def test_every_summary_token_becomes_its_own_position(self):
         enc = AggregationEncoder(GROUP_NAMES, D_TOKEN, D_AGG, n_summary=4,
-                                 n_metadata=3, n_heads=2, n_layers=1)
+                                 n_heads=2, n_layers=1)
         gcd = {name: torch.randn(B, 4, D_TOKEN) for name in GROUP_NAMES}
-        assert enc.seq_len == 1 + len(GROUP_NAMES) * 4 + 3
-        assert enc(gcd, torch.randn(B, 3, D_AGG)).shape == (B, D_AGG)
+        # One cell token plus every group's four summaries. No metadata token:
+        # age was the only one and it is measured for zero cells in this corpus.
+        assert enc.seq_len == 1 + len(GROUP_NAMES) * 4
+        assert enc(gcd).shape == (B, D_AGG)
 
     def test_cell_cls_shape(self):
         enc = self._make_agg()
-        gcd, mt = self._make_inputs(enc)
-        cell_cls = enc(gcd, mt)
+        cell_cls = enc(self._make_inputs(enc))
         assert cell_cls.shape == (B, D_AGG)
 
     def test_returns_cell_cls_only(self):
@@ -194,15 +192,15 @@ class TestAggregationEncoder:
         in, so the narrow signature is the guarantee, not a style choice.
         """
         enc = self._make_agg()
-        gcd, mt = self._make_inputs(enc)
-        out = enc(gcd, mt)
+        gcd = self._make_inputs(enc)
+        out = enc(gcd)
         assert isinstance(out, torch.Tensor), "aggregation must return one tensor"
         assert out.shape == (B, D_AGG)
 
     def test_cell_cls_depends_on_all_groups(self):
         enc = self._make_agg()
-        gcd, mt = self._make_inputs(enc)
-        baseline = enc(gcd, mt)
+        gcd = self._make_inputs(enc)
+        baseline = enc(gcd)
         for name in GROUP_NAMES:
             perturbed = dict(gcd)
             perturbed[name] = perturbed[name] + 5.0

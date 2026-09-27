@@ -109,7 +109,7 @@ def test_gene_queries_take_no_gradient_from_the_encoder():
 
     for name, param in model.named_parameters():
         if name.startswith(("hierarchical_encoder", "aggregation_encoder",
-                            "value_encoder", "metadata_encoder")):
+                            "value_encoder")):
             assert param.grad is None or not param.grad.any(), (
                 f"{name} received gradient from the decoder's gene side"
             )
@@ -127,8 +127,7 @@ def test_reconstruction_depends_on_the_latent():
         queries, _ = model._build_gene_queries(batch)
         z = model.latent_space(
             model.aggregation_encoder(
-                model.hierarchical_encoder(model.token_constructor(batch)),
-                model.metadata_encoder(batch["age"]),
+                model.hierarchical_encoder(model.token_constructor(batch))
             )
         )["z_proj"]
         # Tissue is held fixed across both calls: the decoder is conditioned on

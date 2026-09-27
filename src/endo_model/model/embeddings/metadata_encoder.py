@@ -1,15 +1,13 @@
-"""MetadataEncoder: the metadata tokens the aggregation encoder reads.
+"""No metadata reaches the encoder. This module records why, and stays empty.
 
-Currently one token: age.
-
-Two fields were removed from here deliberately, and both removals change what
-the trained model can be used to claim.
+Three fields were considered for the aggregation encoder's input. All three are
+now out, and each removal changes what the trained model can be used to claim.
 
 **disease_status.** The project's output is a disease atlas, and its headline
 result is whether the latent organises cells by disease.  If the encoder is
 *told* which cells are diseased it will separate them, and that separation is
-evidence of nothing — the answer was an input.  Disease status is now held out
-of the model entirely and used only to colour the UMAP, which is the only
+evidence of nothing — the answer was an input.  Disease status is held out of
+the model entirely and used only to colour the UMAP, which is the only
 arrangement in which the picture supports a claim.
 
 **tissue.** Moved to the decoder rather than dropped; see
@@ -19,37 +17,23 @@ to spend capacity encoding "this cell came from myometrium", because the
 decoder is told separately.  What remains in the latent is the variation tissue
 does not explain.
 
-Age stays.  It is continuous, often missing, and not a label anyone will read
-off the UMAP as a finding.
+**age.** Removed 27 September 2026, and it was a defect rather than a design
+choice. Every study in the corpus reports age for **zero** cells: the column is
+either absent or present and entirely empty in all twelve. The one study that
+carries real ages, zhang_2022 with 345,469 cells, is excluded from the corpus.
+So the age token was a learned constant plus a NaN path, occupying a position
+in every cell's aggregation sequence and contributing nothing to any of them.
+
+Two reasons removing it is worth the churn rather than leaving it inert. It sat
+on the *encoder* side, and nothing about a donor's age belongs there: metadata
+that is known and not to be discovered conditions the decoder, which is where
+tissue and platform already are. And an input that is always missing is a
+standing invitation to misread the architecture — the shape map showed a
+metadata token feeding the cell-level transformer, which is a claim about the
+model that was not true in any run.
+
+N_METADATA is kept at 0 so that a caller which still counts metadata positions
+gets the right answer rather than an AttributeError.
 """
 
-import torch
-import torch.nn as nn
-from torch import Tensor
-
-from .age_encoder import AgeEncoder
-
-N_METADATA = 1  # age
-
-
-class MetadataEncoder(nn.Module):
-    """Encodes per-cell metadata into aggregation-encoder tokens.
-
-    Args:
-        d_agg: Token dimension for the aggregation encoder.
-    """
-
-    def __init__(self, d_agg: int) -> None:
-        super().__init__()
-        self.age_encoder = AgeEncoder(d_agg)
-
-    def forward(self, age: Tensor) -> Tensor:
-        """Encode metadata into a token sequence.
-
-        Args:
-            age: (B,) float — age in years, NaN if unknown.
-
-        Returns:
-            (B, N_METADATA, d_agg) — metadata token sequence.
-        """
-        return torch.stack([self.age_encoder(age)], dim=1)  # (B, 1, d_agg)
+N_METADATA = 0

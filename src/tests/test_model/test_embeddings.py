@@ -4,11 +4,10 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from endo_model.model.embeddings.age_encoder import AgeEncoder
 from endo_model.model.embeddings.disease_encoder import DiseaseStatusEncoder
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
-from endo_model.model.embeddings.metadata_encoder import MetadataEncoder, N_METADATA
+from endo_model.model.embeddings.metadata_encoder import N_METADATA
 from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
 from endo_model.model.embeddings.values import LinearMap
 
@@ -90,31 +89,6 @@ def test_tissue_encoder_different_levels_different_output():
     assert not torch.allclose(enc(levels0), enc(levels1))
 
 
-# ── AgeEncoder ─────────────────────────────────────────────────────────────
-
-def test_age_encoder_shape():
-    enc = AgeEncoder(D)
-    age = torch.tensor([30.0, 45.0, 52.0, 28.0])
-    out = enc(age)
-    assert out.shape == (B, D)
-
-
-def test_age_encoder_nan_produces_zero():
-    enc = AgeEncoder(D)
-    age = torch.tensor([30.0, float("nan"), 45.0, float("nan")])
-    out = enc(age)
-    assert torch.all(out[1] == 0.0)
-    assert torch.all(out[3] == 0.0)
-
-
-def test_age_encoder_non_nan_nonzero():
-    enc = AgeEncoder(D)
-    age = torch.tensor([30.0, 45.0])
-    out = enc(age)
-    # With random init the output is almost certainly non-zero
-    assert not torch.all(out == 0.0)
-
-
 # ── DiseaseStatusEncoder ────────────────────────────────────────────────────
 
 def test_disease_encoder_shape():
@@ -124,29 +98,21 @@ def test_disease_encoder_shape():
     assert out.shape == (B, D)
 
 
-# ── MetadataEncoder ─────────────────────────────────────────────────────────
+# ── No metadata reaches the encoder ─────────────────────────────────────────
 
-def test_metadata_encoder_shape():
-    enc = MetadataEncoder(D)
-    age = torch.tensor([30.0, 45.0, 52.0, 28.0])
-    out = enc(age)
-    assert out.shape == (B, N_METADATA, D)
-
-
-def test_metadata_encoder_n_metadata_constant():
-    assert N_METADATA == 1
+def test_no_metadata_token_exists():
+    """Age was the last one, and it is measured for zero cells in every study
+    of this corpus, so the token was a learned constant on a NaN path. The
+    count is pinned at zero because re-adding a metadata token would change
+    the aggregation sequence length without failing anything else."""
+    assert N_METADATA == 0
 
 
-def test_metadata_encoder_holds_no_disease_or_tissue():
-    """Both are deliberately absent, and both for a stated reason.
-
-    disease_status is what the atlas exists to reveal, so feeding it to the
+def test_the_encoder_receives_no_metadata_module():
+    """disease_status is what the atlas exists to reveal, so feeding it to the
     encoder would make any separation in the latent circular. tissue moved to
-    the decoder so the latent is not obliged to encode anatomy. Re-adding
-    either here would quietly invalidate the UMAP without failing anything
-    else, which is why it is pinned.
-    """
-    enc = MetadataEncoder(D)
-    children = dict(enc.named_children())
-    assert "disease_encoder" not in children
-    assert "tissue_encoder" not in children
+    the decoder so the latent is not obliged to encode anatomy. age is gone
+    outright. Nothing may reappear here without this failing."""
+    import endo_model.model.embeddings as emb
+    for gone in ("AgeEncoder", "MetadataEncoder"):
+        assert not hasattr(emb, gone), f"{gone} is back on the encoder side"

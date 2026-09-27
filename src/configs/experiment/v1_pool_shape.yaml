@@ -1,0 +1,123 @@
+name: v1_pool_shape
+description: >
+  v1_pool with a different latent: part of it cyclic, and less pressure on all
+  of it. The second card. Read the two together; they are not a single-variable
+  pair and are not meant to be.
+
+  ONE HYPOTHESIS BEHIND BOTH CHANGES. The latent is the wrong shape for the
+  variable we are furthest behind on, and under too much pressure to be tidy.
+
+  THE SHAPE. Menstrual phase is a cycle. Cross-donor phase is ELAJ's worst
+  column against the baselines, 0.5413 against scVI's 0.7013, and the latent
+  has no cyclic part at all: n_circular is 0 in every c and v run, though this
+  model config's own default is 8. A circular subspace is the right geometry
+  for a variable that wraps.
+
+  THE PRESSURE. The withdrawn ELAJ column had cross-donor cell family 0.9115
+  with NMI 0.0159 and ARI 0.0005. Those are not in conflict, they are a
+  description: a cell's neighbours are the right family, and yet Leiden
+  clustering of the same latent recovers no cell type. Local structure right,
+  global structure absent, which is what pulling every cell toward N(0, I)
+  produces. beta_max 0.5 -> 0.2 releases that.
+
+  WHY THE TWO BELONG TOGETHER RATHER THAN ON SEPARATE CARDS. They are the same
+  force. R8 settled that the circular branch can be made to SURVIVE and did not
+  make it USED: with kappa_floor 1.0 the median kappa came out at 0.51-0.57
+  against a floor of 0.50, piled against the wall, and val_kl_circ was 6.7e-5,
+  below r5_cce's. The circular KL is a function of kappa alone and increases
+  with it, so the KL term actively penalises a concentrated -- that is,
+  informative -- circular dimension. At beta 0.5 that penalty pinned kappa to
+  its floor. At 0.2 it is two and a half times weaker. Adding the branch back
+  without lowering beta would repeat R8; lowering beta without the branch
+  leaves the geometry wrong. Neither change is worth a card on its own.
+
+  WHAT R8 ALREADY SETTLED, AND IS NOT RE-TESTED HERE.
+
+  circular_parameterisation: direction. Up to R7 the mean was one unbounded
+  number per dimension turned into a point by (cos, sin), so theta and
+  theta + 2*pi meant the same point and nothing kept the number small -- the
+  Gaussian KL contains mu^2 and pulls its mean back, but the circular KL does
+  not contain the angle at all, so no force acted on it. Once it drifted,
+  d(cos theta)/d theta flips sign every pi and two similar cells got opposite
+  gradients. Predicting the direction, two numbers per dimension divided by
+  their own length, discards the magnitude instead of wrapping it. The config
+  default is still "angle", which is the version that failed.
+
+  kappa_floor: 1.0. Not a guess: the reference hyperspherical-VAE
+  implementation has used softplus(x) + 1 since 2018. R7's 0.5 was reasoned
+  from the gradient arithmetic and landed below the standard. The default of
+  1e-4 permits the collapse the floor exists to prevent.
+
+  THE LATENT WIDTH IS UNCHANGED. d_z = d_gauss + 2 * n_circular, so 24 + 8 = 32
+  here against v1_pool's 32 + 0 = 32. The comparison between the cards is shape
+  and pressure, not capacity.
+
+  THE RISK, PLAINLY. The circular branch collapsed through R5 to R7 and was
+  survivable but idle in R8, and r8_direction scored cross-donor phase 0.12.
+  This is a real bet. Two things have changed: the cell vector now carries
+  structure worth putting on a circle, since order statistics at cell level
+  were worth +0.228 untrained, and beta is lower than any run that has carried
+  the branch. If kappa sits on the floor again at beta 0.2, the branch is not
+  merely unused but unusable in this architecture, and C6 closes as a negative
+  result the paper can state.
+
+  WHAT TO READ. NMI and ARI are the diagnostic for the beta half, not cell
+  family. Median kappa relative to the floor, and val_kl_circ, are the
+  diagnostic for the circular half -- "0 of 4 collapsed" says nothing when the
+  floor is above the collapse threshold, so read the distance from the floor.
+  If val_nb improves while kl_gauss climbs steeply, the latent is buying
+  reconstruction by drifting from the prior and the run is not the win it looks.
+
+  Everything else is v1_pool exactly: same corpus, same vocabulary, same seed,
+  same epoch budget, same stop metric, same encoder, same aggregation readout.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/v_series_runs/v1_pool_shape/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+
+  # CHANGE 1 OF 2. Less pull toward the prior, and the reason the circular
+  # branch has room to be used rather than merely to survive.
+  training.kl_annealing.beta_max: 0.2
+
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  model.dab.lambda_dab: 0.01
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.05
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  # CHANGE 2 OF 2. Four cyclic dimensions in place of eight Gaussian ones, so
+  # d_z stays 32. The parameterisation and the floor are R8's settings, not the
+  # config defaults, which are the versions that failed.
+  model.d_gauss: 24
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

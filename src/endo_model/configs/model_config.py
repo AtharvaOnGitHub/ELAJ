@@ -90,6 +90,10 @@ class AggregationEncoderConfig:
     n_layers: int = 2
     n_heads: int = 4
     dropout: float = 0.1
+    # How the cell vector is read out of the aggregation's token sequence.
+    # "cls" is the summary token alone and is every run to date; "cls+pool8"
+    # adds order statistics over the group tokens. See encoders/cell_readout.py.
+    readout: str = "cls"
 
     @classmethod
     def from_dict(cls, d: dict) -> "AggregationEncoderConfig":
@@ -97,6 +101,7 @@ class AggregationEncoderConfig:
             n_layers=d.get("n_layers", 2),
             n_heads=d.get("n_heads", 4),
             dropout=d.get("dropout", 0.1),
+            readout=d.get("readout", "cls"),
         )
 
 

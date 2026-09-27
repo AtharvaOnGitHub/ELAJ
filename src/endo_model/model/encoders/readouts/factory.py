@@ -5,6 +5,7 @@ Specs are parts joined by "+", each either "cls" or a named operator set:
     cls              the learned summary tokens alone. Every run to date.
     cls+pool4        those, plus mean, standard deviation, minimum, maximum.
     cls+pool8        those, plus the four above and median, quartiles, top-4.
+    cls+pool16       those, plus a finer quantile grid and more top-k means.
     cls+robust       those, plus the outlier-tolerant statistics only.
     cls+extremes     those, plus the order statistics only, no averages.
     pool8            the statistics alone, with no learned summary token.
@@ -41,6 +42,25 @@ def _pool8() -> list[PoolOperator]:
     ]
 
 
+def _pool16() -> list[PoolOperator]:
+    """pool8 with the quantile grid refined and more top-k means.
+
+    Here to answer one question and no other: pool8 was worth +0.211 untrained
+    at the group outputs, so is the readout still short of statistics, or has
+    it saturated? Doubling the operator count doubles the tokens each group
+    contributes, which is a cost paid at the aggregation, so a flat reading
+    here closes the question rather than inviting a pool32.
+    """
+    return [
+        MeanPool(), StdPool(),
+        QuantilePool(0.0), QuantilePool(0.05), QuantilePool(0.1),
+        QuantilePool(0.25), QuantilePool(0.5), QuantilePool(0.75),
+        QuantilePool(0.9), QuantilePool(0.95), QuantilePool(1.0),
+        TopKMeanPool(2), TopKMeanPool(4), TopKMeanPool(8), TopKMeanPool(16),
+        AbsMaxPool(),
+    ]
+
+
 def _robust() -> list[PoolOperator]:
     return [
         MeanPool(), StdPool(),
@@ -59,6 +79,7 @@ def _extremes() -> list[PoolOperator]:
 OPERATOR_SETS = {
     "pool4": _pool4,
     "pool8": _pool8,
+    "pool16": _pool16,
     "robust": _robust,
     "extremes": _extremes,
 }

@@ -3,14 +3,14 @@
 Forward pass (one call):
   1. TokenConstructor  → per-group gene tokens  (B, G_k, d_token) per group
   2. BatchedGroupEncoder → group CLS dict       (B, d_token) per group
-  4. AggregationEncoder → cell_cls  (the only per-cell tensor it returns)
-  5. BifurcatedLatentSpace → z, z_proj, ...
-  6. _build_gene_queries → per-gene decoder queries (G_meas, d_dec)
+  3. AggregationEncoder → cell_cls  (the only per-cell tensor it returns)
+  4. BifurcatedLatentSpace → z, z_proj, ...
+  5. _build_gene_queries → per-gene decoder queries (G_meas, d_dec)
                            — no batch dim: the latent is the only route
                              from a cell to its reconstruction
-  7. BilinearDecoder   → log_mu                 (B, G_meas)
-  8. Library-size scaling: mu_hat = softmax(log_mu) * library_size
-  9. PerGeneDispersion → theta                  (G_meas,)
+  6. BilinearDecoder   → log_mu                 (B, G_meas)
+  7. Library-size scaling: mu_hat = softmax(log_mu) * library_size
+  8. PerGeneDispersion → theta                  (G_meas,)
 
 model_output keys:
     mu_hat, theta, mu_gauss, logvar, z_gauss, mu_angle, kappa,
@@ -99,6 +99,7 @@ class EndoFoundationModel(nn.Module):
         self.aggregation_encoder = AggregationEncoder(
             vocabulary.group_names, config.d_token, config.d_agg,
             n_summary=self.hierarchical_encoder.n_summary,
+            readout=config.aggregation_encoder.readout,
             n_heads=config.aggregation_encoder.n_heads,
             n_layers=config.aggregation_encoder.n_layers,
             dropout=config.aggregation_encoder.dropout,

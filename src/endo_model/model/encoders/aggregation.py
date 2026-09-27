@@ -26,6 +26,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from endo_model.model.encoders.cell_readout import build_cell_readout
+
 
 class AggregationEncoder(nn.Module):
     """Cross-module transformer that aggregates every group's summary tokens.
@@ -35,6 +37,10 @@ class AggregationEncoder(nn.Module):
         d_token:     Input token dimension from HierarchicalEncoder.
         d_agg:       Aggregation (output) dimension.  If d_token != d_agg,
                      a linear projection is applied to all input tokens first.
+        readout:     How the cell vector is read out of the token sequence.
+                     "cls" takes the summary token, which is every run to date;
+                     "cls+pool8" adds order statistics over the group tokens.
+                     See cell_readout.py.
         n_heads:     Attention heads.
         n_layers:    Transformer encoder layers.
         dropout:     Dropout probability.
@@ -46,6 +52,7 @@ class AggregationEncoder(nn.Module):
         d_token: int,
         d_agg: int,
         n_summary: int = 1,
+        readout: str = "cls",
         n_heads: int = 4,
         n_layers: int = 2,
         dropout: float = 0.1,
@@ -86,6 +93,7 @@ class AggregationEncoder(nn.Module):
             enable_nested_tensor=False,
         )
 
+        self.readout = build_cell_readout(readout, d_agg)
         self.n_groups = n_groups
         # Sequence: CELL_CLS, then every group's summary tokens. Nothing else.
         # A metadata token used to sit at the end carrying age, and age is not
@@ -135,4 +143,4 @@ class AggregationEncoder(nn.Module):
 
         out = self.transformer(seq)
 
-        return out[:, 0, :]                   # (B, d_agg) — CELL_CLS only
+        return self.readout(out)              # (B, d_agg)

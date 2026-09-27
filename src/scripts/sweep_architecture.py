@@ -118,10 +118,14 @@ AGGREGATION: tuple[Arm, ...] = (
 
 GROUP: tuple[Arm, ...] = (
     Arm("base", "the control: exactly what the --run config builds today"),
-    Arm("grp_heads8", "8 group heads of 4 instead of 4 of 8. Costs nothing: "
-        "QKV is d_token to 3*d_token whatever the split", grp_heads=8),
+    Arm("grp_heads8", "8 group heads of 4 instead of 4 of 8. No parameters "
+        "and no arithmetic: QKV is d_token to 3*d_token whatever the split",
+        grp_heads=8),
     Arm("grp_heads16", "16 group heads of 2. The far end of the same axis, "
-        "and the point at which a head sees almost nothing", grp_heads=16),
+        "and the point at which a head sees almost nothing. NOTE it needs a "
+        "smaller --batch-size: scores are (batch, heads, L, L), so four times "
+        "the heads is four times the activation memory at constant FLOPs",
+        grp_heads=16),
     Arm("grp_depth1", "one block per group instead of two. If this reads flat "
         "the second block is free to spend elsewhere: 559,000 parameters",
         grp_layers=1),
@@ -158,6 +162,15 @@ def parse_args() -> argparse.Namespace:
                    help="Cells to score, sampled evenly across studies. The "
                         "neighbour search is quadratic in cells and linear in "
                         "width; the widest arm here is 44 * 17 * 32.")
+    p.add_argument("--batch-size", type=int, default=None,
+                   help="Override the experiment's batch size. Untrained "
+                        "scoring does not depend on it (the model is in eval "
+                        "mode, so DSBN uses running statistics), but the "
+                        "attention scores do: they are (batch, heads, L, L), "
+                        "so head count multiplies activation memory even "
+                        "though it leaves parameters and arithmetic alone. "
+                        "grp_heads16 at batch 256 asks for 8.88 GiB in one "
+                        "allocation and does not get it.")
     p.add_argument("--k", type=int, default=30)
     p.add_argument("--seed", type=int, default=24)
     p.add_argument("--out", required=True)
@@ -414,6 +427,10 @@ def main() -> None:
     model_cfg.n_groups = len(vocab.group_names)
     names = {s["id"]: s["name"] for s in study_configs}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.batch_size is not None:
+        logger.info("batch size %d, overriding the experiment's %d",
+                    args.batch_size, train_cfg.batch_size)
+        train_cfg.batch_size = args.batch_size
 
     logger.info("family %r, %d arms, varying from %s", args.family, len(arms),
                 args.run)

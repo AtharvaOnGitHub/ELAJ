@@ -77,9 +77,27 @@ DROP_SUFFIX = "_drop"
 KEPT_SUFFIX = "_kept"
 PATIENT_METRIC = "patient_knn"
 
-DEFAULT_MAX_CELLS = 20_000
-"""Cells scored per epoch. Cross-donor kNN is quadratic, and the definitive
-numbers come from score_arm.sh on the full split; this is a per-epoch gauge."""
+DEFAULT_MAX_CELLS = None
+"""No subsample for the headline metric.
+
+This was 20,000 for one run, and it silently changed what `family_knn` means.
+A cell's 30 nearest neighbours are drawn from whatever pool is present, so a
+thinner pool puts more distant cells in the neighbourhood and agreement falls
+for a reason that has nothing to do with the model. `v1_combined` read 0.806 at
+epoch 0 where `c1_combined` read 0.865, and most of that gap was the sample.
+The thinner metric was also noisier, which is worse than being low: it spiked
+at epoch 1, early stopping counted its patience from that spike, and the run
+died at epoch 8 of 22.
+
+This metric selects checkpoints and stops runs, and it is the one ruler applied
+across the whole c and v series. It must not change underneath a comparison."""
+
+DEFAULT_DONOR_MAX_CELLS = 20_000
+"""Cells scored per epoch in the cross-donor block, which is the quadratic one.
+
+Kept separate from `DEFAULT_MAX_CELLS` so that capping the expensive
+measurement cannot move the cheap one. The definitive cross-donor numbers come
+from `score_arm.sh` on the full split; this is a per-epoch direction gauge."""
 
 
 class LabelProbe:
@@ -88,12 +106,14 @@ class LabelProbe:
     def __init__(self, labels: np.ndarray, name: str = FAMILY_METRIC,
                  k: int = 30, seed: int = 24,
                  max_cells: int | None = DEFAULT_MAX_CELLS,
+                 donor_max_cells: int | None = DEFAULT_DONOR_MAX_CELLS,
                  patients: np.ndarray | None = None) -> None:
         self.labels = np.asarray(labels, dtype=object)
         self.name = name
         self.k = int(k)
         self.seed = int(seed)
         self.max_cells = max_cells
+        self.donor_max_cells = donor_max_cells
         self.patients = None if patients is None else np.asarray(patients, dtype=object)
         if self.patients is not None and len(self.patients) != len(self.labels):
             raise ValueError(
@@ -128,10 +148,7 @@ class LabelProbe:
                 f"{len(self.labels)} labels; the sampler order changed"
             )
         latent = np.concatenate([mu_gauss, circular_coordinates(mu_angle)], axis=-1)
-        keep = np.flatnonzero(self._labelled)
-        if self.max_cells is not None and len(keep) > self.max_cells:
-            keep = np.sort(np.random.default_rng(self.seed).choice(
-                keep, size=self.max_cells, replace=False))
+        keep = self._subsample(np.flatnonzero(self._labelled), self.max_cells)
         if len(keep) < self.k + 1:
             return {self.name: float("nan"), f"{self.name}_n": float(len(keep))}
         started = time.perf_counter()
@@ -144,10 +161,18 @@ class LabelProbe:
                     time.perf_counter() - started)
 
         if self.patients is not None:
-            out.update(self._donor_metrics(latent, keep, out[self.name]))
+            out.update(self._donor_metrics(latent, keep))
         return out
 
-    def _donor_metrics(self, latent, keep, within: float) -> dict[str, float]:
+    def _subsample(self, index: np.ndarray, limit: int | None) -> np.ndarray:
+        """`index` thinned to `limit` rows, or returned whole. Sorted, seeded."""
+        if limit is None or len(index) <= limit:
+            return index
+        drawn = np.random.default_rng(self.seed).choice(index, size=limit,
+                                                        replace=False)
+        return np.sort(drawn)
+
+    def _donor_metrics(self, latent, keep) -> dict[str, float]:
         """Cross-donor agreement, the drop from within-donor, and patient kNN.
 
         A failure here costs the three numbers, not the epoch: the probe is a
@@ -160,13 +185,22 @@ class LabelProbe:
         out: dict[str, float] = {}
         try:
             started = time.perf_counter()
+            # Both halves of the drop are measured on the SAME cells. Neighbour
+            # agreement depends on how densely the space is sampled, so a
+            # within-donor value from 91,598 cells minus a cross-donor value
+            # from 20,000 would report a difference in sample size as if it
+            # were a difference in donor transfer.
+            rows = self._subsample(keep, self.donor_max_cells)
             # n_permutations=0: the null test belongs in score_arm.sh, which
             # runs once. Per epoch we want the agreement and nothing slower.
             across = cross_group_agreement(
-                latent[keep], self.labels[keep], self.patients[keep],
+                latent[rows], self.labels[rows], self.patients[rows],
                 k=self.k, seed=self.seed, n_permutations=0,
             )
             excess = float(across.get("excess", float("nan")))
+            within = float(label_knn_agreement(
+                latent[rows], self.labels[rows], k=self.k, seed=self.seed,
+            )["excess"])
             out[self.name + CROSS_DONOR_SUFFIX] = excess
             out[self.name + DROP_SUFFIX] = within - excess
             # How many of each cell's k neighbours survived the exclusion.
@@ -177,18 +211,23 @@ class LabelProbe:
             out[self.name + KEPT_SUFFIX] = float(
                 across.get("neighbours_kept", float("nan")))
 
-            # Donor identity measured directly. Scored on every cell, not only
-            # the labelled ones, because every cell has a donor.
-            patient = label_knn_agreement(latent, self.patients,
+            # Donor identity measured directly. Drawn from every cell, not only
+            # the labelled ones, because every cell has a donor, and held to the
+            # same budget as the rest of this block.
+            everything = self._subsample(np.arange(len(self.patients)),
+                                         self.donor_max_cells)
+            patient = label_knn_agreement(latent[everything],
+                                          self.patients[everything],
                                           k=self.k, seed=self.seed)
             out[PATIENT_METRIC] = float(patient["excess"])
 
             logger.info(
-                "   %s: cross-donor %.4f over %.1f kept neighbours, drop "
-                "%.4f (lower is more donor-agnostic); %s %.4f (LOWER IS "
-                "BETTER), %.0f s",
-                self.name, excess, out[self.name + KEPT_SUFFIX],
-                within - excess, PATIENT_METRIC, out[PATIENT_METRIC],
+                "   %s: on %d cells, within %.4f, cross-donor %.4f over %.1f "
+                "kept neighbours, drop %.4f (lower is more donor-agnostic); "
+                "%s %.4f (LOWER IS BETTER), %.0f s",
+                self.name, len(rows), within, excess,
+                out[self.name + KEPT_SUFFIX], within - excess,
+                PATIENT_METRIC, out[PATIENT_METRIC],
                 time.perf_counter() - started,
             )
         except Exception as exc:                            # noqa: BLE001
@@ -220,8 +259,15 @@ def patients_in_order(dataset, order) -> np.ndarray | None:
     None rather than a raise: a dataset without donor ids loses the cross-donor
     numbers, and the probe says so at construction rather than stopping a run
     that is otherwise fine.
+
+    The accessor is `patient_ids`. `patient_id` is a column of the dataset's
+    internal cell table and not an attribute of the dataset, so asking for the
+    singular name returned the default and switched the cross-donor metrics off
+    for a whole run without failing: `getattr` with a default cannot tell a
+    dataset that has no donors from a name that was mistyped, which is why the
+    name is checked against the class below rather than guessed.
     """
-    patients = getattr(dataset, "patient_id", None)
+    patients = getattr(dataset, "patient_ids", None)
     if patients is None or len(patients) == 0:
         return None
     return np.asarray(patients, dtype=object)[np.asarray(order, dtype=np.int64)]

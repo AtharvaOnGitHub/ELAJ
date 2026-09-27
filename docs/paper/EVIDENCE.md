@@ -370,12 +370,168 @@ with more room to learn.
 
 ---
 
+## 7c. `v1_baselines_transductive`: the baselines fitted the conventional way
+
+Job output in `outputs/v_series/v1_baselines_transductive`. Same corpus, same
+382,464 scored cells, same scorer, 16 dimensions; each baseline fitted on all
+1,577,728 cells rather than on the 1,195,264 training donors only.
+
+**It settles whether §2's inductive fit handicaps the baselines. It does not.**
+Cross-donor family moves by at most 0.0012 in either direction, and cross-donor
+phase moves *down* for all three methods. On the two rows ELAJ is compared on,
+the inductive baselines are the same numbers as the conventional ones.
+
+What the extra fitting buys is donor identity, and only for the two neural
+methods:
+
+| | PCA-16 | scVI | scANVI |
+|---|---:|---:|---:|
+| patient kNN, inductive ↓ | 0.6628 | 0.6488 | 0.6507 |
+| patient kNN, transductive ↓ | 0.6614 | **0.7176** | **0.7134** |
+| within-donor phase, move | −0.0130 | **+0.0376** | **+0.0329** |
+| cross-donor phase, move | −0.0149 | −0.0055 | −0.0042 |
+| cross-donor neighbours kept of 100 | 52 (was 51) | **42** (was 50) | **41** (was 49) |
+
+scVI and scANVI, shown the donors they will be scored on, pull each donor's
+cells tighter together: donor identity up 0.06 to 0.07, within-donor phase up by
+about as much, neighbours surviving the same-donor exclusion down from 50 to 42.
+Cross-donor transfer does not improve at all. The extra capacity goes into donor
+structure. PCA is unchanged on every row, as a linear projection refitted on 30%
+more cells should be.
+
+Two uses. It licenses publishing the inductive fit as the fair comparison, with
+evidence rather than assertion. And it means the donor-blindness claim against
+the baselines *as conventionally used* is the stronger one: 0.37 against 0.72,
+not 0.37 against 0.65.
+
+**Do not quote the disease-stage row.** It rises about 0.07 for scVI and scANVI,
+but p = 0.194 with a null 95th percentile of 0.59 against a 0.40 estimate. Noise
+in both settings.
+
+**Status:** solid. Nothing here involves an ELAJ checkpoint, so the split defect
+in §2 does not touch it.
+
+---
+
+## 7d. `probes/c1_combined`: the input-space reference, and a job that ran out of clock
+
+Job 55326180, `outputs/probes/c1_combined`. **Cancelled at the 12-hour wall
+limit** partway through its second-to-last stage, so it carries 195 rows of the
+input-space stages and **none of the ELAJ encoder stages**, which were the point
+of running it. The stage that locates where along the encoder the family signal
+is lost has not been run on `c1_combined`.
+
+Cost, measured: each per-group stage takes about 4.5 minutes, and there are 90 of
+them (45 groups × raw and log-normalised), which is 6.8 hours before the pipeline
+and encoder stages start. A re-run needs a longer wall or fewer group stages.
+
+What it did produce is worth keeping. The per-group PCA of the counts, 45 groups
+at width 32 each, concatenated to width 1,440 — ELAJ's input, with no attention:
+
+| | raw counts | ELAJ's latent (withdrawn, §2) |
+|---|---:|---:|
+| kNN family | 0.9688 | 0.9506 |
+| cross-donor family | 0.944 | 0.9115 |
+| kNN phase | 0.8462 | 0.7002 |
+| cross-donor phase | 0.621 | 0.5413 |
+| patient kNN ↓ | 0.6653 | 0.3674 |
+| linear family | 0.985 | — |
+| linear phase | 0.394 | — |
+
+**The input already carries more cross-donor family signal than the latent
+retains: 0.944 against 0.9115.** So the encoder is not failing to find family
+structure that is absent; it is discarding family structure that was present.
+That is a different problem from the one "improve the encoder" usually names, and
+it points at the compression from 1,440 numbers to 16 rather than at the group
+transformers' capacity. The same row shows what the model *does* buy: donor
+identity falls from 0.6653 to 0.3674, which is most of the 1,440 → 16 budget
+spent on removing the donor.
+
+The tokenisation cost, across the 45 groups:
+
+| per-group kNN, mean over 45 groups | raw | log-normalised | gap |
+|---|---:|---:|---:|
+| cell family | 0.710 | 0.777 | **+0.067** |
+| menstrual phase | 0.397 | 0.465 | **+0.068** |
+
+Log-normalising wins on 44 of 45 groups for family and 45 of 45 for phase, worth
+about 0.067 either way. That is the cost of reading raw counts, measured per
+group and before any attention runs, and it is consistent with `c1_scale` (§6b)
+having been worth roughly that much end-to-end.
+
+**Status:** provisional for the input-space rows (they are a reference, not an
+ELAJ result, and the label sets match §2's). The encoder stages are **not run**.
+
+---
+
+## 7e. `v1_combined` read far worse than `c1_combined`, and three of the four reasons were measurement
+
+`v1_combined` peaked at family 0.884 against `c1_combined`'s 0.947, reached
+`val_nb` 0.4016 against 0.3732, reported every cross-donor metric as NaN, and
+early-stopped at epoch 8 of 22. The two arms are the same architecture on the
+same corpus and differ only in the vocabulary, by eleven genes and one group, so
+a gap that size is not the model.
+
+**1. The two arms were scored on different numbers of cells.** From the logs:
+
+```
+c1  family_knn: excess 0.8650 over 91598 cells (chance 0.659)
+v1  family_knn: excess 0.8060 over 20000 cells (chance 0.665)
+```
+
+A `DEFAULT_MAX_CELLS = 20_000` added with the cross-donor block capped the
+headline metric too. A cell's 30 nearest neighbours are drawn from whatever
+pool is present, so a thinner pool puts more distant cells in the neighbourhood
+and agreement falls for a reason that is not the model — the effect
+`MEASURING_WITHOUT_TRAINING.md` §9 describes. The two arms were never on one
+ruler.
+
+**2. The thinner metric also ended the run.** Subsampling made it noisier, it
+spiked to 0.9065 at epoch 1, the checkpointer took that as best, and patience
+counted from there. The run died at epoch 8 of 22 on a spike, not a plateau.
+`c1_combined` peaked at epoch 14.
+
+**3. The validation split itself moved.** Commit `482dc69` gave garcia_alonso
+real tissue levels, which changed the (study, tissue) strata the split
+stratifies over:
+
+| | study 6 val | study 7 val | val total | train total |
+|---|---:|---:|---:|---:|
+| c1 | 20,002 | 1,528 | 202,928 | 1,168,260 |
+| v1 | 5,027 | 1,792 | 188,217 | 1,196,684 |
+
+That this is the data and not the model is settled by a **model-free** control:
+the mean-profile baseline, which contains no learned parameters at all, moved
+from `nb_all_genes` 0.4088 to 0.4332 over the same change. Against their own
+baselines, c1 is 8.7% better and v1 7.3% — much closer than the raw figures.
+
+**4. The cross-donor metrics were never computed.** The log says `cross-donor
+OFF (no patient ids)`. `patients_in_order` read `getattr(dataset, "patient_id",
+None)`; the accessor is `patient_ids`, and `patient_id` is a column of the
+internal cell table. `getattr` with a default cannot tell a dataset that has no
+donors from a name that was mistyped, so it returned None and the whole block
+was skipped in silence for a 13-hour run.
+
+**What this costs.** `v1_combined` is not evidence about the v1 vocabulary
+either way, and neither is the c1-against-v1 comparison. Three of the four
+causes are now fixed in code (`label_probe.py`: separate budgets for the
+headline and cross-donor measurements, the drop computed on one sample, the
+accessor corrected). The fourth, the moved split, is not a bug — it is a
+corpus repair that should have invalidated the old checkpoints and did not say
+so, which is what `data/split_fingerprint.py` now enforces.
+
+**Status:** diagnosis solid; `v1_combined`'s own numbers are void.
+
+---
+
 ## 8. Pending
 
 | | what it will settle | expected |
 |---|---|---|
 | `f1_epochs_03/05/10` | what budget a frozen run needs | 25 Sep |
 | transferability gate | whether a frozen latent ranking survives a change of encoder | 27 Sep |
+| re-score of a clean checkpoint | the whole ELAJ column of §2, which is withdrawn | after the next run |
+| `probe_stages` re-run with a longer wall | where along the encoder family is lost | — |
 
 ---
 

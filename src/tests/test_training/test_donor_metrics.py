@@ -132,6 +132,75 @@ class TestWithoutDonorIds:
             lp.LabelProbe(families, k=K, patients=donors[:-1])
 
 
+class TestTheTwoBudgetsAreSeparate:
+    """The headline metric must not move when the donor block is capped.
+
+    `family_knn` selects checkpoints and drives early stopping, and it is the
+    one ruler applied across every arm of the c and v series. Capping it to
+    20,000 cells for one run cost `v1_combined` its comparability: agreement
+    depends on how densely the space is sampled, so a thinner sample scores
+    lower for a reason that is not the model.
+    """
+
+    def test_capping_the_donor_block_leaves_the_headline_metric_whole(
+            self, cells):
+        families, donors = cells
+        latent = positioned_by(families, np.random.default_rng(6))
+        whole = score(families, donors, latent, donor_max_cells=None)
+        capped = score(families, donors, latent, donor_max_cells=200)
+        assert capped["family_knn_n"] == N
+        assert capped["family_knn"] == pytest.approx(whole["family_knn"])
+
+    def test_the_drop_is_measured_on_the_cells_the_cross_donor_test_used(
+            self, cells):
+        """Otherwise the drop reports a change of sample size as donor loss."""
+        families, donors = cells
+        latent = positioned_by(families, np.random.default_rng(7),
+                               spread=1.8, spacing=2.0)
+        capped = score(families, donors, latent, donor_max_cells=200)
+        naive = capped["family_knn"] - capped["family_knn_xdonor"]
+        assert capped["family_knn_drop"] != pytest.approx(naive, abs=1e-6), (
+            "the drop was taken against the full-sample within-donor value"
+        )
+
+
+class TestTheDatasetAccessorTheProbeReads:
+    """`getattr(dataset, name, None)` cannot tell a dataset with no donors from
+    a name that was mistyped, and it returned None for a whole 13-hour run.
+    So the name is checked against the dataset class here."""
+
+    def test_the_name_exists_on_the_dataset(self):
+        import ast
+
+        probe = ast.parse((SRC / "endo_model" / "training"
+                           / "label_probe.py").read_text())
+        reads = {
+            node.args[1].value
+            for node in ast.walk(probe)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name) and node.func.id == "getattr"
+            and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+        }
+        assert "patient_ids" in reads, "the probe no longer reads a donor name"
+
+        dataset = ast.parse((SRC / "endo_model" / "data"
+                             / "dataset.py").read_text())
+        declared = {
+            member.name
+            for cls in ast.walk(dataset)
+            if isinstance(cls, ast.ClassDef)
+            and cls.name == "EndometriosisDataset"
+            for member in cls.body
+            if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        assert declared, "EndometriosisDataset was renamed or moved"
+        missing = reads - declared
+        assert not missing, (
+            f"label_probe reads {sorted(missing)} off the dataset, which "
+            f"declares no such name; getattr would return None in silence"
+        )
+
+
 class TestFailuresCostTheNumbersNotTheEpoch:
     def test_a_broken_cross_donor_call_leaves_the_within_donor_number(
             self, cells, monkeypatch):

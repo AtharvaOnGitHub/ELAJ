@@ -181,24 +181,55 @@ token change, and that has to be stated wherever the two are compared.
 
 ---
 
+### 0.4 Every ELAJ number in the paper rests on a split that moved (open)
+
+The fix in 0.3 changed the (study, tissue) strata, and the split is stratified
+over exactly those, so the patient wall moved with it. `c1_combined` trained
+before the fix and was scored after it, and study 7's validation grew from 1,528
+cells to 1,792, which had to come from donors that had been on the training
+side.
+
+**So the published ELAJ column was measured partly on cells the model had
+learnt,** and leakage raises a score by an amount nothing in the output reveals.
+SCOREBOARD.md §2 is marked withdrawn; EVIDENCE.md §7e has the arithmetic.
+
+Guarded, not just fixed: `data/split_fingerprint.py` writes the held-out donors
+into every checkpoint and the scorers refuse a mismatch. Checkpoints already on
+disk have no record, so they score with an `UNVERIFIED SPLIT` warning, which is
+honest about what can and cannot be checked for them.
+
+**What is needed:** one clean ELAJ column. A run trained and scored on the same
+split, with the corrected probe. No other arm's numbers can be quoted until one
+exists.
+
+---
+
 ## 1. Next, in order
 
-**P1. Launch `v1_combined`.** `c1_combined` settled it: 0.9466 peak family
-against `c1_scale`'s 0.9292, and better reconstruction too. The architecture
-arm is worth its 26 hours.
+**P1. One clean ELAJ column.** Nothing else in the paper matters until the main
+table has a number that can be defended. The next training arm carries the split
+fingerprint, the corrected probe budgets, and the fixed donor accessor, so it is
+the first run whose score is checkable. Until it lands, SCOREBOARD.md §2 has no
+ELAJ column.
 
-**P2. A transductive baseline pass on v1.** C5 is the claim that cross-donor
-agreement separates biology from donor identity, and its evidence was scVI's
-phase falling 0.605 to 0.437 when refitted inductively on the r8 corpus. On
-v1, inductive scVI reaches **0.7013**. Without a transductive pass on the same
-corpus there is no comparison to make, and the claim cannot be written. This
-is a two-hour job and it may cost us a claim, which is a reason to run it now
-rather than in October.
+**P2. Re-run `v1_combined`.** Its numbers are void (EVIDENCE.md §7e): it was
+scored on 20,000 cells against `c1_combined`'s 91,598, its cross-donor block
+never ran, and it early-stopped at epoch 8 on a subsampling spike. It is not
+evidence about the v1 vocabulary either way.
 
-**P3. Score both v1 arms** against `v1_baselines` once they land. Until then
-no ELAJ number is comparable to the table in EVIDENCE.md §7.
+**P3. Re-run `probe_stages` on a checkpoint, with a longer wall.** Job 55326180
+was cancelled at 12 hours having done the 90 input-space stages (4.5 minutes
+each, 6.8 hours) and none of the encoder stages, which were the point. Either
+raise the wall past 20 hours or cut the per-group stages, which are a reference
+and are now measured (EVIDENCE.md §7d).
 
-**P4. The f1 epoch ladder**, once `v1_combined` has a checkpoint.
+**P4. The f1 epoch ladder**, once a clean checkpoint exists.
+
+**Done: the transductive baseline pass.** `v1_baselines_transductive` landed and
+settles P2's old question in the paper's favour — see EVIDENCE.md §7c and
+SCOREBOARD.md §3. Cross-donor family and phase are unmoved by transductive
+fitting, so the inductive baselines are not handicapped; what the neural
+baselines gain is donor identity, +0.069 for scVI. C5 can be written.
 
 ---
 

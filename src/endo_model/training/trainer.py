@@ -95,6 +95,10 @@ class Trainer:
         # pass and may rank checkpoints; see label_probe.py.
         self.label_probe = label_probe
         self._probe_rows: list[tuple[np.ndarray, np.ndarray]] = []
+        # Which donors were held out, written into every checkpoint so that a
+        # later scoring run cannot quietly use a different wall. See
+        # data/split_fingerprint.py.
+        self._split_record = self._fingerprint_validation_split()
         # Re-encodes a fixed cohort every validation pass and reports how
         # far the encoder's output moved since last epoch; see drift.py.
         # It decides when the encoder is settled enough to freeze.
@@ -165,6 +169,25 @@ class Trainer:
         # History carried over a resume, so metrics.csv and the loss panels
         # cover the whole run rather than the part after the restart.
         self._restored_history: dict[str, list[float]] | None = None
+
+    def _fingerprint_validation_split(self) -> dict | None:
+        """The held-out donors, as a record for the checkpoint payload.
+
+        None on any failure. A run must not die because it could not write down
+        its provenance; the scorer treats a missing record as unverified and
+        says so, which is the same outcome as every checkpoint saved so far.
+        """
+        from endo_model.data.split_fingerprint import SplitFingerprint
+
+        try:
+            record = SplitFingerprint.of(self.val_loader.dataset)
+        except Exception as exc:                                # noqa: BLE001
+            logger.warning("Could not fingerprint the validation split "
+                           "(%s: %s); checkpoints will be unverifiable",
+                           type(exc).__name__, exc)
+            return None
+        logger.info("Validation split fingerprint %s", record.describe())
+        return record.as_record()
 
     def resumable_state(self, history: dict[str, list[float]]) -> dict:
         """Everything a resume needs beyond weights and optimizer.
@@ -309,6 +332,7 @@ class Trainer:
                         epoch, self.global_step, stop_metric,
                         extra={"train_metrics": train_metrics,
                                "val_metrics": val_metrics,
+                               "split_fingerprint": self._split_record,
                                **self.resumable_state(history)},
                     )
 

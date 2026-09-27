@@ -215,6 +215,7 @@ def main() -> None:
         format_agreement, label_knn_agreement, periodic_corr,
     )
     from endo_model.evaluation.scib_metrics import compute_scib_metrics
+    from endo_model.data.split_fingerprint import SplitGuard
     from endo_model.evaluation.purity_report import best_checkpoint
     from endo_model.model.endo_model import EndoFoundationModel
     from endo_model.training.checkpointing import CheckpointManager
@@ -243,7 +244,8 @@ def main() -> None:
     ckpt = best_checkpoint(run_dir)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EndoFoundationModel(vocab, model_cfg).to(device)
-    CheckpointManager.load(str(ckpt), model, None, map_location=device)
+    payload = CheckpointManager.load(str(ckpt), model, None,
+                                     map_location=device)
 
     # One embedding pass per split, concatenated. Each split is a separate
     # Dataset, so its own sampler order is what aligns its metadata; mixing the
@@ -260,6 +262,11 @@ def main() -> None:
         loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
                               study_configs, extra_obs_columns=ALL_COLUMNS,
                               split=split)
+        # Before embedding anything: is this the split the checkpoint was held
+        # out from? A mismatch scores the model partly on cells it trained on,
+        # and the resulting numbers look like a better model.
+        if split != "train":
+            SplitGuard().check(payload, loader.dataset)
         order = sampler_order(loader)
         extra = loader.dataset.extra_obs
         logger.info("Embedding %d cells from %s", len(order), split)

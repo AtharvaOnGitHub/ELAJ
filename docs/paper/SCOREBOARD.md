@@ -57,12 +57,32 @@ the benchmark is the number quoted.
 ## 2. The main table
 
 Baselines from `outputs/v_series/v1_baselines` (v1 corpus, inductive, fitted on
-1,195,264 training donors, applied to 382,464 held-out cells). ELAJ from
-`outputs/C_series/c1_combined/validation`, job 55238504, on the **c1**
-vocabulary: same cells, same donors, same scorer, eleven genes and one group
-apart. Treat the ELAJ column as accurate to about that much.
+1,195,264 training donors, applied to 382,464 held-out cells).
 
-| | | PCA-16 | scVI | scANVI | **ELAJ** |
+> ### ⚠ THE ELAJ COLUMN IS WITHDRAWN. DO NOT QUOTE IT.
+>
+> `c1_combined` was **trained before** commit `482dc69` and **scored after it**.
+> That commit repaired the tissue-column collision, which changed the
+> (study, tissue) strata, which moved the patient split:
+>
+> | | study 6 val cells | study 7 val cells | val total |
+> |---|---:|---:|---:|
+> | as `c1_combined` trained | 20,002 | 1,528 | 202,928 |
+> | as job 55238504 scored | 5,027 | 1,792 | 188,217 |
+>
+> Study 7 **gained** validation cells, and they came from donors that had been
+> on the training side. So the run was scored partly on cells it had learnt.
+> Contamination inflates a score, and by an amount nothing in the output
+> reveals: the numbers below are upper bounds of unknown tightness, not
+> measurements. Every one of them needs a re-score against the split the
+> checkpoint actually trained on, or a re-train on the current split.
+>
+> The guard that would have caught this is now in
+> `data/split_fingerprint.py`; every checkpoint written from here on records
+> its held-out donors and the scorers refuse a mismatch. Checkpoints already
+> on disk carry no record, so they score with an `UNVERIFIED SPLIT` warning.
+
+| | | PCA-16 | scVI | scANVI | ELAJ *(withdrawn)* |
 |---|---|---:|---:|---:|---:|
 | **Cell family** | kNN, k=30 ↑ | **0.9897** | 0.9870 | 0.9873 | 0.9506 |
 | | cross-donor, k=100 ↑ | **0.9866** | 0.9822 | 0.9835 | 0.9115 |
@@ -92,13 +112,28 @@ baselines' 3 on different cells), so it is indicative rather than a
 head-to-head. scANVI is supervised on cell family, so its family rows are not
 a fair comparison either.
 
-### What the column says
+### What the column says, if it survives a clean re-score
+
+Read everything here as a hypothesis about the re-score, not a result.
+
+Contamination does not touch all rows equally, which is worth stating before
+the readings. It flatters whatever rewards recognising a particular cell, so the
+within-donor kNN rows and the donor-identity row are the exposed ones. It cannot
+manufacture the cross-donor rows' *shape*, since those exclude a cell's own
+donor whichever split it came from, but the excluded donor may itself have been
+a training donor, so those are suspect too, just less so.
 
 **ELAJ loses on biology and wins donor-blindness by a wide margin.**
 
 Patient identity, **0.3674 against 0.6488 to 0.6628**. The baselines encode
 who the cell came from roughly twice as strongly. That is the one column ELAJ
 has ever won and it is still the clearest result in the table.
+
+This is the one row the contamination works *against*. A donor the model trained
+on is easier to identify, not harder, so leakage pushes patient kNN up. ELAJ's
+0.3674 is therefore a ceiling on a number where lower is better: a clean
+re-score should land at or below it. It is the only row that survives the defect
+in the direction the paper wants.
 
 **It keeps far more neighbours.** 67 of 100 survive the same-donor exclusion
 against the baselines' 49 to 51, which is the same fact seen from the other
@@ -137,7 +172,74 @@ that lead is the question the campaign now turns on.
 
 ---
 
-## 3. Has the baseline moved?
+## 3. Are the baselines handicapped by being fitted inductively? No.
+
+A reviewer will ask this, because it is the obvious way to win a comparison
+unfairly. PCA, scVI and scANVI are all transductive by habit: the usual practice
+is to fit them on the same cells they are then scored on, which lets them shape
+their representation around exactly those donors. ELAJ cannot do that — it is
+inductive by construction, so the held-out donors are genuinely unseen. Fitting
+the baselines inductively to match could be read as taking something away from
+them.
+
+`outputs/v_series/v1_baselines_transductive` settles it. Same corpus, same
+cells, same scorer, same 16 dimensions; the only change is that each baseline is
+fitted on all 1,577,728 cells and scored on the 382,464 held out from ELAJ.
+
+| | | PCA-16 | scVI | scANVI |
+|---|---|---:|---:|---:|
+| **cross-donor family** | inductive | 0.9866 | 0.9822 | 0.9835 |
+| | transductive | 0.9868 | 0.9810 | 0.9824 |
+| | move | +0.0002 | −0.0012 | −0.0011 |
+| **cross-donor phase** | inductive | 0.6477 | 0.7013 | 0.6903 |
+| | transductive | 0.6328 | 0.6958 | 0.6861 |
+| | move | −0.0149 | −0.0055 | −0.0042 |
+| **kNN family** | move | −0.0001 | 0.0000 | +0.0002 |
+| **kNN phase** | move | −0.0130 | **+0.0376** | **+0.0329** |
+| **patient kNN** ↓ | inductive | 0.6628 | 0.6488 | 0.6507 |
+| | transductive | 0.6614 | **0.7176** | **0.7134** |
+| | move | −0.0014 | **+0.0688** | **+0.0627** |
+
+**On the two rows the paper compares ELAJ against, transductive fitting is worth
+nothing.** Cross-donor family moves by at most 0.0012 in either direction, and
+cross-donor phase moves *down* for all three. The inductive baselines in §2 are
+not weakened versions of the usual ones; on the headline metrics they are the
+same number.
+
+**What transductive fitting does buy the two neural baselines is donor
+identity.** scVI's patient kNN rises 0.0688 and scANVI's 0.0627, and their
+within-donor phase rises by about as much. Fitted on the cells it is scored on,
+scVI gets better at recognising which person a cell came from and better at
+labelling phase among that person's own neighbours, while getting no better at
+carrying either label to a new person. The two effects are one effect.
+
+The neighbour counts say the same thing from the other side. Of each cell's 100
+nearest neighbours, the number surviving the same-donor exclusion:
+
+| | PCA-16 | scVI | scANVI |
+|---|---:|---:|---:|
+| inductive | 51 | 50 | 49 |
+| transductive | 52 | **42** | **41** |
+
+scVI and scANVI pull each donor's cells tighter together when they have seen
+those donors; PCA, being a linear projection, does not change. So the extra
+fitting is spent on donor structure, and the cross-donor test — which is the
+test — is unmoved.
+
+Two consequences. **The inductive fit in §2 is the right comparison to publish**,
+and this table is the evidence for saying so rather than merely asserting it.
+And **the honest version of ELAJ's donor-blindness claim is the stronger one**:
+against the baselines as they are conventionally used, the gap is 0.37 against
+0.71 to 0.72, not 0.37 against 0.65.
+
+One row moves the other way and should not be quoted: cross-donor disease stage
+rises about 0.07 for scVI and scANVI under transductive fitting. Its permutation
+test gives p = 0.194 there and its null 95th percentile is 0.59, well above the
+0.40 point estimate, so the row is noise in both settings.
+
+---
+
+## 4. Has the baseline moved?
 
 Yes, upward, because the corpus grew: 784,896 training cells to 1,195,264,
 controls in, organoids out, 74 query donors.
@@ -153,7 +255,7 @@ so the target the plan was written against was far too easy.
 
 ---
 
-## 4. Has ELAJ improved?
+## 5. Has ELAJ improved?
 
 Yes, on the training loop's within-donor family probe, the only ruler applied
 consistently across the c series.
@@ -173,14 +275,14 @@ ELAJ column reads *not scored*.
 
 ---
 
-## 5. Reference only: superseded corpora
+## 6. Reference only: superseded corpora
 
 > **REMOVE BEFORE SUBMISSION.** Nothing in this section can appear in the
 > paper. Both sections below are on corpora the paper does not use, so no
 > number here is comparable to §2 or to any other section here. They are kept
 > only so that a trend can be seen while the v series runs.
 
-### 5.1 The r series (twelve studies, organoids in, no controls)
+### 6.1 The r series (twelve studies, organoids in, no controls)
 
 `outputs/benchmarks/r8_all`, transductive: every baseline fitted on the cells
 it was scored on, which flatters them. ELAJ never saw those donors.
@@ -198,7 +300,7 @@ The one row ELAJ won, and by a wide margin.
 `outputs/benchmarks/r8_inductive` refitted the baselines fairly and gave scVI
 cross-donor family 0.971 and phase 0.437, and PCA-16 family 0.978.
 
-### 5.2 The c series (the v1 corpus, the c1 vocabulary)
+### 6.2 The c series (the v1 corpus, the c1 vocabulary)
 
 Eleven studies, controls in, 15,495 genes in 45 groups. Differs from v1 in the
 vocabulary alone: eleven genes and one group. No baselines were run against

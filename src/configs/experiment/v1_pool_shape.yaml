@@ -96,6 +96,18 @@ overrides:
   model.loss.free_bits: 0.25
   model.loss.w_dab: 0.5
 
+  # The setting the first launch of this arm missed, and it inverted the bet.
+  # The circular KL enters the loss as beta_kl * w_kl_circ * kl_circ
+  # (objectives/composite.py:210), so the pressure on kappa is the PRODUCT.
+  # Every r-series arm that carried the branch set this to 0.1; the default is
+  # 1.0. Launched at beta 0.2 with the default, this arm ran at 0.2 * 1.0 =
+  # 0.20 against r8_direction's 0.5 * 0.1 = 0.05 -- four times the pressure
+  # that had already pinned kappa to the floor, not the 2.5x less the arm was
+  # designed for. All four dimensions pinned at kappa = 1.00 by epoch 5, which
+  # at that pressure is the expected result and says nothing about the branch.
+  # At 0.1 the product is 0.02, which is 0.4x r8 and the bet as intended.
+  model.loss.w_kl_circ: 0.1
+
   model.dab.lambda_dab: 0.01
 
   model.cce.enabled: true

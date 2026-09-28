@@ -667,6 +667,79 @@ memory check.
 
 ---
 
+## 7h. The auxiliary loss terms carried a hidden weight of the gene count
+
+Found 28 September 2026 from `v1_pool`'s loss panels, by inspection of the
+curves rather than of the code: DAB dominated both the magnitude and the
+epoch-to-epoch variability of the total, which no `lambda_dab` of 0.01 should
+produce.
+
+**The mechanism.** `nb` is a mean over measured genes. Both KL terms are
+divided by `n_measured` so they sit on that same per-gene scale, and
+`composite.py` says why in a comment: without it, `beta_kl = 1.0` was an
+effective beta of 469 for the Gaussian branch and 1,875 for the circular one,
+and run 50132670 collapsed exactly as that predicts.
+
+**`cce_loss` and `dab_loss` are per-cell scalars and were never given the same
+division.** Multiply the objective through by `n_measured` to read it per cell:
+
+```
+n·total = NLL_cell + β·KL_cell + n·w_cce·CCE + n·w_dab·CE_study
+```
+
+so each auxiliary term carried a weight of `n_measured`, which is 13,144 to
+15,031 on this corpus and varies by study. What the encoder actually felt,
+against reconstruction at 1.0:
+
+| arm | nominal `lambda_dab` | effective weight |
+|---|---:|---:|
+| r2_ref, r2_cce | 0.2 | **~1,400** |
+| r1_dab_005 | 0.05 | ~350 |
+| r4 through r8 | 0.02 | ~140 |
+| r5_lambda_low | 0.005 | ~35 |
+| `v1_pool` | 0.01 | **~70** |
+| CCE, `w_cce` 0.05 | — | ~700 |
+
+**The history is the confirmation.** `lambda_dab` was walked 0.2 → 0.1 → 0.05 →
+0.02 → 0.005 across five waves and then set to **0.0 for every arm of the c
+series and for `v1_combined`**. Twenty-six configs carry `lambda_dab: 0.0`.
+That is the signature of a knob whose real scale is three orders of magnitude
+above its nominal one: each reduction helped, so the next was smaller, until
+the term was abandoned rather than understood.
+
+**What it explains.** `v1_pool`'s `val_nb` sitting on the study-mean baseline
+while the discriminator marches toward chance: at an effective 70, most of the
+gradient reaching the latent is adversarial, and the study-mean baseline is
+precisely what a study-blind latent cannot beat. It also explains why every
+previous wave concluded that DAB hurt.
+
+**It reverses a reading made two days earlier.** `train_cce` falling 0.262 →
+0.0148 was recorded here as "CCE is solved, so λ_CCE is inert". At an effective
+weight of ~700 the opposite holds: CCE is near zero *because* it is weighted
+heavily. A near-zero loss under a large weight is a sign of dominance, not of
+irrelevance.
+
+**The fix**, committed 28 September: both terms are divided by `n_measured` in
+the objective, matching the KL, while the reported values stay raw so `dab`
+remains readable against chance at ln(11) = 2.398. `CompositeLoss` now logs the
+weights it actually applies on the first batch of every run.
+
+**Consequence for every earlier number.** No `lambda_dab` or `w_cce` written
+before 28 September 2026 is comparable with one written after. `w_cce: 0.05`
+was an effective 700 and is now 0.05. Arms with `lambda_dab: 0.0` are
+unaffected, which is most of them.
+
+**Status:** the arithmetic is solid and the code is fixed. The right operating
+point in the corrected units is **unmeasured**, and no arm has yet run under
+them.
+
+**For the paper.** This is a methods result, not only a defect. In any
+multi-study VAE whose reconstruction is a per-gene mean, an auxiliary per-cell
+term silently acquires a weight equal to the measured gene count, and that
+count varies by study. Worth a Methods paragraph; a reviewer will recognise it.
+
+---
+
 ## 8. Pending
 
 | | what it will settle | expected |

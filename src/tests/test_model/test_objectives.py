@@ -228,8 +228,12 @@ class TestCompositeLoss:
             _make_fake_batch(),
             current_step=0, total_steps=100,
         )
+        # dab enters the total divided by the measured gene count, like the
+        # KL terms, so that w_dab means what it says. The REPORTED dab stays
+        # the raw cross-entropy, which is what can be read against chance at
+        # ln(n_studies).
         assert torch.allclose(
-            out["elbo"] + 0.7 * out["dab"], out["total"], atol=1e-6
+            out["elbo"] + 0.7 * out["dab"] / G_MEAS, out["total"], atol=1e-6
         )
 
     def test_elbo_excludes_dab_even_when_dab_dominates(self):
@@ -253,6 +257,67 @@ class TestCompositeLoss:
 
         assert elbos[0] == pytest.approx(elbos[1], abs=1e-6)
         assert totals[1] > totals[0] + 1.0
+
+    def test_auxiliary_terms_are_per_gene_like_everything_else(self):
+        """`nb` is a mean over genes and both KLs are divided by the gene count
+        to match it. `cce` and `dab` are per-CELL scalars, and until 28
+        September 2026 they were not divided, so each carried a hidden weight
+        of n_measured: 13,144 to 15,031 on the real corpus.
+
+        That made lambda_dab 0.01 an effective 70 against reconstruction, and
+        it is why lambda_dab was walked from 0.2 down to 0 across five waves.
+        A weight has to mean what it says or nothing tuned against it means
+        anything.
+        """
+        batch = _make_fake_batch()
+        torch.manual_seed(0)
+        output = _make_model_output(torch.arange(G_MEAS))
+
+        torch.manual_seed(0)
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_dab=1.0)
+        out = comp(output, batch, current_step=0, total_steps=100)
+
+        contribution = float(out["total"] - out["elbo"])
+        assert contribution == pytest.approx(float(out["dab"]) / G_MEAS,
+                                             abs=1e-6)
+        # And emphatically NOT the raw per-cell value, which is what it was.
+        assert contribution != pytest.approx(float(out["dab"]), abs=1e-3)
+
+    def test_the_reported_dab_stays_a_readable_cross_entropy(self):
+        """Divided in the objective, raw in the report.
+
+        The logged number has to stay comparable with chance at ln(n_studies),
+        because that is the only way to read whether the latent is going
+        study-blind. On the real corpus that is ln(11) = 2.398.
+        """
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_dab=1.0)
+        out = comp(
+            _make_model_output(torch.arange(G_MEAS)),
+            _make_fake_batch(),
+            current_step=0, total_steps=100,
+        )
+        chance = float(torch.log(torch.tensor(float(N_STUDIES))))
+        assert 0.0 < float(out["dab"]) < 3.0 * chance
+
+    def test_gene_count_changes_the_weight_the_encoder_feels(self):
+        """The division is by n_measured, not by a constant, which follows the
+        KL's reasoning: these are prices on what the latent stores and should
+        be weighed against the reconstruction evidence actually in the batch.
+        A study measuring more genes therefore feels a lighter adversary, and
+        that is a choice this test pins rather than an accident."""
+        batch = _make_fake_batch()
+        contributions = []
+        for n in (G_MEAS, G_MEAS // 2):
+            torch.manual_seed(0)
+            output = _make_model_output(torch.arange(n))
+            torch.manual_seed(0)
+            comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0,
+                                 w_dab=1.0)
+            out = comp(output, batch, current_step=0, total_steps=100)
+            contributions.append(float(out["total"] - out["elbo"])
+                                 / float(out["dab"]))
+        assert contributions[1] == pytest.approx(2.0 * contributions[0],
+                                                 rel=1e-6)
 
     def test_total_is_scalar_finite(self):
         comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0)

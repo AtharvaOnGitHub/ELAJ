@@ -1,6 +1,6 @@
 # What is left, by part of the paper
 
-Updated **27 September 2026**, 15 days from the 12 October deadline. Companion
+Updated **28 September 2026**, 14 days from the 12 October deadline. Companion
 to [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md), which holds the claims and the
 schedule, and [`EVIDENCE.md`](EVIDENCE.md), which holds what we already have.
 
@@ -23,6 +23,11 @@ deliberately out of scope; nothing there is ever a top-five item.
 > **Nothing on the latent programme has run.** The frozen-encoder ladder, the
 > transferability gate, the latent sweep, and all three required ablations are
 > at zero, and they were scheduled for 25 September.
+>
+> **And as of 28 September, the adversary was never tuned.** `lambda_dab` and
+> `w_cce` carried a hidden weight equal to the measured gene count, so every
+> value chosen across five waves was three orders of magnitude off (§0.6). The
+> code is fixed; nothing has yet run under the corrected units.
 
 ---
 
@@ -254,9 +259,44 @@ went out. But that is a guess, and a guess is what moving three variables buys.
 named predecessor on the same split, or the arm is not evidence. With 15 days
 left there is no budget for a second unattributable run.
 
+### 0.6 Every tuned value of `lambda_dab` and `w_cce` is in the wrong units (fixed in code, unmeasured in practice)
+
+`nb` is a mean over measured genes, and both KL terms are divided by
+`n_measured` to match it. `cce_loss` and `dab_loss` are per-cell scalars and
+were not, so each carried a hidden weight equal to the measured gene count:
+13,144 to 15,031 here, varying by study. `lambda_dab: 0.01` was an effective
+**70** against reconstruction; `w_cce: 0.05` was an effective **700**.
+
+The campaign history is the evidence. `lambda_dab` was walked 0.2 → 0.1 → 0.05
+→ 0.02 → 0.005 across five waves and then set to **0.0 in twenty-six configs**,
+including every arm of the c series. Every one of those decisions was taken
+against a number three orders of magnitude below what the model experienced,
+so **the conclusion that "DAB hurts" is not supported by any of them.**
+
+Fixed 28 September: both terms divided by `n_measured` in the objective, raw
+values still reported so `dab` stays readable against chance at ln(11) = 2.398,
+and `CompositeLoss` logs the weights it actually applies on the first batch.
+
+**What is still open.** The right operating point in the corrected units is
+unmeasured, and no arm has run under them. `v1_pool` and `v1_pool_shape` are
+both running under the old scaling. Full arithmetic in EVIDENCE.md §7h.
+
+**It also reverses a reading.** `train_cce` falling to 0.0148 was recorded as
+"CCE is solved, λ_CCE inert". Under an effective weight of 700 it means the
+opposite: near zero because it is weighted heavily.
+
+---
+
 ---
 
 ## 1. Next, in order
+
+**P0. Calibrate DAB in the corrected units.** Nothing about the adversary is
+known any more (§0.6). It is the term standing between `v1_pool` and a
+reconstruction that beats the study-mean baseline, and it is the one knob whose
+history is entirely uninterpretable. One arm at `lambda_dab: 0.0` and one at a
+chosen effective weight would settle it; the r-series' long-preferred 0.02
+becomes an effective 0.01 under the fix, which is a defensible starting point.
 
 **P1. One clean ELAJ column.** Nothing else in the paper matters until the main
 table has a number that can be defended. The next training arm carries the split

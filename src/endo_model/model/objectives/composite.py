@@ -11,6 +11,8 @@ Call signature is designed for the Trainer; includes optional cce_output2 for
 the InfoNCE contrastive loss when two forward passes are used.
 """
 
+import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +23,8 @@ from .cce_embedding import cce_embedding
 from .contrastive import InfoNCELoss
 from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
 from .reconstruction import NegativeBinomialLoss
+
+logger = logging.getLogger(__name__)
 
 
 class CompositeLoss(nn.Module):
@@ -89,6 +93,31 @@ class CompositeLoss(nn.Module):
         self.cce = InfoNCELoss(temperature=cce_temperature) if w_cce > 0.0 else None
         self.cce_block_normalise = cce_block_normalise
         self.cce_circular_weight = cce_circular_weight
+        # Printed once, from the first batch, because n_measured is not known
+        # until one arrives and because the weights a run ACTUALLY applies are
+        # the thing that went unnoticed for five waves. See the note in
+        # `forward` beside cce_per_gene.
+        self._weights_reported = False
+
+    def _report_weights_once(self, n_measured: int) -> None:
+        """Log the weights this run applies, relative to reconstruction at 1.
+
+        Once per process, on the first batch. Every term is now per gene, so
+        each weight below is what it says it is; before 28 September 2026 the
+        two auxiliary terms were multiplied by n_measured and no log recorded
+        it.
+        """
+        if self._weights_reported:
+            return
+        self._weights_reported = True
+        logger.info(
+            "Objective weights per gene, against reconstruction 1.0: "
+            "kl_gauss %.4g, kl_circ %.4g, cce %.4g, dab %.4g "
+            "(lambda_dab_max %.4g x w_dab %.4g); %d measured genes",
+            self.w_kl_gauss, self.w_kl_circ, self.w_cce,
+            self.lambda_dab_max * self.w_dab,
+            self.lambda_dab_max, self.w_dab, n_measured,
+        )
 
     def _embedding(self, model_output: dict[str, Tensor]) -> Tensor:
         """One cell's deterministic latent, laid out for a distance-based loss.
@@ -204,17 +233,52 @@ class CompositeLoss(nn.Module):
         # it learned nothing about the model. It is also what made early
         # stopping and checkpointing pick the wrong epochs until both were moved
         # onto val_nb.
+        # PER-CELL TERMS ON A PER-GENE OBJECTIVE, and the reason both weights
+        # below meant something other than what every config assumed.
+        #
+        # `nb` is a mean over measured genes. Both KL terms are divided by
+        # n_measured above for exactly that reason, and the comment there
+        # records what happened when they were not: an effective beta of 469.
+        # `cce` and `dab` are per-CELL scalars and were never given the same
+        # division, so each silently carried a weight of n_measured -- 13,144
+        # to 15,031 here, and varying by study.
+        #
+        # What that made the real weights, against reconstruction at 1.0:
+        #
+        #     dab   lambda_dab * w_dab * n_measured
+        #           = 0.01 * 0.5 * ~14,000  =  ~70     (v1_pool)
+        #           = 0.02 * 0.5 * ~14,000  =  ~140    (r4 through r8)
+        #           = 0.20 * 0.5 * ~14,000  =  ~1,400  (r2)
+        #     cce   w_cce * n_measured = 0.05 * ~14,000 = ~700
+        #
+        # Which is the history: lambda_dab was walked 0.2 -> 0.1 -> 0.05 ->
+        # 0.02 -> 0.005 across five waves and then set to 0.0 for every arm of
+        # the c series. Each of those decisions was taken against a number
+        # three orders of magnitude below the one the model experienced.
+        #
+        # Dividing by n_measured rather than by a constant follows the KL's
+        # reasoning: these are prices on what the latent stores, and they
+        # should be weighed against the reconstruction evidence actually
+        # present in the batch, which varies by study.
+        #
+        # THIS CHANGES WHAT EVERY EXISTING CONFIG DOES. A w_cce of 0.05 was an
+        # effective 700 and is now 0.05. Configs written before 28 September
+        # 2026 carry weights in the old units and are not comparable.
+        cce_per_gene = cce_loss / n_measured
+        dab_per_gene = dab_loss / n_measured
+        self._report_weights_once(n_measured)
+
         elbo = (
             self.w_nb * nb
             + beta_kl * self.w_kl_gauss * kl_gauss
             + beta_kl * self.w_kl_circ * kl_circ
-            + self.w_cce * cce_loss
+            + self.w_cce * cce_per_gene
         )
 
         # What backward() actually descends. The classifier has to be trained
         # for `dab` to mean anything — an untrained one reports chance whatever
         # the latent holds — so its loss stays in the graph.
-        total = elbo + self.w_dab * dab_loss
+        total = elbo + self.w_dab * dab_per_gene
 
         return {
             "elbo": elbo,

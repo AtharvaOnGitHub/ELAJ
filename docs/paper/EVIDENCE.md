@@ -729,9 +729,31 @@ before 28 September 2026 is comparable with one written after. `w_cce: 0.05`
 was an effective 700 and is now 0.05. Arms with `lambda_dab: 0.0` are
 unaffected, which is most of them.
 
-**Status:** the arithmetic is solid and the code is fixed. The right operating
-point in the corrected units is **unmeasured**, and no arm has yet run under
-them.
+**Status: the arithmetic is solid, the causal story is not.** Corrected 29
+September against `v1_pool`'s finished run.
+
+The coefficient is what it says: in per-cell units the adversary's weight is
+`n_measured × w_dab × lambda_dab` ≈ 70. **But a large coefficient on a term
+whose gradient is small is not a dominant force, and I inferred the second from
+the first.** The direct evidence is against it. Across all eighteen epochs of
+`v1_pool`, at nominal `lambda_dab` 0.01, the study discriminator sat at **2.02
+validation and 1.95 train against chance at ln(11) = 2.398** and never
+approached it. An adversary genuinely carrying seventy times reconstruction's
+weight would annihilate study identity in the latent. This one never wins.
+
+So what is established: the two auxiliary terms were on a different scale from
+everything else, which is a defect whether or not it dominated, and a weight
+must mean what it says before anything can be tuned against it. What is **not**
+established: that DAB's effective strength is why `lambda_dab` was walked down
+across five waves. That remains a plausible reading of the history and nothing
+more.
+
+The measurement that would settle it is the gradient norm of each loss term at
+the latent, logged per epoch. It is a small change, and it is what should have
+been asked for instead of reasoning from coefficients.
+
+The right operating point in the corrected units is **unmeasured**, and no arm
+has yet run under them.
 
 **For the paper.** This is a methods result, not only a defect. In any
 multi-study VAE whose reconstruction is a per-gene mean, an auxiliary per-cell

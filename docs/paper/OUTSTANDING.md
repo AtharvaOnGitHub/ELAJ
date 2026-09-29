@@ -285,6 +285,14 @@ both running under the old scaling. Full arithmetic in EVIDENCE.md §7h.
 "CCE is solved, λ_CCE inert". Under an effective weight of 700 it means the
 opposite: near zero because it is weighted heavily.
 
+**And it carries a correction of its own, made 29 September.** The coefficient
+is 70; the claim that DAB therefore dominates the optimisation is not
+supported. `v1_pool` ran eighteen epochs at nominal 0.01 with the study
+discriminator stuck at 2.02 against chance 2.398 — an adversary at seventy
+times reconstruction's weight would have flattened it. The scale defect is
+real; the causal story about the campaign's history is not established. What
+settles it is per-term gradient norms at the latent, which nothing logs.
+
 ---
 
 ---

@@ -206,6 +206,7 @@ def main() -> None:
     # (shuffle=False), so the latents collected in `_val_epoch` line up.
     from endo_model.training.label_probe import (
         LabelProbe, family_labels_in_order, patients_in_order,
+        studies_in_order,
     )
     val_order = [i for batch in val_sampler for i in batch]
     # Donor ids as well as labels, so every epoch reports both bounds on the
@@ -213,7 +214,8 @@ def main() -> None:
     # them, and donor identity itself. See training/label_probe.py.
     label_probe = LabelProbe(family_labels_in_order(val_dataset, val_order),
                              k=30, seed=exp_cfg.seed,
-                             patients=patients_in_order(val_dataset, val_order))
+                             patients=patients_in_order(val_dataset, val_order),
+                             studies=studies_in_order(val_dataset, val_order))
     if label_probe.n_labelled == 0:
         logger.warning("No validation cell carries a family label; the probe "
                        "will report NaN and stop_metric falls back to nb")

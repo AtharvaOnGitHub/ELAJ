@@ -248,6 +248,11 @@ class ModelConfig:
     # explain. The two are different models making different claims; see
     # model/embeddings/disease_encoder.py before choosing.
     d_disease: int = 0
+    # Width of the study embedding in the DECODER's context, 0 = off.
+    # Telling the decoder which study a cell came from removes the
+    # latent's obligation to carry it, which is the same argument
+    # tissue and platform already have. See embeddings/study_encoder.py.
+    d_study: int = 0
     n_groups: Optional[int] = None    # populated from vocabulary at runtime
     n_studies: Optional[int] = None   # populated from data config at runtime
     tokens: TokenConfig = field(default_factory=TokenConfig)
@@ -304,6 +309,7 @@ class ModelConfig:
             ),
             d_tissue=int(d.get("d_tissue", 16)),
             d_disease=int(d.get("d_disease", 0)),
+            d_study=int(d.get("d_study", 0)),
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),
             n_studies=d.get("n_studies"),

@@ -1,0 +1,127 @@
+name: v1_bottleneck
+description: >
+  CARD 1. Every batch-correction bet at once: the tiny latent, the converted
+  adversarial pressure, and an adversary that can see. Read against
+  v1_baselines, and against v1_pool for what changed.
+
+  WHY ALL THREE TOGETHER. Exploration, not attribution. We do not need to know
+  which of them worked, we need to know whether donor-blindness comes back.
+
+  THE DIAGNOSIS THIS ANSWERS. v1_pool reached cross-donor cell family 0.94 and
+  lost donor-blindness doing it: patient kNN went 0.3574 at epoch 0 to 0.4449
+  at epoch 17, while the study discriminator went the other way. At epoch 10 it
+  sat at chance -- P(true study) 0.094 against 1/11 = 0.091 -- and the UMAP at
+  that same epoch shows eleven cleanly separated study islands. Across epochs 1
+  to 17 the correlation between the discriminator's loss and donor kNN was
+  +0.232: the blinder the adversary, the MORE donor identity the latent held.
+  The encoder was not facing a weak opponent, it was defeating one.
+
+  BET 1, THE TINY LATENT. r8_direction reached patient kNN 0.2406 against
+  baselines at 0.69 to 0.82, with 72 of 100 neighbours surviving the same-donor
+  exclusion. Its config calls it "the tiny latent": d_gauss 8 and n_circular 4,
+  so d_z = 16. Every arm in that family ran the same adversarial pressure and
+  none of them ever varied it, because at sixteen dimensions evasion is not
+  available -- there is no room to hold biology and donor at once, so the
+  encoder has to trade.
+
+  This is the opposite of the reasoning that set v1_pool's d_gauss to 32, which
+  was "the latent needs room for DAB to delete directions from". Room is what
+  lets the encoder keep both.
+
+  BET 2, THE PRESSURE, CONVERTED. r8 ran lambda_dab 0.02 at w_dab 0.5 under the
+  OLD loss scaling, where dab was not divided by the measured gene count. It is
+  now. Multiplying the objective through by n_measured:
+
+      old:  NLL_cell + beta*KL + n*w_cce*CCE + n*w_dab*CE
+      new:  NLL_cell + beta*KL +   w_cce*CCE +   w_dab*CE
+
+  so a pre-28-September lambda has to be multiplied by n_measured to mean the
+  same thing. r8's encoder pressure was lambda*w_dab = 0.01; at n ~ 14,000 that
+  is 140 in the new units, so lambda_dab 280 at w_dab 0.5. Likewise r8's w_cce
+  0.025 becomes 350.
+
+  In per-cell nats that is an adversary contributing about 280 against a
+  reconstruction of ~5,900 and a KL of ~21: 4.7% of the reconstruction and
+  thirteen times the prior. Sizeable, and interpretable, which the old units
+  never were.
+
+  One thing the conversion cannot restore: n_measured varies 13,144 to 15,031
+  by study, so the old adversary was study-dependent by construction and no
+  single lambda reproduces it exactly.
+
+  BET 3, AN ADVERSARY THAT CAN SEE. model.dab.hidden_dim appears in NO config
+  in this repository. The classifier has been 32 -> 64 -> 11 with one hidden
+  layer, about 2,827 parameters, against an encoder of 1.9 million, for the
+  entire campaign. Five waves tuned how hard to push against it and none asked
+  whether it could see. 256 here.
+
+  WHAT IS NOT r8. The token fix postdates it (log counts, gene direction,
+  cls+pool8, worth +0.211 at the group outputs), agg_pool did not exist
+  (+0.228 at the cell summary), the age token is gone, the corpus has controls
+  and one study fewer, and the vocabulary, grouping and split all differ. r8's
+  0.2406 is a precedent, not a prediction. What transplants is the latent
+  recipe; everything upstream of it is different and mostly better.
+
+  THE BET BEHIND THE BET. r8's tiny latent cost it cell family: cross-donor
+  0.7486 against v1_pool's 0.88 to 0.94. The wager here is that it could not
+  hold family BECAUSE the funnel was discarding it first, and that agg_pool --
+  which r8 never had -- lets sixteen dimensions carry both.
+
+  WHAT TO READ. study_knn is new and is the number that matters: val_dab
+  reports what the adversary can see, and the adversary is the thing being
+  defeated. And the gradient-balance line, logged once an epoch, gives the
+  actual pull of each term on the latent -- the measurement no lambda in this
+  project has ever been chosen against.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/v_series_runs/v1_bottleneck/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # CONVERTED UNITS. 280 * 0.5 = 140, which is r8's 0.02 * 0.5 = 0.01 times
+  # n_measured ~ 14,000. Anything written before 28 September is 14,000x
+  # weaker than it looks.
+  model.dab.lambda_dab: 280.0
+  # Never set in any previous config. 2,827 parameters was the whole adversary.
+  model.dab.hidden_dim: 256
+
+  model.cce.enabled: true
+  # r8's 0.025, converted the same way.
+  model.cce.lambda_cce: 350.0
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  # THE TINY LATENT, exactly r8's. d_z = 8 + 2*4 = 16.
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.loss.w_kl_circ: 0.1
+
+  model.d_platform: 16
+  model.d_disease: 0
+  model.d_study: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

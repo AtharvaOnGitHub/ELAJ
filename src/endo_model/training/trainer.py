@@ -99,6 +99,10 @@ class Trainer:
         # later scoring run cannot quietly use a different wall. See
         # data/split_fingerprint.py.
         self._split_record = self._fingerprint_validation_split()
+        # A coefficient is not a force, and nothing here has ever measured the
+        # difference. See training/gradient_balance.py.
+        from endo_model.training.gradient_balance import GradientBalance
+        self._gradient_balance = GradientBalance(composite_loss)
         # Re-encodes a fixed cohort every validation pass and reports how
         # far the encoder's output moved since last epoch; see drift.py.
         # It decides when the encoder is settled enough to freeze.
@@ -423,6 +427,13 @@ class Trainer:
                 raise
 
             self.monitor.check_losses(batch, losses)
+
+            # One batch an epoch, before backward frees the graph.
+            if self._gradient_balance.due(self.current_epoch):
+                self._gradient_balance.report(
+                    self.current_epoch, losses, output1["mu_gauss"],
+                    int(output1["measured_global_idxs"].numel()),
+                )
 
             # Backward runs outside the autocast context, which is what the
             # torch docs require: autocast records the dtype each op ran in

@@ -1,0 +1,113 @@
+name: v1_studydec
+description: >
+  CARD 2, and a different dimension entirely: tell the DECODER which study a
+  cell came from, and turn the adversary off completely.
+
+  THE HYPOTHESIS. The adversary was never the problem. The decoder's context is
+  d_agg + d_tissue + d_platform + d_disease and study is not in it, so the
+  negative-binomial term needs study-specific expression and the latent is the
+  only route to it, while DAB penalises the latent for carrying exactly that.
+  The encoder is handed two demands it cannot both meet and resolves them the
+  only way available: keep study in a form the decoder can use and a
+  2,827-parameter MLP cannot read. That is not a weak opponent, it is a
+  contradiction in the objective, and what v1_pool did is the only thing
+  available to it.
+
+  THE ARGUMENT IS ALREADY IN THIS CODEBASE, applied to everything except the
+  covariate it most obviously applies to. platform_encoder.py:
+
+      "This goes to the decoder, never the encoder, and that placement is the
+      whole point. Study identity already reaches the encoder through DSBN,
+      which means the latent has to carry the technical signal itself for
+      reconstruction to use it -- and four waves of adversarial training have
+      shown how badly that goes. ... That is the scVI pattern."
+
+  Tissue got that treatment. Platform got it. Study never did, and study is the
+  variable DAB exists to remove.
+
+  SO THIS ARM REMOVES THE CONTRADICTION INSTEAD OF FIGHTING IT. d_study 16 into
+  the decoder's context, lambda_dab 0.0, no adversary at all. If the latent
+  comes out donor-blind without one, that is a better paper than one that needs
+  an adversarial game, and it makes ELAJ's handling of covariates internally
+  consistent: known technical variables condition the decoder, the latent holds
+  what they do not explain.
+
+  A LIGHTER VARIANT NOT TAKEN. DSBN already learns a per-study affine pair in
+  the encoder, so the decoder could be handed those rather than a fresh table.
+  It adds no parameters and is literally the signal the encoder has isolated.
+  Not done here because sharing the tensor makes the decoder's gradient reach
+  back into the encoder's normalisation and the two roles stop being separable.
+  Worth its own arm if this one works.
+
+  THREE THINGS THIS COSTS, none of them blocking.
+
+  The decoder now needs a study id at inference. That constrains the DECODER on
+  a genuinely unseen study; it does not touch the encoder or the latent, which
+  is what the paper claims and what score_arm.sh measures. scVI carries the
+  same constraint.
+
+  The decoder could explain away real biology that happens to track study.
+  Watch cell family: if it falls while study_knn also falls, the covariate is
+  absorbing signal rather than nuisance.
+
+  wang_2022 is the only study with adenomyosis and the only one with
+  myometrium, so a study covariate is also an adenomyosis indicator for those
+  49,606 cells. OUTSTANDING.md 0.1 already rules out any adenomyosis claim;
+  this sharpens the reason rather than adding a new one.
+
+  WHAT IS HELD FROM v1_pool so the comparison means something: the same
+  architecture, the same d_gauss 32, the same agg_pool, the same corpus and
+  split. The differences are d_study 0 -> 16 and lambda_dab 0.01 -> 0, plus
+  w_cce converted into the corrected units.
+
+  WHAT TO READ. study_knn, which is new, and which nothing in the loss can
+  learn to fool -- unlike val_dab, which is meaningless here anyway with the
+  adversary off. If study_knn falls without an adversary, the contradiction was
+  the whole story.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/v_series_runs/v1_studydec/
+seed: 24
+
+overrides:
+  training.max_epochs: 22
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 7
+  training.early_stop_warmup_epochs: 6
+  training.stop_metric: family_knn
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+
+  # NO ADVERSARY. The point of the arm.
+  model.dab.lambda_dab: 0.0
+  model.loss.w_dab: 0.5
+
+  model.cce.enabled: true
+  # v1_pool's 0.05 in the corrected units: 0.05 * ~14,000 = 700.
+  model.cce.lambda_cce: 700.0
+  model.cce.block_normalise: false
+  model.cce.every: 4
+
+  # As v1_pool, so the comparison is the decoder and the adversary.
+  model.d_gauss: 32
+  model.n_circular: 0
+
+  model.d_platform: 16
+  model.d_disease: 0
+  # THE CHANGE THIS ARM EXISTS FOR. See embeddings/study_encoder.py.
+  model.d_study: 16
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

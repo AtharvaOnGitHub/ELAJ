@@ -3,6 +3,7 @@ from .disease_encoder import DiseaseStatusEncoder
 from .dsbn import DSBN
 from .gene_embedding import ModuleGroupEmbedding
 from .metadata_encoder import N_METADATA
+from .study_encoder import StudyEncoder
 from .tissue_encoder import TissueHierarchyEncoder
 from .values import LinearMap, TokenInputs, ValuePart, build_value_part
 
@@ -14,6 +15,7 @@ __all__ = [
     "LogNormalisedCounts",
     "ModuleGroupEmbedding",
     "N_METADATA",
+    "StudyEncoder",
     "RawCounts",
     "TissueHierarchyEncoder",
     "TokenInputs",

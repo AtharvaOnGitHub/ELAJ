@@ -31,6 +31,7 @@ from endo_model.model.embeddings.disease_encoder import DiseaseStatusEncoder
 from endo_model.model.embeddings.dsbn import DSBN
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.platform_encoder import PlatformEncoder
+from endo_model.model.embeddings.study_encoder import StudyEncoder
 from endo_model.model.embeddings.tissue_encoder import TissueHierarchyEncoder
 from endo_model.model.embeddings.counts import build_count_scaler
 from endo_model.model.embeddings.values import build_value_part
@@ -138,9 +139,16 @@ class EndoFoundationModel(nn.Module):
         self.decoder_disease = (
             DiseaseStatusEncoder(config.d_disease) if config.d_disease else None
         )
+        # Decoder side only. See embeddings/study_encoder.py for why this is
+        # the covariate whose absence made the adversary unwinnable.
+        self.decoder_study = (
+            StudyEncoder(config.n_studies, config.d_study)
+            if config.d_study else None
+        )
         self.decoder = BilinearDecoder(
             config.d_agg, config.d_dec, d_tissue=config.d_tissue,
             d_platform=config.d_platform, d_disease=config.d_disease,
+            d_study=config.d_study,
         )
         self.dispersion = PerGeneDispersion(vocabulary.vocab_size)
 
@@ -221,8 +229,12 @@ class EndoFoundationModel(nn.Module):
             self.decoder_disease(batch["disease_status"])       # (B, d_disease)
             if self.decoder_disease is not None else None
         )
+        study = (
+            self.decoder_study(batch["study_id"])                # (B, d_study)
+            if self.decoder_study is not None else None
+        )
         log_mu = self.decoder(
-            gene_queries, latent["z_proj"], tissue, platform, disease
+            gene_queries, latent["z_proj"], tissue, platform, disease, study
         )                                                       # (B, G_meas)
         mu_hat = (
             F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)

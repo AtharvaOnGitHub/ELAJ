@@ -76,6 +76,7 @@ CROSS_DONOR_SUFFIX = "_xdonor"
 DROP_SUFFIX = "_drop"
 KEPT_SUFFIX = "_kept"
 PATIENT_METRIC = "patient_knn"
+STUDY_METRIC = "study_knn"
 
 DEFAULT_MAX_CELLS = None
 """No subsample for the headline metric.
@@ -107,7 +108,8 @@ class LabelProbe:
                  k: int = 30, seed: int = 24,
                  max_cells: int | None = DEFAULT_MAX_CELLS,
                  donor_max_cells: int | None = DEFAULT_DONOR_MAX_CELLS,
-                 patients: np.ndarray | None = None) -> None:
+                 patients: np.ndarray | None = None,
+                 studies: np.ndarray | None = None) -> None:
         self.labels = np.asarray(labels, dtype=object)
         self.name = name
         self.k = int(k)
@@ -115,6 +117,13 @@ class LabelProbe:
         self.max_cells = max_cells
         self.donor_max_cells = donor_max_cells
         self.patients = None if patients is None else np.asarray(patients, dtype=object)
+        # Study identity read the way the benchmark reads it, by neighbours.
+        # `val_dab` cannot answer this: it reports what the adversary can see,
+        # and the adversary is the thing the encoder is trained to defeat. In
+        # v1_pool the discriminator reached chance at epoch 10 while eleven
+        # studies sat in separate islands on the UMAP. This metric is in no
+        # loss term, so nothing can learn to fool it.
+        self.studies = None if studies is None else np.asarray(studies, dtype=object)
         if self.patients is not None and len(self.patients) != len(self.labels):
             raise ValueError(
                 f"label probe: {len(self.patients)} patient ids for "
@@ -221,6 +230,12 @@ class LabelProbe:
                                           k=self.k, seed=self.seed)
             out[PATIENT_METRIC] = float(patient["excess"])
 
+            if self.studies is not None:
+                study = label_knn_agreement(latent[everything],
+                                            self.studies[everything],
+                                            k=self.k, seed=self.seed)
+                out[STUDY_METRIC] = float(study["excess"])
+
             logger.info(
                 "   %s: on %d cells, within %.4f, cross-donor %.4f over %.1f "
                 "kept neighbours, drop %.4f (lower is more donor-agnostic); "
@@ -230,6 +245,10 @@ class LabelProbe:
                 PATIENT_METRIC, out[PATIENT_METRIC],
                 time.perf_counter() - started,
             )
+            if STUDY_METRIC in out:
+                logger.info("   %s %.4f (LOWER IS BETTER) — what neighbours "
+                            "reveal, which val_dab cannot report",
+                            STUDY_METRIC, out[STUDY_METRIC])
         except Exception as exc:                            # noqa: BLE001
             logger.warning("cross-donor metrics failed (%s: %s)",
                            type(exc).__name__, exc)
@@ -251,6 +270,14 @@ def family_labels_in_order(dataset, order) -> np.ndarray:
     if merged.size == 0:
         merged = np.full(len(dataset), None, dtype=object)
     return merged[np.asarray(order, dtype=np.int64)]
+
+
+def studies_in_order(dataset, order) -> np.ndarray | None:
+    """Study ids for a validation dataset, in sampler order, or None."""
+    studies = getattr(dataset, "study_ids", None)
+    if studies is None or len(studies) == 0:
+        return None
+    return np.asarray(studies, dtype=object)[np.asarray(order, dtype=np.int64)]
 
 
 def patients_in_order(dataset, order) -> np.ndarray | None:

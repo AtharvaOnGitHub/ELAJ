@@ -762,6 +762,90 @@ count varies by study. Worth a Methods paragraph; a reviewer will recognise it.
 
 ---
 
+## 7i. The v-series generalisation gap, and what it is not yet known to be
+
+All five v-series arms share one baseline (`nb_all_genes` 0.4332, `nb_hvg`
+1.243) and the same 186,880 scored cells, so they are internally comparable.
+r-series arms are on a different corpus and vocabulary and are excluded here.
+
+| arm | d_z | composition | agg_pool | DAB† | CCE† | `train_nb` @8 | gap @8 | gap end | val sd |
+|---|---:|---|---|---:|---:|---:|---:|---:|---:|
+| `v1_combined` | 16 | 16 G | **no** | 0 | 350 | 0.3752 | **0.0264** | 0.0264 | **0.0023** |
+| `v1_pool` | 32 | 32 G | yes | 70 | 700 | 0.3749 | 0.0473 | 0.0582 | 0.0082 |
+| `v1_studydec` | 32 | 32 G | yes | 0 | 700 | 0.3731 | 0.0603 | 0.0564 | 0.0117 |
+| `v1_pool_shape` | 32 | 24 G + 4 circ | yes | 70 | 700 | 0.3747 | 0.0787 | 0.0740 | 0.0184 |
+| `v1_bottleneck` | 16 | 8 G + 4 circ | yes | 140 | 350 | 0.3788 | 0.0839 | **0.0931** | 0.0110 |
+
+† per-cell coefficients, pre-rescale runs multiplied by n ≈ 14,000 so the old
+and new units sit on one scale.
+
+**The central observation. At epoch 8, `train_nb` spans 0.0057 across all five
+arms and the gap spans 0.0576.** Latent width 16 or 32, adversary 0 to 140, CCE
+350 or 700, circular dimensions, a study covariate, a four-times-wider
+discriminator: every one of those moves generalisation **ten times more than it
+moves training fit**. And `train_nb` plateaus at epoch 5 or 6 in four of five
+arms, so the schedules run sixteen epochs past the point where reconstruction
+stops improving.
+
+### The gap we have been reading is not the generalisation gap
+
+`train_nb` is computed in `model.train()`; `val_nb` in `model.eval()`. The
+difference mixes three things and no run separates them:
+
+1. different cells — generalisation, the thing we meant to measure;
+2. dropout on against off;
+3. **DSBN normalising each study by its own batch statistics against
+   normalising every study by one corpus-wide running average.** `DSBN` is a
+   shared `BatchNorm1d` plus a per-study scale and shift, and
+   `PerStudyBatchSampler` puts one study in every batch, so in train mode each
+   study's scale and shift is learned against its own statistics and in eval
+   mode it is applied on top of a corpus-wide average calibrated for something
+   else.
+
+**No run in this project has ever scored training cells in eval mode.**
+
+`scripts/diagnose_bn_mode.py` was written for (3) and run on three r3 arms; on
+r3_nodab it moved kNN study purity 0.756 → 0.732, which is small. It has never
+been run on a v-series arm and has never been asked about `val_nb`, which is a
+different quantity from purity.
+
+### Four hypotheses, none tested
+
+**H1, the mode switch.** Much of the gap is (2) and (3) rather than
+generalisation. Predicts training cells scored in eval mode land near `val_nb`.
+
+**H2, `agg_pool` amplifies it.** The only arm without it has the smallest gap
+and **one quarter the validation volatility**, 0.0023 against 0.0082 to 0.0184.
+The cell readout takes order statistics — min, max, quantiles — over 396 group
+tokens and feeds them through one linear merge straight into the latent, and
+order statistics are far more sensitive to a distribution shift than means.
+*`v1_combined` differs in four respects, not one, so this is a correlate.*
+
+**H3, the prior is inert.** Measured KL gradient pull is 0.015× reconstruction
+and `free_bits` 0.25/dim gives a 4 to 8 nat floor against a measured 24 to 43
+nats.
+
+**H4, training past the plateau.** `v1_bottleneck` epochs 6 to 16 buy 0.0036 of
+training fit and cost 0.0186 of validation.
+
+**And none of them need be right.** The per-study table in the diagnostic is
+there for that case: a gap concentrated in two or three studies is about the
+data or the split rather than about normalisation or the readout.
+
+### The test
+
+`scripts/diagnose_generalisation.py`, built 30 September, no training. A 2×2
+over {train cells, val cells} × {train mode, eval mode}, which decomposes the
+gap exactly by two routes whose disagreement is reported as an interaction, and
+then splits the mode switch into its batch-norm and dropout halves. Per study
+throughout. BatchNorm running statistics are saved and restored around every
+pass, because a training-mode pass updates them and would otherwise change what
+each later pass measures.
+
+**Status:** the table above is solid. Every explanation for it is a hypothesis.
+
+---
+
 ## 8. Pending
 
 | | what it will settle | expected |

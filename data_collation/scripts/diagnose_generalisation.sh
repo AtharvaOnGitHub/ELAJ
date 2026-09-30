@@ -6,7 +6,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=180G
+# 71.2 GB measured on job 55687733 (one target, 14 min).
+# 100G keeps it under the 128 GB that one of an a100_80 node's
+# four GPUs is entitled to; 180G forced the scheduler to hold
+# back more than a quarter of a node and the job would not place.
+#SBATCH --mem=100G
 #SBATCH --job-name=elaj_diag_gen
 #SBATCH --output=logs/diag_gen_%j.log
 

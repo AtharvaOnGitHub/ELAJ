@@ -25,6 +25,14 @@ pipeline stages, because 135 of them at the full battery would run for
 days. `--no-groups` skips them. scIB is off unless `--scib` is passed: its
 silhouette materialises the cell-by-cell distance matrix and ran a
 1,440-wide stage out of 120 GB.
+
+COST, MEASURED. The patient-identity search is brute force, so a stage costs
+the square of the cell count. On r8's 238k cells a 1,408-wide stage took
+over an hour; on the v-series 382,464 it took four hours twenty-six minutes
+(job 55708680, 1 Oct 2026). Three wide stages at that rate do not fit a
+twelve-hour wall, and the two that are references come first, so a job that
+runs out of time returns the references and nothing about the model.
+`--no-references` drops those two.
 """
 
 from __future__ import annotations
@@ -70,6 +78,13 @@ def parse_args() -> argparse.Namespace:
                         "summaries where they are.")
     p.add_argument("--no-linear", action="store_true",
                    help="Skip the linear probe on the pipeline stages.")
+    p.add_argument("--no-references", action="store_true",
+                   help="Score the model's own stages only, without the two "
+                        "per-group PCA references. They are 1,408 wide, which "
+                        "is two thirds of the job's whole cost, and they say "
+                        "what a linear reading of the counts scores, which the "
+                        "baseline table already says. Drop them when the "
+                        "question is where along the encoder the signal goes.")
     p.add_argument("--reference-components", type=int, default=32,
                    help="Width of the per-group PCA references; 32 matches "
                         "d_token so the searches are in spaces of equal size.")
@@ -130,6 +145,30 @@ def build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
     return corpus
 
 
+def build_references(corpus, vocab, components: int, seed: int, per_group: bool):
+    """The two input references: per-group PCA of the counts, raw and log.
+
+    Raw is what ELAJ reads, log-normalised is what every other method reads.
+    Together they say what a linear reading of the same genes scores, so a
+    model stage below them lost something the counts still held.
+
+    They cost what the widest model stage costs, twice, because they are the
+    same width. `--no-references` is the caller's way of saying it already
+    knows these numbers from the baseline table.
+    """
+    from endo_model.evaluation.stages import StageEmbeddings
+    from endo_model.evaluation.stages.references import (
+        LOG, RAW, GroupPCAReference, group_masks_from_vocabulary,
+    )
+
+    masks = group_masks_from_vocabulary(vocab, corpus.n_genes)
+    staged = StageEmbeddings()
+    for transform in (RAW, LOG):
+        reference = GroupPCAReference(transform, components, seed=seed)
+        staged.merge(reference.build(corpus, masks, per_group=per_group))
+    return staged
+
+
 def main() -> None:
     import torch
 
@@ -145,9 +184,6 @@ def main() -> None:
     from endo_model.evaluation.purity_report import best_checkpoint
     from endo_model.evaluation.stages import (
         ProbeSettings, StageEmbeddings, StageProbe, StageTables,
-    )
-    from endo_model.evaluation.stages.references import (
-        LOG, RAW, GroupPCAReference, group_masks_from_vocabulary,
     )
     from endo_model.model.endo_model import EndoFoundationModel
     from endo_model.training.checkpointing import CheckpointManager
@@ -202,12 +238,16 @@ def main() -> None:
     # The input references, from the counts, ahead of the collected stages:
     # raw first, then log-normalised, then what the model computed. Per-group
     # references only if the group stages were asked for.
-    masks = group_masks_from_vocabulary(vocab, corpus.n_genes)
+    #
+    # Scoring runs in this order, so the references are also the two stages
+    # that stand between the job starting and the first row about the model.
+    # On 382,464 cells one of them takes four and a half hours.
     staged = StageEmbeddings()
-    for transform in (RAW, LOG):
-        reference = GroupPCAReference(transform, args.reference_components,
-                                      seed=args.seed)
-        staged.merge(reference.build(corpus, masks, per_group=not args.no_groups))
+    if args.no_references:
+        logger.info("References skipped; the model's own stages only.")
+    else:
+        staged.merge(build_references(corpus, vocab, args.reference_components,
+                                      args.seed, per_group=not args.no_groups))
     staged.merge(embeddings)
     embeddings = staged
 

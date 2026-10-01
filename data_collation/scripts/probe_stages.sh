@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -24,15 +24,28 @@
 #   sbatch data_collation/scripts/probe_stages.sh r8_direction \
 #       --untrained --out outputs/probes/r8_untrained
 #
+#   # the model's own stages, without the two PCA references:
+#   sbatch data_collation/scripts/probe_stages.sh v1_pool \
+#       --no-groups --no-references --out outputs/probes/v1_pool_quick
+#
 # The first positional argument is the experiment name; everything else is
 # passed through to scripts/probe_stages.py.
 #
-# GPU: the embedding pass only, a few minutes. The rest is CPU: the six
-# pipeline stages take the benchmark battery without scIB (about 15 min
-# each, the three 1,440-wide ones over an hour because the patient-identity
-# search runs over 238k cells at that width); the 135 group stages take
-# family and phase kNN only (about 2 min each). The script writes the
-# tables after every stage, so a job killed early keeps what it finished.
+# GPU: the embedding pass only, a few minutes. The rest is CPU, and the cost
+# of a stage is the square of the cell count because the patient-identity
+# search is brute force. MEASURED on the v-series 382,464 cells: a 1,408-wide
+# stage takes 4 h 26 min (job 55708680, 1 Oct 2026). r8's 238k cells put the
+# same stage at just over an hour, which is where the old estimate came from.
+#
+# With --no-groups there are six stages and three of them are that wide, so
+# the whole job wants about 16 hours. Two of the three wide ones are the PCA
+# references, and they are scored FIRST, so a job that runs out of wall
+# returns the references and nothing about the model: that is exactly how
+# jobs 55708680 and 55708681 ended. --no-references drops them and brings the
+# job to about 9 hours. The 135 group stages take family and phase kNN only.
+#
+# The script writes the tables after every stage, so a job killed early keeps
+# every row it finished.
 #
 # MEMORY: 180 G. The first run at 120 G died in scIB's silhouette on a
 # 1,440-wide stage; scIB is now off unless --scib is passed, and the

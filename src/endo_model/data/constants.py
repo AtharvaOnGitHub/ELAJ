@@ -59,3 +59,25 @@ h5ad files written before this change carry strings, not codes, so they are
 unaffected, but any checkpoint trained before it is not loadable."""
 
 INT_TO_DISEASE_STATUS: dict[int, str] = {v: k for k, v in DISEASE_STATUS_TO_INT.items()}
+
+
+# A cell with no harmonised menstrual phase. Negative so that it is invalid
+# as a class index: a plumbing mistake that lets it reach the loss indexes
+# out of bounds rather than quietly training on a tenth class. Matches
+# `UNLABELLED` in model/objectives/label_classification.py, which is where
+# the masking happens.
+PHASE_UNLABELLED: int = -1
+
+# Harmonised menstrual phase classes, in cycle order. Imported from the
+# harmoniser rather than retyped: the list exists once, in
+# evaluation/label_harmonisation.py, so training and scoring cannot drift.
+def phase_class_names() -> tuple[str, ...]:
+    """The harmonised phase names, in the order their class indices use."""
+    from endo_model.evaluation.label_harmonisation import MENSTRUAL_PHASE
+
+    return MENSTRUAL_PHASE.order
+
+
+def n_phase_classes() -> int:
+    """How many menstrual phase classes a classification head needs."""
+    return len(phase_class_names())

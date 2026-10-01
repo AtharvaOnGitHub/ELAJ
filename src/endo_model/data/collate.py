@@ -68,6 +68,12 @@ def collate_fn(cells: list[dict], vocab: GeneVocabulary) -> Batch:
         [c["disease_status"] for c in cells], dtype=torch.long
     )  # (B,)
 
+    # -1 wherever the cell's study carries no harmonised phase, which is
+    # seven studies of eleven. MaskedCrossEntropy drops those rows.
+    phase_label = torch.tensor(
+        [c["phase_label"] for c in cells], dtype=torch.long
+    )  # (B,)
+
     # --------------------------------------------------------- group structure
     group_indices: dict[str, torch.Tensor] = {}
     group_dns_mask: dict[str, torch.Tensor] = {}
@@ -96,6 +102,7 @@ def collate_fn(cells: list[dict], vocab: GeneVocabulary) -> Batch:
         platform_codes=platform_codes,
         age=age,
         disease_status=disease_status,
+        phase_label=phase_label,
     )
 
 

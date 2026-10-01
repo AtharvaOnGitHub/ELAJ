@@ -41,6 +41,7 @@ from endo_model.data.constants import (
     DISEASE_STATUS_TO_INT,
     N_PLATFORM_CODES,
     N_TISSUE_LEVELS,
+    PHASE_UNLABELLED,
 )
 from endo_model.data.panel import StudyPanel
 from endo_model.data.splits import StudyPatients, assign_splits, log_coverage
@@ -311,6 +312,55 @@ def _select_disease_cells(
     return kept
 
 
+def _phase_label_codes(obs, study_name: str) -> np.ndarray:
+    """Per-cell menstrual phase as int64 class indices, -1 where unknown.
+
+    THE MAPPING IS NOT DEFINED HERE, DELIBERATELY. It comes from
+    `MENSTRUAL_PHASE` in evaluation/label_harmonisation.py, the same
+    `Harmoniser` the benchmark scorer uses. A second copy of the mapping
+    living next to the trainer is how training and scoring drift apart, and
+    with phase as the target that drift would be invisible and fatal: the
+    model would be optimised for one set of classes and measured on another.
+
+    The class INDEX is the position in `MENSTRUAL_PHASE.order`, which runs
+    menstrual, proliferative_early, proliferative, proliferative_late,
+    periovulatory, secretory_early, secretory_early_mid, secretory_mid,
+    secretory_late. That order is the cycle's own, and it wraps, so adjacent
+    indices are adjacent phases and index 8 adjoins index 0.
+
+    Three source values map to None on purpose and so arrive here as
+    unlabelled: `Hormones` and `Hormones Menstrual` mark hormone-treated
+    samples and `Proliferative Disordered` is a pathological reading. None of
+    the three is a position on the cycle, and placing them somewhere
+    convenient would put 15,048 cells at a cycle day nobody measured.
+    """
+    from endo_model.evaluation.label_harmonisation import (
+        MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS, merge_columns,
+    )
+
+    n = len(obs)
+    present = [c for c in PHASE_SOURCE_COLUMNS if c in obs.columns]
+    if not present:
+        logger.info("Study '%s': no menstrual phase column; %d cells "
+                    "unlabelled for the phase head.", study_name, n)
+        return np.full(n, PHASE_UNLABELLED, dtype=np.int64)
+
+    meta = {c: _uncategorise(obs[c]).to_numpy() for c in present}
+    names = merge_columns(meta, PHASE_SOURCE_COLUMNS, MENSTRUAL_PHASE)
+    index = {name: i for i, name in enumerate(MENSTRUAL_PHASE.order)}
+    codes = np.array([index.get(v, PHASE_UNLABELLED) for v in names],
+                     dtype=np.int64)
+
+    dropped = MENSTRUAL_PHASE.unmapped(
+        np.concatenate([meta[c] for c in present]))
+    logger.info("Study '%s': %d of %d cells carry a harmonised phase, from "
+                "%s.", study_name, int((codes >= 0).sum()), n, present)
+    if dropped:
+        logger.info("Study '%s': values carrying a label but mapping to no "
+                    "phase: %s", study_name, dropped)
+    return codes
+
+
 def _disease_status_codes(obs, study_name: str) -> np.ndarray:
     """Per-cell disease status as int64 codes (see DISEASE_STATUS_TO_INT).
 
@@ -369,6 +419,7 @@ class _LoadedStudy:
     platform: np.ndarray      # (n_cells, N_PLATFORM_CODES) int64
     age: np.ndarray           # (n_cells,) float
     disease: np.ndarray       # (n_cells,) int64
+    phase: np.ndarray         # (n_cells,) int64, -1 where unlabelled
 
 
 @dataclass
@@ -410,6 +461,7 @@ class CellTable:
         default_factory=lambda: np.zeros((0, N_PLATFORM_CODES), np.int64))
     age: np.ndarray = field(default_factory=lambda: np.zeros(0, np.float64))
     disease_status: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))
+    phase_label: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))
     patient_id: np.ndarray = field(default_factory=lambda: np.zeros(0, object))
 
     def __len__(self) -> int:
@@ -426,7 +478,7 @@ class CellTable:
             np.full(len(cols["study_id"]), i, dtype=np.int32)
             for i, (_, cols) in enumerate(blocks)])
         for name in ("panel_row", "study_id", "tissue_levels", "platform_codes",
-                     "age", "disease_status", "patient_id"):
+                     "age", "disease_status", "phase_label", "patient_id"):
             setattr(table, name, np.concatenate([cols[name] for _, cols in blocks]))
         return table
 
@@ -440,6 +492,7 @@ class CellTable:
             "platform_codes": self.platform_codes[idx],
             "age": float(self.age[idx]),
             "disease_status": int(self.disease_status[idx]),
+            "phase_label": int(self.phase_label[idx]),
             "patient_id": str(self.patient_id[idx]),
         }
 
@@ -491,6 +544,7 @@ def load_corpus(
             platform=_platform_code_matrix(adata.obs, name, platform),
             age=_age_vector(adata.obs, name),
             disease=_disease_status_codes(adata.obs, name),
+            phase=_phase_label_codes(adata.obs, name),
         ))
 
     # Build patient -> split assignment, stratified by study AND by tissue.
@@ -731,6 +785,7 @@ class EndometriosisDataset:
                 "platform_codes": np.asarray(study.platform[cell_idx_arr], dtype=np.int64),
                 "age": np.asarray(study.age[cell_idx_arr], dtype=np.float64),
                 "disease_status": np.asarray(study.disease[cell_idx_arr], dtype=np.int64),
+                "phase_label": np.asarray(study.phase[cell_idx_arr], dtype=np.int64),
                 "patient_id": np.asarray(
                     [study.patients[i] for i in cell_indices], dtype=object),
             }))

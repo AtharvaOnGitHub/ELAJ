@@ -174,6 +174,9 @@ class LossConfig:
     w_kl_gauss: float = 1.0
     w_kl_circ: float = 1.0
     w_dab: float = 1.0
+    # Weight on the menstrual-phase classification head. 0 disables it,
+    # which is what every run before October 2026 did implicitly.
+    w_cls: float = 0.0
     free_bits: float = 0.0
 
     @classmethod
@@ -183,6 +186,7 @@ class LossConfig:
             w_kl_gauss=float(d.get("w_kl_gauss", 1.0)),
             w_kl_circ=float(d.get("w_kl_circ", d.get("w_kl_vmf", 1.0))),
             w_dab=float(d.get("w_dab", 1.0)),
+            w_cls=float(d.get("w_cls", 0.0)),
             free_bits=float(d.get("free_bits", 0.0)),
         )
 
@@ -204,6 +208,44 @@ class DABConfig:
         return cls(
             lambda_dab=float(d.get("lambda_dab", 1.0)),
             hidden_dim=int(d.get("hidden_dim", 64)),
+        )
+
+
+@dataclass
+class ClassifierConfig:
+    """The menstrual-phase classification head.
+
+    Phase has never been encoded better than a linear reading of the counts
+    by any method in this field. Leaving it to emerge has not worked, so this
+    asks for it directly, and the paper says it was asked for.
+
+    `block` chooses which part of the latent the head reads. `circular` is the
+    arm that tests the architecture's central claim: phase is an ordered
+    variable that wraps, and the circular branch is the only part of any
+    model here that can represent that natively.
+
+    `hidden` stays None by default on purpose. A hidden layer learns the
+    classification inside the head and leaves the latent free to stay
+    unseparated, which is the opposite of the pressure this exists to apply.
+    """
+
+    enabled: bool = False
+    block: str = "full"            # full | gaussian | circular
+    hidden: Optional[int] = None
+    dropout: float = 0.0
+    # Phase is read per donor from a clinical assessment and neighbouring
+    # phases are genuinely hard to separate, so a little smoothing is honest.
+    label_smoothing: float = 0.05
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ClassifierConfig":
+        hidden = d.get("hidden")
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            block=str(d.get("block", "full")),
+            hidden=int(hidden) if hidden else None,
+            dropout=float(d.get("dropout", 0.0)),
+            label_smoothing=float(d.get("label_smoothing", 0.05)),
         )
 
 
@@ -264,6 +306,7 @@ class ModelConfig:
     loss: LossConfig = field(default_factory=LossConfig)
     cce: CCEConfig = field(default_factory=CCEConfig)
     dab: DABConfig = field(default_factory=DABConfig)
+    classifier: ClassifierConfig = field(default_factory=ClassifierConfig)
 
     @property
     def d_z(self) -> int:
@@ -321,4 +364,5 @@ class ModelConfig:
             decoder=DecoderConfig.from_dict(d.get("decoder", {})),
             cce=CCEConfig.from_dict(d.get("cce", {})),
             dab=DABConfig.from_dict(d.get("dab", {})),
+            classifier=ClassifierConfig.from_dict(d.get("classifier", {})),
         )

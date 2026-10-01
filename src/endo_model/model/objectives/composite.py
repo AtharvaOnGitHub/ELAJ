@@ -20,6 +20,7 @@ from torch import Tensor
 
 from .adversarial import DABClassifier
 from .cce_embedding import cce_embedding
+from .label_classification import MaskedCrossEntropy, masked_accuracy
 from .contrastive import InfoNCELoss
 from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
 from .reconstruction import NegativeBinomialLoss
@@ -53,6 +54,8 @@ class CompositeLoss(nn.Module):
         w_kl_circ: float = 1.0,
         w_dab: float = 1.0,
         w_cce: float = 0.0,
+        w_cls: float = 0.0,
+        cls_label_smoothing: float = 0.0,
         lambda_dab_max: float = 1.0,
         cce_temperature: float = 0.1,
         cce_block_normalise: bool = False,
@@ -76,6 +79,12 @@ class CompositeLoss(nn.Module):
         self.w_kl_circ = w_kl_circ
         self.w_dab = w_dab
         self.w_cce = w_cce
+        self.w_cls = w_cls
+        # Built whatever the weight, so a run with w_cls 0 still
+        # REPORTS phase accuracy without optimising for it. That is
+        # the honest control for an arm that does optimise for it.
+        self.cls = MaskedCrossEntropy(label_smoothing=cls_label_smoothing)
+        self._last_accuracy: float = float("nan")
         self.lambda_dab_max = lambda_dab_max
 
         self.nb_loss = NegativeBinomialLoss()
@@ -133,6 +142,36 @@ class CompositeLoss(nn.Module):
             block_normalise=self.cce_block_normalise,
             circular_weight=self.cce_circular_weight,
         )
+
+    def _phase_loss(self, model_output: dict[str, Tensor],
+                    batch) -> tuple[Tensor, int]:
+        """Masked cross entropy on menstrual phase, or an exact zero.
+
+        Returns zero in three cases, all of them normal rather than
+        exceptional: the model has no phase head, the batch carries no phase
+        column, or the batch is from one of the seven studies with no phase
+        labels at all. The last is the common case, because batches hold one
+        study each.
+
+        The zero is built from the logits where they exist so it stays
+        attached to the graph; a detached constant would make the head's
+        parameters look unused on most steps.
+        """
+        logits = model_output.get("phase_logits")
+        if logits is None:
+            self._last_accuracy = float("nan")
+            return torch.zeros((), device=model_output["mu_gauss"].device), 0
+
+        target = batch.get("phase_label") if isinstance(batch, dict) \
+            else getattr(batch, "phase_label", None)
+        if target is None:
+            self._last_accuracy = float("nan")
+            return logits.sum() * 0.0, 0
+
+        loss, n = self.cls(logits, target)
+        accuracy, _ = masked_accuracy(logits, target)
+        self._last_accuracy = accuracy if n else float("nan")
+        return loss, n
 
     def forward(
         self,
@@ -266,6 +305,13 @@ class CompositeLoss(nn.Module):
         # 2026 carry weights in the old units and are not comparable.
         cce_per_gene = cce_loss / n_measured
         dab_per_gene = dab_loss / n_measured
+
+        # The phase head is per-cell like `cce` and `dab`, so it takes
+        # the same division. Without it a w_cls of 0.1 would be an
+        # effective 1,400 and would flatten the reconstruction in one
+        # epoch, which is exactly the defect the block above records.
+        cls_loss, n_labelled = self._phase_loss(model_output, batch)
+        cls_per_gene = cls_loss / n_measured
         self._report_weights_once(n_measured)
 
         elbo = (
@@ -278,7 +324,7 @@ class CompositeLoss(nn.Module):
         # What backward() actually descends. The classifier has to be trained
         # for `dab` to mean anything — an untrained one reports chance whatever
         # the latent holds — so its loss stays in the graph.
-        total = elbo + self.w_dab * dab_per_gene
+        total = elbo + self.w_dab * dab_per_gene + self.w_cls * cls_per_gene
 
         return {
             "elbo": elbo,
@@ -288,6 +334,9 @@ class CompositeLoss(nn.Module):
             "beta_kl": torch.tensor(beta_kl),
             "dab": dab_loss,
             "cce": cce_loss,
+            "cls": cls_loss.detach(),
+            "cls_cells": torch.tensor(float(n_labelled)),
+            "cls_accuracy": torch.tensor(self._last_accuracy),
             # Reported, not optimised. The explanation for r5_cce's circular
             # collapse is that CCE grows this to crowd the fixed-norm circular
             # block out of the cosine similarity, so it should climb under CCE

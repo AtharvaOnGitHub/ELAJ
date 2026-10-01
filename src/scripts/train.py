@@ -253,6 +253,8 @@ def main() -> None:
         w_kl_gauss=model_cfg.loss.w_kl_gauss,
         w_kl_circ=model_cfg.loss.w_kl_circ,
         w_dab=model_cfg.loss.w_dab,
+        w_cls=model_cfg.loss.w_cls if model_cfg.classifier.enabled else 0.0,
+        cls_label_smoothing=model_cfg.classifier.label_smoothing,
         free_bits=model_cfg.loss.free_bits,
         beta_max=train_cfg.kl_annealing.beta_max,
         warmup_fraction=train_cfg.kl_annealing.warmup_fraction,
@@ -266,6 +268,18 @@ def main() -> None:
         model_cfg.loss.free_bits, train_cfg.kl_annealing.beta_max,
         train_cfg.kl_annealing.warmup_fraction, model_cfg.dab.lambda_dab,
     )
+    if model_cfg.classifier.enabled:
+        from endo_model.data.constants import phase_class_names
+        logger.info(
+            "Phase head: block=%s hidden=%s dropout=%.3g w_cls=%.3g "
+            "smoothing=%.3g over %d classes %s",
+            model_cfg.classifier.block, model_cfg.classifier.hidden,
+            model_cfg.classifier.dropout, model_cfg.loss.w_cls,
+            model_cfg.classifier.label_smoothing,
+            len(phase_class_names()), list(phase_class_names()),
+        )
+    else:
+        logger.info("Phase head: disabled; phase is reported, not optimised.")
     if model_cfg.cce.enabled:
         # Stated in the log because the embedding layout decides whether the
         # circular branch survives CCE, and the two arms of wave R6 differ in

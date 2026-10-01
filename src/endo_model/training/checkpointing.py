@@ -43,6 +43,43 @@ def _renamed_keys(state: dict) -> dict:
     return out
 
 
+def _widened_dsbn_statistics(state: dict, model: "torch.nn.Module") -> dict:
+    """Give an old checkpoint's single batch-norm statistics one row per study.
+
+    DSBN used to hold one `nn.BatchNorm1d` with one running mean and variance
+    for every study; it now holds one row per study. Every checkpoint from r1
+    to the v-series carries the old shape, and `load_state_dict` would reject
+    it on shape rather than name, so `_renamed_keys` cannot help.
+
+    Copying the pooled statistics into every row reproduces exactly what the
+    old checkpoint did at evaluation: every study normalised by the corpus
+    average. That is the bug, faithfully. It is the right migration because
+    the alternative is inventing per-study numbers that were never measured,
+    and because a run resumed from here specialises the rows as soon as it
+    trains. A checkpoint loaded only to be SCORED still shows the old
+    behaviour, which is what makes old and new scores comparable.
+    """
+    target = model.state_dict()
+    out = {}
+    for key, value in state.items():
+        want = target.get(key)
+        if (want is not None and hasattr(value, "shape")
+                and value.shape != want.shape
+                and key.endswith(("running_mean", "running_var",
+                                  "num_batches_tracked"))):
+            logger.info("Widening %s from %s to %s: one row per study.",
+                        key, tuple(value.shape), tuple(want.shape))
+            value = value.expand_as(want).clone() if value.dim() else \
+                value.repeat(want.shape[0])
+        out[key] = value
+    return out
+
+
+def _migrated(state: dict, model: "torch.nn.Module") -> dict:
+    """Every migration an old checkpoint needs, in one place."""
+    return _widened_dsbn_statistics(_renamed_keys(state), model)
+
+
 class CheckpointManager:
     """Saves model checkpoints and retains only the best few.
 
@@ -151,7 +188,7 @@ class CheckpointManager:
             weights came from.
         """
         payload = torch.load(path, map_location=map_location, weights_only=False)
-        model.load_state_dict(_renamed_keys(payload["model_state"]))
+        model.load_state_dict(_migrated(payload["model_state"], model))
         logger.info("Loaded weights from %s (its epoch %s, step %s)", path,
                     payload.get("epoch", "?"), payload.get("step", "?"))
         return {k: v for k, v in payload.items()
@@ -176,7 +213,7 @@ class CheckpointManager:
             The full checkpoint payload dict.
         """
         payload = torch.load(path, map_location=map_location, weights_only=False)
-        model.load_state_dict(_renamed_keys(payload["model_state"]))
+        model.load_state_dict(_migrated(payload["model_state"], model))
         if optimizer is not None and "optimizer_state" in payload:
             optimizer.load_state_dict(payload["optimizer_state"])
         return payload

@@ -55,6 +55,13 @@ class Batch(TypedDict):
     age: (B,) float32
         Patient age in years.  NaN where unknown.
 
+    phase_label: (B,) int64
+        Harmonised menstrual phase as a class index into
+        MENSTRUAL_PHASE.order, which runs in cycle order and wraps.
+        -1 where the cell has no harmonised phase: seven of eleven
+        studies carry none, and three source values are deliberately
+        dropped as not being points on the cycle.
+
     disease_status: (B,) int64
         Integer codes: 0=eutopic, 1=ectopic, 2=control, 3=other.
         See endo_model/data/constants.py for the mapping dict.
@@ -70,3 +77,4 @@ class Batch(TypedDict):
     platform_codes: torch.Tensor
     age: torch.Tensor
     disease_status: torch.Tensor
+    phase_label: torch.Tensor

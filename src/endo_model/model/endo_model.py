@@ -29,6 +29,8 @@ from endo_model.model.decoder.gene_query import GroupedGeneQuery
 from endo_model.model.decoder.dispersion import PerGeneDispersion
 from endo_model.model.embeddings.disease_encoder import DiseaseStatusEncoder
 from endo_model.model.embeddings.dsbn import DSBN
+from endo_model.model.heads.label_classifier import LabelClassifier
+from endo_model.data.constants import n_phase_classes
 from endo_model.model.embeddings.gene_embedding import ModuleGroupEmbedding
 from endo_model.model.embeddings.platform_encoder import PlatformEncoder
 from endo_model.model.embeddings.study_encoder import StudyEncoder
@@ -112,6 +114,22 @@ class EndoFoundationModel(nn.Module):
             kappa_floor=config.kappa_floor,
             circular_parameterisation=config.circular_parameterisation,
         )
+
+        # ── Phase head ───────────────────────────────────────────────────────
+        # Optional, and off in every run before October 2026. It reads the
+        # latent means and nothing else, so it cannot reach around the latent
+        # the way the decoder once could; and it is linear by default, so the
+        # pressure it applies lands on the LATENT rather than on itself.
+        self.phase_classifier = None
+        if config.classifier.enabled:
+            self.phase_classifier = LabelClassifier(
+                d_gauss=config.d_gauss,
+                n_circular=config.n_circular,
+                n_classes=n_phase_classes(),
+                block=config.classifier.block,
+                hidden=config.classifier.hidden,
+                dropout=config.classifier.dropout,
+            )
 
         # ── Decoder ──────────────────────────────────────────────────────────
         # The decoder's gene side is gene identity only, projected per group.
@@ -241,12 +259,15 @@ class EndoFoundationModel(nn.Module):
         )                                                       # (B, G_meas)
         theta = self.dispersion(measured_global_idxs)          # (G_meas,)
 
-        return {
+        out = {
             "mu_hat": mu_hat,
             "theta": theta,
             "measured_global_idxs": measured_global_idxs,
             **latent,
         }
+        if self.phase_classifier is not None:
+            out["phase_logits"] = self.phase_classifier(latent)
+        return out
 
     def _build_gene_queries(self, batch: dict) -> tuple[Tensor, Tensor]:
         """Build one decoder query vector per measured (non-DNS) gene.

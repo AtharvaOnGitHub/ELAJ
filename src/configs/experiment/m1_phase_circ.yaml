@@ -1,6 +1,6 @@
-name: w1_phase_circ
+name: m1_phase_circ
 description: >
-  WAVE ONE, ARM TWO. Identical to w1_phase_full in every respect except one
+  THE M-SERIES, ARM TWO. Identical to m1_phase_full in every respect except one
   line: the phase head reads THE FOUR CIRCULAR DIMENSIONS ALONE.
 
   THIS IS NOT AN ABLATION. It is a second attempt to win, by a different
@@ -31,7 +31,7 @@ description: >
   at it, so the pair separates "the circle carries phase" from "the circle
   carries phase when asked".
 
-  READ THE w_cls WARNING IN w1_phase_full. The same guess applies here, and
+  READ THE w_cls WARNING IN m1_phase_full. The same guess applies here, and
   it is likelier to be wrong in this arm: the gradient reaches eight columns
   instead of thirty-two, so the same weight concentrates four times harder.
   CHECK THE GRADIENT BALANCE REPORT AFTER EPOCH 1.
@@ -39,7 +39,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/w_series/w1_phase_circ/
+output_dir: outputs/m_series/m1_phase_circ/
 seed: 24
 
 overrides:

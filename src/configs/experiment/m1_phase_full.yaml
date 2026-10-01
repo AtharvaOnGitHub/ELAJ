@@ -1,6 +1,6 @@
-name: w1_phase_full
+name: m1_phase_full
 description: >
-  WAVE ONE, ARM ONE. The first arm trained with DSBN correct, and the first
+  THE M-SERIES, ARM ONE. The first arm trained with DSBN correct, and the first
   to ask for menstrual phase directly rather than hoping for it.
 
   WHAT CHANGED UNDERNEATH EVERY NUMBER. Two DSBN defects were fixed on
@@ -74,7 +74,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/w_series/w1_phase_full/
+output_dir: outputs/m_series/m1_phase_full/
 seed: 24
 
 overrides:

@@ -1,0 +1,104 @@
+name: w1_phase_circ
+description: >
+  WAVE ONE, ARM TWO. Identical to w1_phase_full in every respect except one
+  line: the phase head reads THE FOUR CIRCULAR DIMENSIONS ALONE.
+
+  THIS IS NOT AN ABLATION. It is a second attempt to win, by a different
+  route, at the thing the paper actually claims. Arm one asks whether the
+  latent can carry menstrual phase. This asks whether the CIRCLE can, and
+  that is the stronger result by a wide margin.
+
+  WHY IT MIGHT WORK. Phase is an ordered variable that wraps, and the
+  harmoniser already treats it as one: PHASE_DAYS places each of the nine
+  classes at a representative day of an idealised 28-day cycle, menstrual
+  at 3, proliferative at 10, periovulatory at 14, secretory_late at 26,
+  and MENSTRUAL_PHASE.periodic is True, so class 8 adjoins class 0. A
+  circular latent is the only representation in this comparison that can
+  hold that natively. PCA, Harmony, scVI and scANVI must all flatten the
+  cycle into a Euclidean space and pay for the seam.
+
+  WHY IT MIGHT NOT. Eight columns, (cos, sin) over four angles, against
+  arm one's thirty-two. Nine classes through eight columns is tight, and
+  the circular KL is actively pulling the posterior back towards uniform
+  at beta_max x w_kl_circ = 0.05. If this arm reaches chance while arm one
+  rises, that is a clean negative result about the architecture and we have
+  it by 4 October rather than during the writing.
+
+  WHAT THE COMPARISON NEEDS. Same seed, same corpus, same epoch budget,
+  same selector, same guard. Only `model.classifier.block` differs, so any
+  difference in phase_knn_xdonor is attributable to it. Arm one's
+  phase_knn_circ column measures the same thing without the head pointed
+  at it, so the pair separates "the circle carries phase" from "the circle
+  carries phase when asked".
+
+  READ THE w_cls WARNING IN w1_phase_full. The same guess applies here, and
+  it is likelier to be wrong in this arm: the gradient reaches eight columns
+  instead of thirty-two, so the same weight concentrates four times harder.
+  CHECK THE GRADIENT BALANCE REPORT AFTER EPOCH 1.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/w_series/w1_phase_circ/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 8
+
+  # The rule, fixed before the run. See the description.
+  training.stop_metric: phase_knn_xdonor
+  training.guard_metric: nb
+  training.guard_max: 0.4332
+  training.block_probe_every: 2
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # beta_max 0.5 x w_kl_circ 0.1 = 0.05 on the circular KL. The arm that
+  # left this at 1.0 ran at 0.5 and pinned every circular dimension.
+  model.loss.w_kl_circ: 0.1
+
+  model.dab.lambda_dab: 0.01
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.05
+  # ON, unlike every v-series arm. r5_cce showed CCE suppressing the
+  # circular branch: the Gaussian block grows, cosine normalisation drowns
+  # the fixed-norm circular block, and concentration decays. With the
+  # circle now central to the claim, this is not optional.
+  model.cce.block_normalise: true
+  model.cce.every: 4
+
+  # THE PHASE HEAD. Linear on purpose: a hidden layer would learn the
+  # classification inside the head and leave the latent unseparated, which
+  # is the opposite of the pressure this exists to apply.
+  model.classifier.enabled: true
+  # THE ONE LINE THAT DIFFERS FROM ARM ONE.
+  model.classifier.block: circular
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 500.0
+
+  # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
+  model.d_gauss: 24
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

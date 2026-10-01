@@ -29,6 +29,7 @@ from endo_model.precision import PrecisionPolicy
 from endo_model.training.callbacks import EarlyStopping, MetricLogger
 from endo_model.training.batch_device import to_device
 from endo_model.training.checkpointing import CheckpointManager
+from endo_model.training.checkpoint_ranking import CheckpointRanking
 from endo_model.training.diagnostics import TrainingMonitor
 
 # The except branch around on_epoch_metrics referenced this name without it
@@ -94,6 +95,13 @@ class Trainer:
         # Scores the validation latent on a label after every validation
         # pass and may rank checkpoints; see label_probe.py.
         self.label_probe = label_probe
+        guard = getattr(self.config, "guard_metric", "") or None
+        self.ranking = CheckpointRanking(
+            metric=getattr(self.config, "stop_metric", "nb") or "nb",
+            guard=guard,
+            guard_max=float(getattr(self.config, "guard_max", float("inf"))),
+        )
+        logger.info(self.ranking.describe())
         self._probe_rows: list[tuple[np.ndarray, np.ndarray]] = []
         # Which donors were held out, written into every checkpoint so that a
         # later scoring run cannot quietly use a different wall. See
@@ -369,14 +377,13 @@ class Trainer:
         return history
 
     def _stop_metric(self, val_metrics: dict, val_loss: float) -> float:
-        name = getattr(self.config, "stop_metric", "nb") or "nb"
-        if name != "nb":
-            value = val_metrics.get(name, float("nan"))
-            if value == value:                      # not NaN
-                return -float(value)
-            logger.warning("stop_metric %r is unavailable this epoch; using nb",
-                           name)
-        return val_metrics.get("nb", val_loss)
+        """One number to minimise, from `CheckpointRanking`.
+
+        The rule, including its guard, is built once in `__init__` and
+        logged there, so the record says what the run was selecting for
+        before it saw any of it.
+        """
+        return self.ranking.rank(val_metrics, val_loss)
 
     def _cce_due(self) -> bool:
         """Whether this step runs the second encoder pass for CCE.

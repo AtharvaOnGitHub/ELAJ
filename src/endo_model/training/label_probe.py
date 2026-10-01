@@ -255,6 +255,25 @@ class LabelProbe:
         return out
 
 
+def phase_labels_in_order(dataset, order) -> np.ndarray:
+    """Harmonised menstrual phase for a validation dataset, in sampler order.
+
+    The same `Harmoniser` the benchmark scorer and the training head use, so
+    the per-epoch gauge, the final score, and the thing being optimised are
+    one label and not three. The dataset must carry `PHASE_SOURCE_COLUMNS`
+    in its `extra_obs_columns`.
+    """
+    from endo_model.evaluation.label_harmonisation import (
+        MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS, merge_columns,
+    )
+
+    merged = merge_columns(dataset.extra_obs, PHASE_SOURCE_COLUMNS,
+                           MENSTRUAL_PHASE)
+    if merged.size == 0:
+        merged = np.full(len(dataset), None, dtype=object)
+    return merged[np.asarray(order, dtype=np.int64)]
+
+
 def family_labels_in_order(dataset, order) -> np.ndarray:
     """Harmonised cell-family labels for a validation dataset, in sampler order.
 
@@ -298,3 +317,102 @@ def patients_in_order(dataset, order) -> np.ndarray | None:
     if patients is None or len(patients) == 0:
         return None
     return np.asarray(patients, dtype=object)[np.asarray(order, dtype=np.int64)]
+
+
+class BlockProbe:
+    """One label, scored on each block of the latent on its own.
+
+    WHAT IT ANSWERS. The paper's distinctive claim is that a circular latent
+    is the right shape for an ordered variable that wraps. A phase score on
+    the whole latent cannot support that claim: the Gaussian block might be
+    carrying all of it. This scores the same label three ways, so the claim
+    is a measurement rather than an argument.
+
+        phase_knn          both blocks, the headline
+        phase_knn_gauss    mu_gauss alone
+        phase_knn_circ     the circular means alone
+
+    It replaces the second arm the schedule could not afford. If the circular
+    column stays at chance while the full column rises, the circle is
+    decoration and we know it during the run rather than during the writing.
+
+    WHY SLICING AND NOT NEW SCORING CODE. `LabelProbe.score` concatenates
+    `mu_gauss` with the circular coordinates, so a zero-width `mu_gauss`
+    gives the circular block alone and a zero-width `mu_angle` gives the
+    Gaussian block alone. Same scorer, same subsample, same k: the three
+    numbers are comparable because nothing but the columns changed.
+
+    COST. Three passes instead of one, and the cross-donor block is the
+    quadratic one. `every` runs the two block passes on a cadence while the
+    headline runs every epoch, because the headline selects checkpoints and
+    the blocks only have to show a trend.
+    """
+
+    def __init__(self, labels: np.ndarray, name: str = "phase_knn",
+                 every: int = 1, **kwargs) -> None:
+        self.name = name
+        self.every = max(1, int(every))
+        self.full = LabelProbe(labels, name=name, **kwargs)
+        self.gauss = LabelProbe(labels, name=f"{name}_gauss", **kwargs)
+        self.circ = LabelProbe(labels, name=f"{name}_circ", **kwargs)
+        self._calls = 0
+        logger.info("Block probe %r: blocks scored every %d epoch(s).",
+                    name, self.every)
+
+    @property
+    def n_labelled(self) -> int:
+        return self.full.n_labelled
+
+    def score(self, mu_gauss: np.ndarray, mu_angle: np.ndarray) -> dict[str, float]:
+        """The headline every call; the two blocks on the cadence."""
+        out = dict(self.full.score(mu_gauss, mu_angle))
+        due = self._calls % self.every == 0
+        self._calls += 1
+        if not due:
+            return out
+        # Zero-width views, not copies: the scorer concatenates, so an empty
+        # block contributes no columns and the other stands alone.
+        out.update(self.gauss.score(mu_gauss, mu_angle[:, :0]))
+        out.update(self.circ.score(mu_gauss[:, :0], mu_angle))
+        return out
+
+
+class CompositeProbe:
+    """Several probes behind one `score`, so the trainer keeps one hook.
+
+    The trainer collects the validation latent once and hands it to a single
+    object. Scoring two labels used to mean choosing between them. This runs
+    each in turn and merges the dictionaries, so family stays as the control
+    while phase becomes the target, and the selector can name a key from
+    either.
+
+    A probe that raises is reported and skipped rather than ending the epoch:
+    a per-epoch gauge must never be able to kill a run that is training
+    correctly.
+    """
+
+    def __init__(self, probes: list) -> None:
+        if not probes:
+            raise ValueError("CompositeProbe needs at least one probe")
+        # Every probe carries `.name`; reading it directly rather than
+        # through getattr keeps the dataset-accessor guard in
+        # tests/test_training/test_donor_metrics.py able to tell an
+        # attribute read on a DATASET from one on a probe.
+        self.probes = probes
+        self.names = [p.name for p in probes]
+
+    @property
+    def n_labelled(self) -> int:
+        """The best-covered probe's count, for the caller's warning."""
+        return max(int(p.n_labelled) for p in self.probes)
+
+    def score(self, mu_gauss: np.ndarray, mu_angle: np.ndarray) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for probe in self.probes:
+            try:
+                out.update(probe.score(mu_gauss, mu_angle))
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning("Probe %r failed this epoch (%s: %s); its "
+                               "metrics are absent, the run continues.",
+                               probe.name, type(exc).__name__, exc)
+        return out

@@ -130,6 +130,17 @@ class TrainingConfig:
     # the validation latent (higher is better; negated internally), which is
     # closer to what the paper is judged on. See training/label_probe.py.
     stop_metric: str = "nb"
+    # A checkpoint whose `guard_metric` exceeds `guard_max` is saved but
+    # ranked behind every checkpoint that does not. With phase as the
+    # selector this is what stops the run choosing an epoch whose
+    # reconstruction has already gone past the mean-profile baseline.
+    # How often the phase probe scores the Gaussian and circular blocks
+    # separately. The headline runs every epoch because it selects
+    # checkpoints; the blocks only have to show a trend, and the
+    # cross-donor search is quadratic in cells.
+    block_probe_every: int = 2
+    guard_metric: str = ""
+    guard_max: float = float("inf")
     kl_annealing: KLAnnealingConfig = field(default_factory=KLAnnealingConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     resume_from_checkpoint: Optional[str] = None
@@ -168,6 +179,9 @@ class TrainingConfig:
             early_stop_warmup_epochs=int(d.get("early_stop_warmup_epochs", 0)),
             val_check_interval=int(d.get("val_check_interval", 1)),
             stop_metric=str(d.get("stop_metric", "nb")),
+            block_probe_every=int(d.get("block_probe_every", 2)),
+            guard_metric=str(d.get("guard_metric", "")),
+            guard_max=float(d.get("guard_max", float("inf"))),
             kl_annealing=KLAnnealingConfig.from_dict(d.get("kl_annealing", {})),
             diagnostics=DiagnosticsConfig.from_dict(d.get("diagnostics", {})),
             resume_from_checkpoint=d.get("resume_from_checkpoint"),

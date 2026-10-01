@@ -1,0 +1,138 @@
+name: w1_phase_full
+description: >
+  WAVE ONE, ARM ONE. The first arm trained with DSBN correct, and the first
+  to ask for menstrual phase directly rather than hoping for it.
+
+  WHAT CHANGED UNDERNEATH EVERY NUMBER. Two DSBN defects were fixed on
+  1 October 2026 and both alter what a checkpoint means, so nothing here is
+  comparable with any r, c or v run.
+
+  1. One shared BatchNorm1d held ONE running mean and variance for all
+     eleven studies, while PerStudyBatchSampler puts one study in each
+     batch. Training normalised each study by its own statistics;
+     evaluation normalised every study by the pooled average. Scoring a
+     checkpoint in eval_bn_train reproduced training mode EXACTLY, and the
+     cost of pooled statistics ran from +0.0052 for the study holding 35.5%
+     of validation to +0.2770 for the one holding 1.0%.
+  2. gamma and beta were nn.Embedding tables at their default
+     initialisation, a standard normal. A batch-norm affine should start at
+     identity. Every study began with a random scale, so about half its
+     features started sign-flipped and some started switched off.
+
+  WHY MENSTRUAL PHASE. It is carried by four of eleven studies through
+  MenstrualCyclePhase, MenstrualCyclePhase_main and Stage: 752,783 cells and
+  148 donors. Fine cell type and cell cycle are each carried by ONE study,
+  so a head on either would be a study classifier wearing a hat, in direct
+  opposition to DAB. Phase is the only shortlisted label broad enough to
+  supervise. Best cross-donor baseline is scVI at 0.7013.
+
+  WHAT WE KNOW AND MUST NOT FORGET. Every patient in this corpus was
+  biopsied once: 269 patients, 269 samples, 1.00 in every study. Phase is
+  therefore CONSTANT WITHIN A DONOR. The within-donor kNN number is
+  inflated by construction, because a cell's neighbours inside its own
+  donor share its phase whatever the model learned. Only the cross-donor
+  number means anything, which is why it and not the headline is the
+  selector below.
+
+  SELECTION, FIXED BEFORE THE RUN. Select on phase_knn_xdonor on the
+  VALIDATION split. Guard on val_nb against the study-mean baseline of
+  0.4332: a checkpoint past that is saved but ranked behind every one that
+  is not, because v1_bottleneck reached its best phase numbers in epochs
+  whose reconstruction had already failed. Report on TEST, once, through
+  score_arm. Selecting and reporting on one split is leakage.
+
+  THE BLOCK PROBE REPLACES THE ARM WE COULD NOT AFFORD. phase_knn is scored
+  three ways every second epoch: both blocks, mu_gauss alone, and the four
+  circular dimensions alone. If the circular column stays at chance while
+  the full column rises, the circle is decoration and we learn it during
+  the run rather than during the writing.
+
+  THE CIRCULAR BRANCH IS ON, at the only setting ever shown to concentrate:
+  n_circular 4, direction parameterisation, kappa_floor 1.0, and
+  w_kl_circ 0.1. The arm that carried kappa_floor and the parameterisation
+  but missed w_kl_circ ran at four times the intended pressure and pinned
+  all four dimensions; with it, three of four reached kappa 24 to 491.
+
+  THE ONE NUMBER HERE THAT IS A GUESS IS w_cls. The classification loss is
+  per-cell and is divided by n_measured exactly as cce and dab are, so it
+  is in honest units for the first time, and nobody has ever set it. Parity
+  with reconstruction would be about 2,400: cross entropy starts near
+  ln(9) = 2.2, n_measured is about 14,000, and w_nb * nb is about 0.38.
+  500 is deliberately below parity so the head shapes the latent without
+  flattening the reconstruction. CHECK THE GRADIENT BALANCE REPORT AFTER
+  EPOCH 1 (about 73 minutes). If the cls gradient at mu_gauss is not
+  somewhere between a tenth and a half of the nb gradient, kill the arm and
+  change this number rather than spending two days on it.
+
+  EPOCH BUDGET. v1_pool ran about 5,500 s an epoch and this adds a phase
+  probe with a cross-donor block, so call it 6,500 s. Twenty-six epochs is
+  about 47 h against the 48 h wall.
+
+  PARAMETERS. v1_pool_shape plus one linear head of (24 + 8) x 9 + 9 = 297.
+  CHECK THE FIRST LINE OF THE TRAINING LOG.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/w_series/w1_phase_full/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 8
+
+  # The rule, fixed before the run. See the description.
+  training.stop_metric: phase_knn_xdonor
+  training.guard_metric: nb
+  training.guard_max: 0.4332
+  training.block_probe_every: 2
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # beta_max 0.5 x w_kl_circ 0.1 = 0.05 on the circular KL. The arm that
+  # left this at 1.0 ran at 0.5 and pinned every circular dimension.
+  model.loss.w_kl_circ: 0.1
+
+  model.dab.lambda_dab: 0.01
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.05
+  # ON, unlike every v-series arm. r5_cce showed CCE suppressing the
+  # circular branch: the Gaussian block grows, cosine normalisation drowns
+  # the fixed-norm circular block, and concentration decays. With the
+  # circle now central to the claim, this is not optional.
+  model.cce.block_normalise: true
+  model.cce.every: 4
+
+  # THE PHASE HEAD. Linear on purpose: a hidden layer would learn the
+  # classification inside the head and leave the latent unseparated, which
+  # is the opposite of the pressure this exists to apply.
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 500.0
+
+  # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
+  model.d_gauss: 24
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

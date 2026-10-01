@@ -142,8 +142,13 @@ def main() -> None:
     # The validation dataset also carries the cell-family source columns, so
     # the label probe can score the latent on family every epoch. They live in
     # `extra_obs`, outside the Batch; the model never sees them.
-    from endo_model.evaluation.label_harmonisation import LINEAGE_SOURCE_COLUMNS
-    split_kwargs["extra_obs_columns"] = list(LINEAGE_SOURCE_COLUMNS)
+    from endo_model.evaluation.label_harmonisation import (
+        LINEAGE_SOURCE_COLUMNS, PHASE_SOURCE_COLUMNS,
+    )
+    # Phase as well as family: phase is the v-series target and family
+    # is kept as the control that says the latent is not simply broken.
+    split_kwargs["extra_obs_columns"] = list(
+        dict.fromkeys([*LINEAGE_SOURCE_COLUMNS, *PHASE_SOURCE_COLUMNS]))
 
     # One read of the corpus for both splits (findings C3: it used to be
     # read once per split, two full passes before the first step).
@@ -205,20 +210,35 @@ def main() -> None:
     # Labels are aligned to the validation sampler's order, which is fixed
     # (shuffle=False), so the latents collected in `_val_epoch` line up.
     from endo_model.training.label_probe import (
-        LabelProbe, family_labels_in_order, patients_in_order,
-        studies_in_order,
+        BlockProbe, CompositeProbe, LabelProbe, family_labels_in_order,
+        patients_in_order, phase_labels_in_order, studies_in_order,
     )
     val_order = [i for batch in val_sampler for i in batch]
     # Donor ids as well as labels, so every epoch reports both bounds on the
     # biology (with and without same-donor neighbours), the drop between
     # them, and donor identity itself. See training/label_probe.py.
-    label_probe = LabelProbe(family_labels_in_order(val_dataset, val_order),
-                             k=30, seed=exp_cfg.seed,
-                             patients=patients_in_order(val_dataset, val_order),
-                             studies=studies_in_order(val_dataset, val_order))
-    if label_probe.n_labelled == 0:
+    patients = patients_in_order(val_dataset, val_order)
+    studies = studies_in_order(val_dataset, val_order)
+    family_probe = LabelProbe(family_labels_in_order(val_dataset, val_order),
+                              k=30, seed=exp_cfg.seed,
+                              patients=patients, studies=studies)
+    if family_probe.n_labelled == 0:
         logger.warning("No validation cell carries a family label; the probe "
                        "will report NaN and stop_metric falls back to nb")
+
+    # Phase is scored on each latent block separately. Menstrual phase is
+    # constant within a donor -- 269 patients, 269 samples -- so the
+    # within-donor number is inflated by construction and only the
+    # cross-donor one means anything. See label_harmonisation.py.
+    phase_probe = BlockProbe(
+        phase_labels_in_order(val_dataset, val_order),
+        name="phase_knn", every=train_cfg.block_probe_every,
+        k=30, seed=exp_cfg.seed, patients=patients, studies=studies)
+    if phase_probe.n_labelled == 0:
+        logger.warning("No validation cell carries a menstrual phase; the "
+                       "phase head will train on nothing and its probe will "
+                       "report NaN")
+    label_probe = CompositeProbe([family_probe, phase_probe])
     # How far the encoder's output moves per epoch. Reported alongside the
     # losses, and the number that says when the encoder is settled enough
     # to freeze for a latent sweep. See training/drift.py.

@@ -78,6 +78,11 @@ KEPT_SUFFIX = "_kept"
 PATIENT_METRIC = "patient_knn"
 STUDY_METRIC = "study_knn"
 
+# Metrics that describe the latent rather than the probe's label, so
+# every probe computes the same value under the same name. BlockProbe
+# prefixes these; see BlockProbe.named.
+IDENTITY_METRICS = (PATIENT_METRIC, STUDY_METRIC)
+
 DEFAULT_MAX_CELLS = None
 """No subsample for the headline metric.
 
@@ -365,16 +370,37 @@ class BlockProbe:
 
     def score(self, mu_gauss: np.ndarray, mu_angle: np.ndarray) -> dict[str, float]:
         """The headline every call; the two blocks on the cadence."""
-        out = dict(self.full.score(mu_gauss, mu_angle))
+        out = self.named(self.full.score(mu_gauss, mu_angle), self.full.name)
         due = self._calls % self.every == 0
         self._calls += 1
         if not due:
             return out
         # Zero-width views, not copies: the scorer concatenates, so an empty
         # block contributes no columns and the other stands alone.
-        out.update(self.gauss.score(mu_gauss, mu_angle[:, :0]))
-        out.update(self.circ.score(mu_gauss[:, :0], mu_angle))
+        out.update(self.named(self.gauss.score(mu_gauss, mu_angle[:, :0]),
+                              self.gauss.name))
+        out.update(self.named(self.circ.score(mu_gauss[:, :0], mu_angle),
+                              self.circ.name))
         return out
+
+    @staticmethod
+    def named(scored: dict[str, float], probe: str) -> dict[str, float]:
+        """Prefix the label-independent metrics with the probe they came from.
+
+        `patient_knn` and `study_knn` describe the LATENT, not the label, so
+        every probe writes them under the same two names. Merging three
+        probes' dictionaries then left whichever ran last, and in m1 that was
+        the circular-block probe on even epochs and the full-latent probe on
+        odd ones. Both series read as one oscillating metric: patient_knn
+        alternated 0.23, 0.53, 0.27, 0.56 for sixteen epochs and neither
+        number meant what the column said.
+
+        Prefixing makes each block's donor recoverability its own series, so
+        `phase_knn_circ_patient_knn` can be compared with
+        `phase_knn_patient_knn` instead of overwriting it.
+        """
+        return {(f"{probe}_{k}" if k in IDENTITY_METRICS else k): v
+                for k, v in scored.items()}
 
 
 class CompositeProbe:

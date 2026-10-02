@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # The order the report prints in: reconstruction first, because everything else
 # is read as a fraction of it.
-TERMS = ("nb", "kl_gauss", "kl_circ", "cce", "dab")
+TERMS = ("nb", "kl_gauss", "kl_circ", "cce", "dab", "cls")
 
 
 class GradientBalance:
@@ -65,6 +65,11 @@ class GradientBalance:
             "kl_circ": beta_kl * c.w_kl_circ,
             "cce": c.w_cce / max(n_measured, 1),
             "dab": c.w_dab / max(n_measured, 1),
+            # Per cell like cce and dab, so divided the same way. Its
+            # absence from this report is why m1 ran two days with DAB
+            # at 0.0000x and nobody could check the one number they
+            # were told to check.
+            "cls": c.w_cls / max(n_measured, 1),
         }
 
     def measure(self, losses: dict, mu_gauss, n_measured: int) -> dict[str, float]:

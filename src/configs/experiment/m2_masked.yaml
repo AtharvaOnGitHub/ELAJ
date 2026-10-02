@@ -1,0 +1,121 @@
+name: m2_masked
+description: >
+  THE M-SERIES, WAVE TWO. Both m1 arms trained a variational autoencoder
+  with no working batch correction, on an input that names the study. This
+  wave fixes both and asks whether the biology comes back.
+
+  WHAT m1 MEASURED, AND WHY IT WAS WASTED. DAB contributed 0.0000x of
+  reconstruction's gradient for sixteen epochs. The loss-scaling fix of
+  28 September removed a hidden factor of n_measured from the dab term, and
+  the configs still carried lambda_dab 0.01 from the old units, so the
+  effective pressure fell from about 70 to 0.005. Three measurements agreed:
+  train_dab fell 1.1377 to 0.2098 against ln(11) = 2.40 chance, study_knn
+  climbed to 0.88, and patient_knn climbed 0.4737 to 0.6121 across the run.
+  The Gaussian UMAP showed fifteen-plus islands, one per study.
+
+  AND THE OTHER HALF WAS IN THE INPUT. Each study measured a different gene
+  panel, so the DNS mask is identical within a study and different between
+  studies. No normalisation touches it: it is about which genes exist. With
+  the adversary inert, nothing opposed it at all.
+
+  THE SELECTOR CHANGED, AND NOT BY CHOICE. m1 selected on
+  phase_knn_xdonor. On the validation split, phase chance is 0.664 against
+  0.380 on val+test, so val's phase labels are dominated by one or two
+  classes and the metric is near-degenerate there. Its whole range across
+  sixteen epochs was 0.030, inside the +/-0.04 noise band the cross-donor
+  function's own docstring records at 40 donors. That was selection on
+  noise. This wave selects on nb and GUARDS on study_knn <= 0.5: the best
+  reconstruction among checkpoints that are not study-fragmented. If no
+  checkpoint clears the guard, every one is penalised equally, ranking falls
+  back to nb, and the guard becomes a pass/fail flag we can read.
+
+  PHASE IS NOW REPORTED, NOT CHASED. The head stays on, the block probe
+  stays on, and phase_knn_circ against phase_knn_gauss still measures the
+  paper's central claim every second epoch. But the honest phase number
+  comes from score_arm on val+test at k=100, once, at the end.
+
+  w_cls 500 IS STILL A GUESS, BUT IT IS NOW CHECKABLE. In m1 the cls term
+  was absent from the gradient balance report and detached in the losses
+  dict, so the check asked for after epoch 1 was impossible. Both are fixed.
+  READ THE GRADIENT BALANCE AFTER EPOCH 1.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m2_masked/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 8
+
+  # The rule, fixed before the run. See the description.
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.5
+  training.block_probe_every: 2
+
+  # ── THE TWO FIXES m1 EXISTS TO MOTIVATE ──────────────────────────────────
+  # 1. Every cell shows the encoder 12,500 measured genes, whatever its
+  #    study's panel holds (13,144 for study 5 up to 15,056 for study 1).
+  #    The per-study DNS pattern was a perfect study fingerprint in the
+  #    input, and m1's Gaussian latent fragmented into one island per study.
+  #    This closes the gene-COUNT half of that signal outright. It cannot
+  #    close the identity half: masking only subtracts, so a panel stays a
+  #    subset. See training/gene_masking.py.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # beta_max 0.5 x w_kl_circ 0.1 = 0.05 on the circular KL. The arm that
+  # left this at 1.0 ran at 0.5 and pinned every circular dimension.
+  model.loss.w_kl_circ: 0.1
+
+  # v1_pool's adversarial pressure, restated in post-fix units. m1 measured
+  # dab at 1.59e-5 of nb's gradient at lambda 0.01; pre-fix, dab was not
+  # divided by n_measured, so v1_pool effectively ran at 1.59e-5 x 14,000 =
+  # 0.22 x nb. This arm asks whether that pressure, which failed on its own,
+  # succeeds once the input shortcut is gone.
+  model.dab.lambda_dab: 140.0
+
+  model.cce.enabled: true
+  model.cce.lambda_cce: 0.05
+  # ON, unlike every v-series arm. r5_cce showed CCE suppressing the
+  # circular branch: the Gaussian block grows, cosine normalisation drowns
+  # the fixed-norm circular block, and concentration decays. With the
+  # circle now central to the claim, this is not optional.
+  model.cce.block_normalise: true
+  model.cce.every: 4
+
+  # THE PHASE HEAD. Linear on purpose: a hidden layer would learn the
+  # classification inside the head and leave the latent unseparated, which
+  # is the opposite of the pressure this exists to apply.
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 500.0
+
+  # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
+  model.d_gauss: 24
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

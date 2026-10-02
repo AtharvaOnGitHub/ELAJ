@@ -20,7 +20,7 @@ from torch import Tensor
 
 from .adversarial import DABClassifier
 from .cce_embedding import cce_embedding
-from .label_classification import MaskedCrossEntropy, masked_accuracy
+from .label_classification import MaskedCrossEntropy, masked_correct
 from .contrastive import InfoNCELoss
 from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
 from .reconstruction import NegativeBinomialLoss
@@ -84,7 +84,7 @@ class CompositeLoss(nn.Module):
         # REPORTS phase accuracy without optimising for it. That is
         # the honest control for an arm that does optimise for it.
         self.cls = MaskedCrossEntropy(label_smoothing=cls_label_smoothing)
-        self._last_accuracy: float = float("nan")
+        self._last_correct: int = 0
         self.lambda_dab_max = lambda_dab_max
 
         self.nb_loss = NegativeBinomialLoss()
@@ -159,18 +159,17 @@ class CompositeLoss(nn.Module):
         """
         logits = model_output.get("phase_logits")
         if logits is None:
-            self._last_accuracy = float("nan")
+            self._last_correct = 0
             return torch.zeros((), device=model_output["mu_gauss"].device), 0
 
         target = batch.get("phase_label") if isinstance(batch, dict) \
             else getattr(batch, "phase_label", None)
         if target is None:
-            self._last_accuracy = float("nan")
+            self._last_correct = 0
             return logits.sum() * 0.0, 0
 
         loss, n = self.cls(logits, target)
-        accuracy, _ = masked_accuracy(logits, target)
-        self._last_accuracy = accuracy if n else float("nan")
+        self._last_correct, _ = masked_correct(logits, target)
         return loss, n
 
     def forward(
@@ -334,9 +333,17 @@ class CompositeLoss(nn.Module):
             "beta_kl": torch.tensor(beta_kl),
             "dab": dab_loss,
             "cce": cce_loss,
-            "cls": cls_loss.detach(),
+            # NOT detached: GradientBalance differentiates the terms it
+            # reports, and a detached one is silently skipped.
+            "cls": cls_loss,
+            # Counts, not a ratio. Both are summed per batch and then
+            # averaged over batches, so cls_correct / cls_cells read
+            # off the metrics is the true epoch accuracy. A per-batch
+            # accuracy cannot be averaged, and on the ~54% of batches
+            # from studies with no phase labels it is undefined, which
+            # is how val_cls_accuracy came out NaN for every epoch.
             "cls_cells": torch.tensor(float(n_labelled)),
-            "cls_accuracy": torch.tensor(self._last_accuracy),
+            "cls_correct": torch.tensor(float(self._last_correct)),
             # Reported, not optimised. The explanation for r5_cce's circular
             # collapse is that CCE grows this to crowd the fixed-norm circular
             # block out of the cosine similarity, so it should climb under CCE

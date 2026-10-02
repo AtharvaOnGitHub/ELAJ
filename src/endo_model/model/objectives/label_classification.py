@@ -61,16 +61,25 @@ class MaskedCrossEntropy(nn.Module):
 
 
 @torch.no_grad()
-def masked_accuracy(logits: Tensor, target: Tensor) -> tuple[float, int]:
-    """Top-1 accuracy over labelled cells, and how many there were.
+def masked_correct(logits: Tensor, target: Tensor) -> tuple[int, int]:
+    """How many labelled cells were classified correctly, and how many there were.
 
-    Reported, never optimised. With one study per batch and phase constant
-    within a donor, a batch's accuracy is a weak signal; the number that
-    matters is the cross-donor probe, not this.
+    COUNTS, not a ratio, and that is the whole point. A per-batch accuracy
+    cannot be averaged into an epoch accuracy, and on a batch from one of the
+    seven studies with no phase labels it is undefined. Reporting it directly
+    is how `val_cls_accuracy` came out NaN for all sixteen epochs of m1: the
+    NaN from one unlabelled batch poisons the epoch mean.
+
+    Two counts do average correctly. Both are summed per batch and averaged
+    over the same number of batches, so their ratio is the true epoch
+    accuracy.
+
+    Reported, never optimised. The number that matters for the paper is the
+    cross-donor probe and the balanced linear probe in the scorer, not this.
     """
     labelled = target != UNLABELLED
     n = int(labelled.sum())
     if n == 0:
-        return 0.0, 0
+        return 0, 0
     correct = (logits[labelled].argmax(dim=-1) == target[labelled]).sum()
-    return float(correct) / n, n
+    return int(correct), n

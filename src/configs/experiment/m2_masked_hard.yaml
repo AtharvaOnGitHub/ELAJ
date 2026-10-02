@@ -34,10 +34,20 @@ description: >
   paper's central claim every second epoch. But the honest phase number
   comes from score_arm on val+test at k=100, once, at the end.
 
-  w_cls 500 IS STILL A GUESS, BUT IT IS NOW CHECKABLE. In m1 the cls term
-  was absent from the gradient balance report and detached in the losses
-  dict, so the check asked for after epoch 1 was impossible. Both are fixed.
-  READ THE GRADIENT BALANCE AFTER EPOCH 1.
+  w_cls 40 IS NOW MEASURED, NOT GUESSED. The first m2 attempt ran at 500
+  and the gradient balance, fixed so it can see the term at all, read
+  cls 5.492e-04 against nb 1.879e-04: 2.9234x reconstruction. The head was
+  driving the latent. Worse, it can only drive it from the FOUR studies
+  that carry phase, because batches hold one study and the other seven
+  contribute exactly zero, so a dominant cls term is an asymmetric force
+  separating labelled studies from unlabelled ones. That is the fragmenting
+  we are trying to remove, applied by our own objective.
+
+  The term is linear in w_cls, so 500 x (0.25 / 2.9234) = 42.8. 40 should
+  land near 0.23x nb, beside DAB at about 0.22x. Confirm it at epoch 1:
+  the report now waits for a batch that HAS labelled cells, because the
+  first two epochs of the 500 run drew unlabelled batches and read
+  0.0000x, which says nothing at all.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
@@ -102,7 +112,7 @@ overrides:
   model.classifier.block: full
   model.classifier.dropout: 0.0
   model.classifier.label_smoothing: 0.05
-  model.loss.w_cls: 500.0
+  model.loss.w_cls: 40.0
 
   # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
   model.d_gauss: 24

@@ -46,9 +46,30 @@ class GradientBalance:
         self.composite = composite
         self._epoch_done: int | None = None
 
-    def due(self, epoch: int) -> bool:
-        """One batch per epoch, and only the first."""
-        return self._epoch_done != epoch
+    def due(self, epoch: int, losses: dict | None = None) -> bool:
+        """One batch per epoch, and the first one that can answer.
+
+        Not simply the first batch. Batches hold one study, seven of the
+        eleven carry no menstrual phase, and on those the classification
+        term is exactly zero by construction. Measuring there reports
+        `cls 0.0000x nb` and means only that this batch had no labels.
+
+        m2 showed the failure: epochs 0 and 1 drew unlabelled batches and
+        read 0.0000x, and the true figure, 2.9234x, appeared only at epoch 2
+        when a labelled batch happened to come first. A reader watching the
+        first report would have concluded the head was inert when it was
+        nearly three times reconstruction.
+
+        So when the composite has a classification weight, the epoch's
+        measurement waits for a batch that has labelled cells.
+        """
+        if self._epoch_done == epoch:
+            return False
+        if losses is not None and getattr(self.composite, "w_cls", 0.0) > 0.0:
+            cells = losses.get("cls_cells")
+            if cells is not None and float(cells) <= 0.0:
+                return False
+        return True
 
     def weights(self, beta_kl: float, n_measured: int) -> dict[str, float]:
         """What each term's raw value is multiplied by inside `total`.

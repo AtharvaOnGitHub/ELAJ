@@ -452,7 +452,7 @@ class Trainer:
             self.monitor.check_losses(batch, losses)
 
             # One batch an epoch, before backward frees the graph.
-            if self._gradient_balance.due(self.current_epoch):
+            if self._gradient_balance.due(self.current_epoch, losses):
                 self._gradient_balance.report(
                     self.current_epoch, losses, output1["mu_gauss"],
                     int(output1["measured_global_idxs"].numel()),

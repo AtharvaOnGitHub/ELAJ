@@ -246,6 +246,14 @@ def main() -> None:
 
     drift_probe = EncoderDriftProbe.from_loader(val_loader)
 
+    # Hides a share of each cell's measured genes from the encoder on
+    # training steps. The per-study DNS pattern is a study fingerprint
+    # the encoder reads for free; see training/gene_masking.py for what
+    # this weakens and what it cannot remove.
+    from endo_model.training.gene_masking import GeneMasker
+    gene_masker = GeneMasker(target_measured=train_cfg.gene_mask_target,
+                             seed=exp_cfg.seed)
+
     if train_cfg.stop_metric != "nb":
         logger.info("Checkpoints ranked and early stopping driven by "
                     "val_%s (negated), not val_nb", train_cfg.stop_metric)
@@ -470,6 +478,7 @@ def main() -> None:
         cce_enabled=model_cfg.cce.enabled,
         cce_every=model_cfg.cce.every,
         label_probe=label_probe,
+        gene_masker=gene_masker,
         drift_probe=drift_probe,
         monitor=monitor,
         reporter=reporter,

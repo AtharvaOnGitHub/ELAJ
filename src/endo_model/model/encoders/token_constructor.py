@@ -76,7 +76,13 @@ class TokenConstructor(nn.Module):
 
         for group_name, global_idxs in batch["group_indices"].items():
             # global_idxs: (B, G_k) — all rows identical within a study batch
-            dns_mask = batch["group_dns_mask"][group_name]  # (B, G_k)
+            # The INPUT mask when a GeneMasker put one there, else the
+            # study's own. Only the encoder sees this; the decoder's
+            # layout and the reconstruction target keep the true panel,
+            # so a hidden gene still has to be predicted. See
+            # training/gene_masking.py.
+            dns_mask = batch.get("group_input_dns_mask", {}).get(
+                group_name, batch["group_dns_mask"][group_name])  # (B, G_k)
             B, G_k = global_idxs.shape
             device = global_idxs.device
 

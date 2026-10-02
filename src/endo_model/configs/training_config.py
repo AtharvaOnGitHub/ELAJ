@@ -138,6 +138,12 @@ class TrainingConfig:
     # separately. The headline runs every epoch because it selects
     # checkpoints; the blocks only have to show a trend, and the
     # cross-donor search is quadratic in cells.
+    # How many measured genes each cell shows the ENCODER on a training
+    # step, whatever its study's panel holds. 0 disables masking. Must sit
+    # below the smallest study panel, 13,144 in this corpus. Equalising the
+    # count removes one of the two ways the DNS mask identifies a study; see
+    # training/gene_masking.py for the one it cannot remove.
+    gene_mask_target: int = 0
     block_probe_every: int = 2
     guard_metric: str = ""
     guard_max: float = float("inf")
@@ -179,6 +185,7 @@ class TrainingConfig:
             early_stop_warmup_epochs=int(d.get("early_stop_warmup_epochs", 0)),
             val_check_interval=int(d.get("val_check_interval", 1)),
             stop_metric=str(d.get("stop_metric", "nb")),
+            gene_mask_target=int(d.get("gene_mask_target", 0)),
             block_probe_every=int(d.get("block_probe_every", 2)),
             guard_metric=str(d.get("guard_metric", "")),
             guard_max=float(d.get("guard_max", float("inf"))),

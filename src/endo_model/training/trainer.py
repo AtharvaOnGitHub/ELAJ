@@ -30,6 +30,7 @@ from endo_model.training.callbacks import EarlyStopping, MetricLogger
 from endo_model.training.batch_device import to_device
 from endo_model.training.checkpointing import CheckpointManager
 from endo_model.training.checkpoint_ranking import CheckpointRanking
+from endo_model.training.gene_masking import GeneMasker
 from endo_model.training.diagnostics import TrainingMonitor
 
 # The except branch around on_epoch_metrics referenced this name without it
@@ -53,6 +54,9 @@ class Trainer:
         device:          torch.device for training.
         cce_enabled:     Whether to run two forward passes per batch for CCE.
         cce_every:       Run that second pass on every k-th step only.
+        gene_masker:     A GeneMasker hiding a share of each cell's
+                         measured genes from the encoder on TRAINING
+                         steps only. None means no masking.
         label_probe:     A LabelProbe scored on the validation latent each
                          epoch; its number joins val_metrics.
         monitor:         TrainingMonitor watching for non-finite values.  None
@@ -76,6 +80,7 @@ class Trainer:
         cce_every: int = 1,
         label_probe=None,
         drift_probe=None,
+        gene_masker=None,
         monitor: TrainingMonitor | None = None,
         reporter=None,
         extra_val_metrics=None,
@@ -102,6 +107,12 @@ class Trainer:
             guard_max=float(getattr(self.config, "guard_max", float("inf"))),
         )
         logger.info(self.ranking.describe())
+        # Injected, like the probes, because the seed belongs to the
+        # experiment rather than to the training config, and a getattr
+        # fallback here would silently use 24 for every run.
+        # Training steps only: the validation pass must see the real panel
+        # or val_nb stops being comparable with earlier runs and baselines.
+        self.gene_masker = gene_masker or GeneMasker(target_measured=0)
         self._probe_rows: list[tuple[np.ndarray, np.ndarray]] = []
         # Which donors were held out, written into every checkpoint so that a
         # later scoring run cannot quietly use a different wall. See
@@ -412,6 +423,11 @@ class Trainer:
 
         for batch in self.train_loader:
             batch = to_device(batch, self.device)
+            # After to_device so the mask is drawn on the GPU the tokens are
+            # on, and before the forward pass so both CCE views see the same
+            # hidden genes: two views that differed in WHICH genes were hidden
+            # would make the contrastive task partly about the mask.
+            batch = self.gene_masker.apply(batch)
             self.optimizer.zero_grad()
             self.monitor.begin_step(self.current_epoch, self.global_step)
 

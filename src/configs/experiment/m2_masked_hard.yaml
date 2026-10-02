@@ -48,6 +48,12 @@ description: >
   the report now waits for a batch that HAS labelled cells, because the
   first two epochs of the 500 run drew unlabelled batches and read
   0.0000x, which says nothing at all.
+
+  SUPERSEDED, AND KEPT AS A RECORD. Jobs 55951638 (m2_masked) and 55951655
+  (m2_masked_hard) launched from these files at w_cls 500. The gradient
+  balance then measured cls at 2.9234x reconstruction, so the corrected arm
+  is m2_cls40.yaml. These files keep w_cls 500 so the repository matches
+  what the jobs ran; do not relaunch them.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
@@ -112,7 +118,7 @@ overrides:
   model.classifier.block: full
   model.classifier.dropout: 0.0
   model.classifier.label_smoothing: 0.05
-  model.loss.w_cls: 40.0
+  model.loss.w_cls: 500.0
 
   # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
   model.d_gauss: 24

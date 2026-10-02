@@ -1,4 +1,4 @@
-name: m2_nocls
+name: m2_dab70
 description: >
   THE M-SERIES, WAVE TWO. Both m1 arms trained a variational autoencoder
   with no working batch correction, on an input that names the study. This
@@ -49,35 +49,36 @@ description: >
   first two epochs of the 500 run drew unlabelled batches and read
   0.0000x, which says nothing at all.
 
-  NO PHASE HEAD AT ALL, AND THAT IS THE POINT TWICE OVER.
+  HALF THE ADVERSARIAL PRESSURE, BECAUSE THE TREND POINTS DOWN. Identical
+  to m2_cls40 but for lambda_dab: 70 here against 140 there.
 
-  FIRST, IT IS THE CONTROL NOTHING HAS EVER HAD. Every m1 and m2 arm ran
-  w_cls 500, which the gradient balance measured at 2.9234x and 3.1618x
-  reconstruction. So this project has never once run the model without a
-  dominant phase head, and cannot say whether that head fragments the latent
-  or merely sits on one that fragments anyway. Batches hold one study and
-  only four of eleven carry phase, so the classification gradient arrives
-  from those four and is exactly zero on the other seven: an asymmetric force
-  separating labelled studies from unlabelled ones, at any strength. Read
-  against m2_cls40, which is identical but for w_cls 40, this settles it.
+  WHY DOWN AND NOT UP. The lambda140 and lambda420 arms were a clean
+  comparison, same mask, same w_cls, same seed, and the stronger adversary
+  was WORSE on both metrics that matter: study_knn 0.8650 against 0.8123 at
+  epoch 2, patient_knn 0.5510 against 0.5244, with the gap widening from
+  0.008 at epoch 1 to 0.053 at epoch 2.
 
-  SECOND, IT IS A DELIVERABLE. The paper still has no clean unsupervised
-  ELAJ column. Every candidate so far was either scored against a split it
-  did not train on, trained with DSBN's two defects, or supervised on the
-  label being reported. This arm is none of those. Phase is still measured
-  every second epoch by the block probe, which is kNN on the latent and
-  touches no head, so a phase result here is emergent rather than coerced
-  and is the stronger claim if it appears.
+  AND IT WAS NOT EVEN DELIVERING MORE PRESSURE. Tripling the coefficient
+  from 70 to 210 moved the measured gradient only from 0.3285x to 0.3751x
+  of reconstruction, 14% more for 3x the weight. Gradient reversal is linear
+  in lambda for a FIXED discriminator; ours trains alongside and adapts, so
+  a stronger lambda mostly teaches the encoder to hide study identity from
+  the classifier while leaving it in neighbour distance. That is the
+  v-series hypothesis, measured.
 
-  THE HEAD IS DISABLED RATHER THAN WEIGHTED TO ZERO. With w_cls 0 the head's
-  parameters receive no gradient, so it would sit at its initialisation and
-  report chance while looking like a measurement. The block probe already
-  measures phase without any head.
+  WHAT THIS ARM RISKS. m1 ran an effective coefficient of 0.005 and its
+  study_knn reached 0.882, so the bottom of the range is not safe either.
+  m1 had no gene masking, so the low end is untested under current
+  conditions, and an optimum plausibly sits between. Coefficient 35 here
+  against m2_cls40's 70 brackets it from below. If both land near each
+  other, adversarial strength is not the lever at any setting and the
+  remaining channel is gene identity in the DNS mask, which masking weakens
+  and cannot close.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/m_series/m2_nocls/
+output_dir: outputs/m_series/m2_dab70/
 seed: 24
 
 overrides:
@@ -119,7 +120,7 @@ overrides:
   # divided by n_measured, so v1_pool effectively ran at 1.59e-5 x 14,000 =
   # 0.22 x nb. This arm asks whether that pressure, which failed on its own,
   # succeeds once the input shortcut is gone.
-  model.dab.lambda_dab: 140.0
+  model.dab.lambda_dab: 70.0
 
   model.cce.enabled: true
   model.cce.lambda_cce: 0.05
@@ -133,11 +134,11 @@ overrides:
   # THE PHASE HEAD. Linear on purpose: a hidden layer would learn the
   # classification inside the head and leave the latent unseparated, which
   # is the opposite of the pressure this exists to apply.
-  model.classifier.enabled: false
+  model.classifier.enabled: true
   model.classifier.block: full
   model.classifier.dropout: 0.0
   model.classifier.label_smoothing: 0.05
-  model.loss.w_cls: 0.0
+  model.loss.w_cls: 40.0
 
   # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
   model.d_gauss: 24

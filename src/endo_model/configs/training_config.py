@@ -143,13 +143,12 @@ class TrainingConfig:
     # below the smallest study panel, 13,144 in this corpus. Equalising the
     # count removes one of the two ways the DNS mask identifies a study; see
     # training/gene_masking.py for the one it cannot remove.
-    # How many checkpoints to retain, ranked by stop_metric. Three was the
-    # hard-coded default and it assumes the selector is trustworthy. val_nb
-    # improves only 0.034 over the study-mean baseline of 0.4332, so
-    # reconstruction is nearly indifferent to the latent, which is the thing
-    # we actually score. Keeping more lets score_arm choose at the end
-    # rather than trusting a weak ruler during the run.
-    keep_checkpoints: int = 3
+    # Keep every n-th epoch's checkpoint, plus the best and the last. Not a
+    # top-k by stop_metric: that is only sound when the metric is a trusted
+    # ranking of what you care about, and val_nb's relationship to latent
+    # quality is exactly what DecoderReliance is measuring. 5 matches the
+    # figure cadence, so a kept checkpoint has UMAPs to go with it.
+    keep_every_epochs: int = 5
     gene_mask_target: int = 0
     block_probe_every: int = 2
     guard_metric: str = ""
@@ -192,7 +191,7 @@ class TrainingConfig:
             early_stop_warmup_epochs=int(d.get("early_stop_warmup_epochs", 0)),
             val_check_interval=int(d.get("val_check_interval", 1)),
             stop_metric=str(d.get("stop_metric", "nb")),
-            keep_checkpoints=int(d.get("keep_checkpoints", 3)),
+            keep_every_epochs=int(d.get("keep_every_epochs", 5)),
             gene_mask_target=int(d.get("gene_mask_target", 0)),
             block_probe_every=int(d.get("block_probe_every", 2)),
             guard_metric=str(d.get("guard_metric", "")),

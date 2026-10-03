@@ -80,6 +80,20 @@ def _migrated(state: dict, model: "torch.nn.Module") -> dict:
     return _widened_dsbn_statistics(_renamed_keys(state), model)
 
 
+def _epoch_of(path: Path) -> int:
+    """The epoch a checkpoint filename records, or -1 if it does not.
+
+    Filenames are `epoch_{epoch:04d}_step_{step:07d}.pt`, so the epoch is
+    recoverable without opening the file. -1 for anything unparseable, which
+    the retention policy will never schedule and so will delete, matching the
+    old behaviour for files it did not write.
+    """
+    try:
+        return int(path.stem.split("_")[1])
+    except (IndexError, ValueError):
+        return -1
+
+
 class CheckpointManager:
     """Saves model checkpoints and retains only the best few.
 
@@ -88,10 +102,15 @@ class CheckpointManager:
         max_to_keep:    Maximum number of checkpoints to retain.
     """
 
-    def __init__(self, checkpoint_dir: str, max_to_keep: int = 3) -> None:
+    def __init__(self, checkpoint_dir: str, max_to_keep: int = 3,
+                 policy: "RetentionPolicy | None" = None) -> None:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.max_to_keep = max_to_keep
+        # When a policy is given it replaces top-k entirely. See
+        # training/retention.py for why top-k is the wrong rule when the
+        # ranking metric is itself under investigation.
+        self.policy = policy
         self._history: list[tuple[float, Path]] = []  # (val_loss, path)
         self.rehydrate()
 
@@ -154,14 +173,33 @@ class CheckpointManager:
 
         self._history.append((val_loss, fname))
         self._history.sort(key=lambda x: x[0])  # ascending by val_loss
-
-        # Remove worst checkpoints beyond max_to_keep
-        while len(self._history) > self.max_to_keep:
-            _, old_path = self._history.pop()
-            if old_path.exists():
-                old_path.unlink()
-
+        self.prune()
         return fname
+
+    def prune(self) -> None:
+        """Delete the checkpoints the policy does not keep.
+
+        With no policy this is the original rule: the best `max_to_keep` by
+        metric. With one, the metric decides only which single checkpoint is
+        "the best"; the schedule and the last epoch are kept regardless of
+        what it says about them.
+        """
+        if self.policy is None:
+            while len(self._history) > self.max_to_keep:
+                _, old_path = self._history.pop()
+                if old_path.exists():
+                    old_path.unlink()
+            return
+
+        entries = [(_epoch_of(path), loss) for loss, path in self._history]
+        keep = self.policy.survivors(entries)
+        remaining = []
+        for loss, path in self._history:
+            if _epoch_of(path) in keep:
+                remaining.append((loss, path))
+            elif path.exists():
+                path.unlink()
+        self._history = remaining
 
     @staticmethod
     def load_weights(

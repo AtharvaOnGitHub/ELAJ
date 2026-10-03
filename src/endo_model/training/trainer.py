@@ -31,6 +31,7 @@ from endo_model.training.batch_device import to_device
 from endo_model.training.checkpointing import CheckpointManager
 from endo_model.training.checkpoint_ranking import CheckpointRanking
 from endo_model.training.gene_masking import GeneMasker
+from endo_model.training.retention import RetentionPolicy
 from endo_model.training.decoder_reliance import DecoderReliance
 from endo_model.training.diagnostics import TrainingMonitor
 
@@ -146,7 +147,8 @@ class Trainer:
         self.ckpt_manager = (
             CheckpointManager(
                 checkpoint_dir,
-                max_to_keep=int(getattr(config, "keep_checkpoints", 3)),
+                policy=RetentionPolicy(
+                    every=int(getattr(config, "keep_every_epochs", 5))),
             ) if checkpoint_dir else None
         )
         self.early_stopping = EarlyStopping(

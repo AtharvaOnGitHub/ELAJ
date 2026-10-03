@@ -10,7 +10,8 @@ class EarlyStopping:
     Args:
         patience:       Epochs to tolerate no improvement.
         min_delta:      Minimum absolute improvement to count as progress.
-        warmup_epochs:  Epochs to ignore entirely before stopping is allowed.
+        warmup_epochs:  Epochs ignored entirely: neither scored against the
+                        best nor counted toward patience.
                         val_loss is a *moving* objective while beta_kl and
                         lambda_dab ramp, so an epoch late in the ramp is scored
                         more harshly than epoch 0 and looks worse even when the
@@ -43,15 +44,29 @@ class EarlyStopping:
             True if training should stop.
         """
         self._seen += 1
+
+        # Warm-up epochs are ignored ENTIRELY: not scored, not compared, not
+        # counted. They used to set `_best` while being barred from stopping
+        # the run, which contradicts both this class's docstring and its own
+        # reason for existing. The losses in those epochs are not the same
+        # function of the parameters -- the KL and lambda_dab ramps are still
+        # moving -- so an early epoch can post a number no converged epoch
+        # will beat, and then patience counts down against it.
+        #
+        # m2_cls40 is the case. Its bar was set at epoch 3 (val_nb 0.3992)
+        # while beta_kl was still ramping, nothing later beat it, and the run
+        # stopped at epoch 11 of 26 having never been compared against a
+        # settled baseline.
+        if self._seen <= self.warmup_epochs:
+            return False
+
         if val_loss < self._best - self.min_delta:
             self._best = val_loss
             self._counter = 0
         else:
             self._counter += 1
 
-        # During warmup, track the best value but never act on it: the losses
-        # being compared are not the same function of the parameters.
-        if self._seen > self.warmup_epochs and self._counter >= self.patience:
+        if self._counter >= self.patience:
             self.should_stop = True
         return self.should_stop
 

@@ -126,19 +126,21 @@ overrides:
 
   training.diagnostics.log_every: 50
   training.diagnostics.latent_every: 5
-  # 8 stopped m2_cls40 at epoch 11 of 26: val_nb's best was epoch 3 and
-  # it never beat it. Selecting and stopping on a metric that improves
-  # only 0.034 over the study-mean baseline ends runs on noise.
-  training.early_stop_patience: 14
-  training.early_stop_warmup_epochs: 8
+  # Patience stays at 8. What changes is that warm-up epochs are now
+  # ignored ENTIRELY rather than being allowed to set the bar while
+  # barred from stopping the run. m2_cls40's bar was epoch 3, posted
+  # while beta_kl was still ramping, and nothing later beat it.
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 6
 
   # The rule, fixed before the run. See the description.
   training.stop_metric: nb
   training.guard_metric: study_knn
   training.guard_max: 0.5
   training.block_probe_every: 2
-  # Score several at the end rather than trusting val_nb now.
-  training.keep_checkpoints: 8
+  # Epochs 5, 10, 15, 20, 25 plus the best and the last, rather
+  # than a top-k by a metric still under investigation.
+  training.keep_every_epochs: 5
 
   # ── THE TWO FIXES m1 EXISTS TO MOTIVATE ──────────────────────────────────
   # 1. Every cell shows the encoder 12,500 measured genes, whatever its

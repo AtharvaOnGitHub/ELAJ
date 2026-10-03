@@ -81,7 +81,9 @@ description: >
   wrong normalisation. Its train_nb of 0.3731 was the best of the v series.
   The idea has never had a fair test.
 
-  KEEPS A MODEST ADVERSARY. Coefficient 35, half of m2_cls40's. With the
+  KEEPS A MODEST ADVERSARY. lambda_dab 35 x w_dab 0.5 is a coefficient of
+  17.5, a QUARTER of m2_cls40's 70, not the half an earlier draft of this
+  description claimed. With the
   decoder told the study, DAB should have little left to remove, so this is
   belt and braces: if any study signal still reaches the latent, something
   still objects.

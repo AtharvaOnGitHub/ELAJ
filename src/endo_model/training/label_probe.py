@@ -379,8 +379,13 @@ class BlockProbe:
         # block contributes no columns and the other stands alone.
         out.update(self.named(self.gauss.score(mu_gauss, mu_angle[:, :0]),
                               self.gauss.name))
-        out.update(self.named(self.circ.score(mu_gauss[:, :0], mu_angle),
-                              self.circ.name))
+        # An arm with n_circular 0 has no circular block. Scoring a
+        # zero-column latent raises inside the kNN search, which
+        # CompositeProbe would catch and log every epoch for the life of the
+        # run. There is simply nothing to measure, so say so once by omission.
+        if mu_angle.shape[-1]:
+            out.update(self.named(self.circ.score(mu_gauss[:, :0], mu_angle),
+                                  self.circ.name))
         return out
 
     @staticmethod

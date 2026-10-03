@@ -238,25 +238,7 @@ class EndoFoundationModel(nn.Module):
         # gene_queries: (G_meas, d_dec) — no batch dimension, by construction
 
         # ── Decode ────────────────────────────────────────────────────────────
-        tissue = self.decoder_tissue(batch["tissue_levels"])   # (B, d_tissue)
-        platform = (
-            self.decoder_platform(batch["platform_codes"])      # (B, d_platform)
-            if self.decoder_platform is not None else None
-        )
-        disease = (
-            self.decoder_disease(batch["disease_status"])       # (B, d_disease)
-            if self.decoder_disease is not None else None
-        )
-        study = (
-            self.decoder_study(batch["study_id"])                # (B, d_study)
-            if self.decoder_study is not None else None
-        )
-        log_mu = self.decoder(
-            gene_queries, latent["z_proj"], tissue, platform, disease, study
-        )                                                       # (B, G_meas)
-        mu_hat = (
-            F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)
-        )                                                       # (B, G_meas)
+        mu_hat = self.decode_once(batch, latent, gene_queries)  # (B, G_meas)
         theta = self.dispersion(measured_global_idxs)          # (G_meas,)
 
         out = {
@@ -268,6 +250,59 @@ class EndoFoundationModel(nn.Module):
         if self.phase_classifier is not None:
             out["phase_logits"] = self.phase_classifier(latent)
         return out
+
+    def decode_once(self, batch: dict, latent: dict, gene_queries: Tensor,
+                    study_ids: Tensor | None = None,
+                    z_proj: Tensor | None = None) -> Tensor:
+        """Predicted counts from one latent and one set of covariates.
+
+        Split out of `forward` so that a probe can run it again with ONE
+        input replaced and read off what the decoder actually depends on.
+        `study_ids` substitutes the study the decoder is told about, leaving
+        the encoder, DSBN and the gene layout untouched; `z_proj` substitutes
+        the latent. Everything else is unchanged in both cases, so the
+        difference in reconstruction is attributable to the substitution.
+
+        This matters because the decoder is now told the study. A decoder
+        that leans on that embedding can reconstruct a cell without a good
+        latent, and the study-mean baseline of 0.4332 says most of the
+        reconstruction signal in this corpus IS study-level. That failure
+        would look like success: val_nb improving while the latent empties.
+        See training/decoder_reliance.py.
+
+        Args:
+            batch:        The batch, for tissue, platform, disease, study and
+                          library size.
+            latent:       The dict `encode` returned.
+            gene_queries: (G_meas, d_dec) from `_build_gene_queries`.
+            study_ids:    (B,) long to tell the decoder instead of the real
+                          study, or None for the real one.
+            z_proj:       (B, d_agg) to decode from instead of the latent's,
+                          or None for the real one.
+
+        Returns:
+            (B, G_meas) predicted counts.
+        """
+        tissue = self.decoder_tissue(batch["tissue_levels"])   # (B, d_tissue)
+        platform = (
+            self.decoder_platform(batch["platform_codes"])      # (B, d_platform)
+            if self.decoder_platform is not None else None
+        )
+        disease = (
+            self.decoder_disease(batch["disease_status"])       # (B, d_disease)
+            if self.decoder_disease is not None else None
+        )
+        study = (
+            self.decoder_study(batch["study_id"] if study_ids is None
+                               else study_ids)                  # (B, d_study)
+            if self.decoder_study is not None else None
+        )
+        log_mu = self.decoder(
+            gene_queries,
+            latent["z_proj"] if z_proj is None else z_proj,
+            tissue, platform, disease, study,
+        )                                                       # (B, G_meas)
+        return F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)
 
     def _build_gene_queries(self, batch: dict) -> tuple[Tensor, Tensor]:
         """Build one decoder query vector per measured (non-DNS) gene.

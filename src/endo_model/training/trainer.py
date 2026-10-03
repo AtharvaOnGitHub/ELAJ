@@ -31,6 +31,7 @@ from endo_model.training.batch_device import to_device
 from endo_model.training.checkpointing import CheckpointManager
 from endo_model.training.checkpoint_ranking import CheckpointRanking
 from endo_model.training.gene_masking import GeneMasker
+from endo_model.training.decoder_reliance import DecoderReliance
 from endo_model.training.diagnostics import TrainingMonitor
 
 # The except branch around on_epoch_metrics referenced this name without it
@@ -113,6 +114,14 @@ class Trainer:
         # Training steps only: the validation pass must see the real panel
         # or val_nb stops being comparable with earlier runs and baselines.
         self.gene_masker = gene_masker or GeneMasker(target_measured=0)
+        # Only meaningful once the decoder is told the study; without a
+        # StudyEncoder there is nothing to substitute. See
+        # training/decoder_reliance.py for what it catches.
+        self.decoder_reliance = (
+            DecoderReliance()
+            if getattr(self.model, "decoder_study", None) is not None
+            else None
+        )
         self._probe_rows: list[tuple[np.ndarray, np.ndarray]] = []
         # Which donors were held out, written into every checkpoint so that a
         # later scoring run cannot quietly use a different wall. See
@@ -524,6 +533,14 @@ class Trainer:
                 ))
 
         metrics = val_logger.epoch_averages()
+        if self.decoder_reliance is not None:
+            try:
+                metrics.update(self.decoder_reliance.measure(
+                    self.model, self.val_loader,
+                    self.composite_loss.nb_loss))
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning("decoder reliance failed (%s: %s)",
+                               type(exc).__name__, exc)
         if self.drift_probe is not None:
             metrics.update(self.drift_probe.measure(self.model, self.device))
         if self.label_probe is not None and self._probe_rows:

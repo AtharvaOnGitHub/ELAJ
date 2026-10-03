@@ -1,4 +1,4 @@
-name: m3_studydec_pure
+name: m3_study_raw
 description: >
   THE M-SERIES, WAVE TWO. Both m1 arms trained a variational autoencoder
   with no working batch correction, on an input that names the study. This
@@ -81,12 +81,34 @@ description: >
   wrong normalisation. Its train_nb of 0.3731 was the best of the v series.
   The idea has never had a fair test.
 
-  NO ADVERSARY AT ALL, AND THAT IS A HYPOTHESIS RATHER THAN AN OMISSION.
-  The +0.883 correlation says the adversary is what TEACHES the encoder to
-  hide. Remove the reason to store study (decoder conditioning) and the
-  thing that rewards concealment (the adversary), and there may be nothing
-  left to fight. If this beats m3_studydec on study_knn, adversarial
-  training was never the answer and the paper says so.
+  THE BET: A TINY LATENT AND ALMOST NO ADVERSARY.
+
+  No circular branch, n_circular 4 -> 0, with d_gauss held at 24. So d_z
+  falls from 32 to 24 and the latent is doing strictly less. lambda_dab 7
+  gives a coefficient of 3.5, a fifth of m3_studydec's 17.5 and a twentieth
+  of m2_cls40's 70.
+
+  THE REASONING, WHICH IS NOT MINE. Once the decoder is told the study, the
+  encoder no longer has to carry technical identity to reconstruct, so it
+  needs to encode less and a smaller latent should suffice. And adversarial
+  pressure is then only needed to remove whatever study information is still
+  redundantly present, not to fight the reconstruction term for it. Every
+  previous wave set lambda against a decoder that NEEDED study in the
+  latent; none of those settings transfer.
+
+  WHAT IT GIVES UP. The circular branch is the paper's most distinctive
+  claim and this arm cannot speak to it. m3_studydec carries it, and the
+  block probe there still scores phase on the circular dimensions alone, so
+  the claim is not lost by running this.
+
+  WHAT IT WOULD SHOW. If a 24-dimensional latent with a coefficient of 3.5
+  matches or beats 32 dimensions at 17.5, then most of what the latent has
+  been holding across every wave of this project was technical rather than
+  biological, and the adversary was fighting the decoder rather than
+  helping it. With the
+  decoder told the study, DAB should have little left to remove, so this is
+  belt and braces: if any study signal still reaches the latent, something
+  still objects.
 
   EVERYTHING ELSE IS HELD: DSBN correct, gene_mask_target 12500, w_cls 40,
   the circular branch at the setting that concentrates, selector nb guarded
@@ -95,7 +117,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/m_series/m3_studydec_pure/
+output_dir: outputs/m_series/m3_study_raw/
 seed: 24
 
 overrides:
@@ -137,7 +159,7 @@ overrides:
   # divided by n_measured, so v1_pool effectively ran at 1.59e-5 x 14,000 =
   # 0.22 x nb. This arm asks whether that pressure, which failed on its own,
   # succeeds once the input shortcut is gone.
-  model.dab.lambda_dab: 0.0
+  model.dab.lambda_dab: 7.0
 
   model.cce.enabled: true
   model.cce.lambda_cce: 0.05
@@ -159,7 +181,7 @@ overrides:
 
   # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
   model.d_gauss: 24
-  model.n_circular: 4
+  model.n_circular: 0
   model.circular_parameterisation: direction
   model.kappa_floor: 1.0
   model.d_platform: 16

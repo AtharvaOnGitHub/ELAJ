@@ -144,7 +144,10 @@ class Trainer:
         self.on_epoch_metrics = on_epoch_metrics
 
         self.ckpt_manager = (
-            CheckpointManager(checkpoint_dir) if checkpoint_dir else None
+            CheckpointManager(
+                checkpoint_dir,
+                max_to_keep=int(getattr(config, "keep_checkpoints", 3)),
+            ) if checkpoint_dir else None
         )
         self.early_stopping = EarlyStopping(
             patience=config.early_stop_patience,

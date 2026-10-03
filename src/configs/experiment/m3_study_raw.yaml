@@ -126,7 +126,10 @@ overrides:
 
   training.diagnostics.log_every: 50
   training.diagnostics.latent_every: 5
-  training.early_stop_patience: 8
+  # 8 stopped m2_cls40 at epoch 11 of 26: val_nb's best was epoch 3 and
+  # it never beat it. Selecting and stopping on a metric that improves
+  # only 0.034 over the study-mean baseline ends runs on noise.
+  training.early_stop_patience: 14
   training.early_stop_warmup_epochs: 8
 
   # The rule, fixed before the run. See the description.
@@ -134,6 +137,8 @@ overrides:
   training.guard_metric: study_knn
   training.guard_max: 0.5
   training.block_probe_every: 2
+  # Score several at the end rather than trusting val_nb now.
+  training.keep_checkpoints: 8
 
   # ── THE TWO FIXES m1 EXISTS TO MOTIVATE ──────────────────────────────────
   # 1. Every cell shows the encoder 12,500 measured genes, whatever its
@@ -161,7 +166,15 @@ overrides:
   # succeeds once the input shortcut is gone.
   model.dab.lambda_dab: 7.0
 
-  model.cce.enabled: true
+  # OFF. w_cce 0.05 carried over from before the 28 September scaling
+  # fix, where it was an effective 700 (0.05 x n_measured). After the
+  # fix it is 0.05, and the gradient balance measured it at 0.0005x
+  # reconstruction: inert, while still costing a second encoder pass
+  # on every fourth step. This is the DAB unit bug in its twin, which
+  # we fixed for DAB and never checked for CCE. Turned off rather
+  # than guessed at: if it comes back it comes back from a gradient
+  # measurement, as lambda_dab did.
+  model.cce.enabled: false
   model.cce.lambda_cce: 0.05
   # ON, unlike every v-series arm. r5_cce showed CCE suppressing the
   # circular branch: the Gaussian block grows, cosine normalisation drowns

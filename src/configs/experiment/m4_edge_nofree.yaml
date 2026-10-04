@@ -1,4 +1,4 @@
-name: m4_tight_dab
+name: m4_edge_nofree
 description: >
   THE M-SERIES, WAVE TWO. Both m1 arms trained a variational autoencoder
   with no working batch correction, on an input that names the study. This
@@ -81,53 +81,49 @@ description: >
   wrong normalisation. Its train_nb of 0.3731 was the best of the v series.
   The idea has never had a fair test.
 
-  BACK TO A LATENT THAT CANNOT AFFORD TO KEEP EVERYTHING.
+  EDGE TWO: CHARGE FOR EVERYTHING. free_bits 0.25 -> 0.0, width unchanged at
+  24, adversary unchanged at coefficient 3.5.
 
-  THE REGRESSION, LOCATED. d_z was 16 in r8_direction (d_gauss 8 +
-  n_circular 4) and 16 in c1_combined (16 + 0). The v series doubled it to
-  32 and the m series ran 24. Donor mixing collapsed over exactly that
-  change. At d_z 16, ELAJ scored patient kNN 0.3674 against PCA 0.6628,
-  scVI 0.6488 and scANVI 0.6507, and kept 67 of 100 neighbours after the
-  same-donor exclusion where the baselines keep 49 to 51. That column is
-  withdrawn for split contamination, but the contamination pushes patient
-  kNN UP -- a donor you trained on is easier to identify -- so 0.3674 is a
-  ceiling, not a flattering estimate.
+  This asks whether the constraint has to come from WIDTH or whether PRICE
+  will do. m3_study_raw is this arm with a 6.00-nat allowance, and it is the
+  only earlier run this can be read against directly: same width, same
+  adversary, same everything, one number different. If donor and study
+  identity have been living in the free allowance, removing it should move
+  patient_knn and study_knn and leave family kNN alone, because biology is
+  worth paying for and donor identity is not.
 
-  WHY THE WIDENING WAS DONE, AND WHY IT WAS WRONG. v1_pool's own
-  description: "Sixteen dimensions is what is left AFTER an adversary takes
-  directions away, and that is too few." The extra room was not spent on
-  biology. It was spent keeping donor and study identity, because nothing
-  charged for them once reconstruction stopped needing them.
+  If it changes nothing, the free allowance was never where they were
+  living, the nats arithmetic above is a coincidence, and width is the only
+  instrument that works.
 
-  AND IT EXPLAINS THE RELIANCE MEASUREMENT. On m3_study_raw, telling the
-  decoder the WRONG study costs 0.0149 nats per gene while giving it the
-  WRONG latent costs 0.1118, a ratio of 7.5. The study embedding is nearly
-  unused: the decoder reads study out of the latent, where it already sits
-  rent-free. A latent that cannot afford it has to drop it, and the decoder
-  then has to use the embedding we gave it. THE PREDICTION IS THAT
-  reliance_study RISES IN THIS ARM. If it does not, conditioning is not the
-  mechanism and d_study should come out.
+  WHY TWO EXTREMES RATHER THAN A CANDIDATE. Nothing between r8 and now has
+  told us where the edges of this search space are, so the pair is chosen to
+  bound it on two axes rather than to win. A result at an edge gives a
+  direction; a result in the middle gives another week of tuning.
 
-  THE COMBINATION NOBODY HAS RUN. r8 starved the latent without telling the
-  decoder the study, and paid in biology: cross-donor family 0.9115 against
-  the baselines' 0.98. The m series fed the latent and told the decoder, and
-  paid in donor-blindness. This starves it AND tells the decoder, so the
-  technical signal has somewhere to go that is not the latent.
+  THE ARITHMETIC THAT MOTIVATES BOTH. free_bits is nats per dimension the
+  latent is NOT charged for, and it has been 0.25 in every config from r8 to
+  m3. Identifying one of 269 donors costs ln(269) = 5.59 nats; identifying
+  one of 11 studies costs ln(11) = 2.40.
 
-  R8'S ADVERSARIAL PRESSURE, RESTATED. lambda_dab 0.02 x w_dab 0.5 in
-  pre-fix units was an effective coefficient of about 140; 280 x 0.5 is 140
-  here. Higher than anything the m series ran, and deliberately so: m2
-  showed coefficient 210 WORSE than 70 at d_z 32, and the reading that
-  reconciles that with r8 is that an adversary only works when the latent
-  has no room to hide in. At 16 dimensions there is no room.
+      r8, c1    d_z 16   free allowance 4.00   covers study, NOT donor
+      v1_pool   d_z 32   free allowance 8.00   covers both
+      m3        d_z 24   free allowance 6.00   covers both
 
-  EVERYTHING ELSE HELD: d_study 16, gene_mask_target 12500, w_cls 40,
-  DSBN correct, CCE off, selector nb guarded on study_knn.
+  r8 mixed donors and still separated studies. The v and m series separated
+  both. The allowance crosses the donor threshold exactly where the
+  behaviour changes.
+
+  SPEED. CCE off removes the second encoder pass on every fourth step, and
+  gradient checkpointing is off, which v1_pool's own note prices at about
+  30% of epoch time. Together these should take an epoch from roughly 85
+  minutes to nearer 60. If it runs out of memory it will do so in the first
+  minutes, which is a cheap way to find out.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/m_series/m4_tight_dab/
+output_dir: outputs/m_series/m4_edge_nofree/
 seed: 24
 
 overrides:
@@ -164,7 +160,7 @@ overrides:
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  model.loss.free_bits: 0.25
+  model.loss.free_bits: 0.0
   model.loss.w_dab: 0.5
 
   # beta_max 0.5 x w_kl_circ 0.1 = 0.05 on the circular KL. The arm that
@@ -176,7 +172,7 @@ overrides:
   # divided by n_measured, so v1_pool effectively ran at 1.59e-5 x 14,000 =
   # 0.22 x nb. This arm asks whether that pressure, which failed on its own,
   # succeeds once the input shortcut is gone.
-  model.dab.lambda_dab: 280.0
+  model.dab.lambda_dab: 7.0
 
   # OFF. w_cce 0.05 carried over from before the 28 September scaling
   # fix, where it was an effective 700 (0.05 x n_measured). After the
@@ -205,8 +201,8 @@ overrides:
   model.loss.w_cls: 40.0
 
   # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
-  model.d_gauss: 8
-  model.n_circular: 4
+  model.d_gauss: 24
+  model.n_circular: 0
   model.circular_parameterisation: direction
   model.kappa_floor: 1.0
   model.d_platform: 16
@@ -214,7 +210,9 @@ overrides:
   model.d_study: 16
   model.d_disease: 0
 
-  model.group_encoder.grad_checkpointing: true
+  # OFF for speed: about 30% of epoch time, per v1_pool's note. With
+  # CCE off and a small latent the memory should be there.
+  model.group_encoder.grad_checkpointing: false
 
   model.tokens.count_scale: log
   model.tokens.target_sum: 1.0e4

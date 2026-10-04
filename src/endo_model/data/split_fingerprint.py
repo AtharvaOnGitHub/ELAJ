@@ -99,26 +99,74 @@ class SplitFingerprint:
 
 
 class SplitGuard:
-    """Refuses to score a checkpoint against a split it did not train on."""
+    """Refuses to score a checkpoint against a split it did not train on.
+
+    A CHECKPOINT RECORDS ONE SPLIT, AND SCORING USES SEVERAL. The trainer
+    writes the fingerprint of the split it validated on, which is `val`.
+    `score_arm` scores `val` and `test`. Comparing the record against `test`
+    compares two sets that are meant to differ, and an earlier version of
+    this class refused on that difference alone: it stopped m3_study_raw
+    being scored on the 197,193 test cells for no reason beyond the name.
+
+    WHAT ACTUALLY MATTERS is whether the partition moved. Donors are
+    assigned by stratifying over study and tissue, so a corpus fix can move
+    the wall and put training donors into validation -- that is the failure
+    commit 482dc69 produced and this class exists to catch. If the RECORDED
+    split's donors are exactly what the checkpoint recorded, the partition
+    has not moved, and every other split drawn from it is the same set it
+    was during training: disjoint from train, and safe to score.
+
+    So the guard verifies the recorded split once, and then admits the
+    others. That is stateful on purpose, and it means the recorded split has
+    to be checked FIRST. `score_arm` passes `--splits val test`, in that
+    order, which is why it works; a caller that checks `test` alone gets a
+    message saying to check `val` too rather than a silent pass.
+    """
 
     def __init__(self, allow_unrecorded: bool = True) -> None:
         self.allow_unrecorded = bool(allow_unrecorded)
+        self._verified: SplitFingerprint | None = None
 
     def check(self, payload: dict, dataset) -> SplitFingerprint | None:
         """Compare the split in hand against the one the checkpoint recorded.
 
         Returns the recorded fingerprint, or None when the checkpoint predates
-        the record. Raises `SplitMismatch` when the two disagree.
+        the record. Raises `SplitMismatch` when the partition has moved, or
+        when a different split is offered before the recorded one has been
+        confirmed.
         """
         here = SplitFingerprint.of(dataset)
         record = (payload or {}).get(PAYLOAD_KEY)
         if not record:
             return self._unrecorded(here)
         there = SplitFingerprint.from_record(record)
-        if not here.matches(there):
-            raise SplitMismatch(self._mismatch_message(here, there))
-        logger.info("Split provenance OK, %s", here.describe())
+
+        if here.split == there.split:
+            if not here.matches(there):
+                raise SplitMismatch(self._mismatch_message(here, there))
+            self._verified = there
+            logger.info("Split provenance OK, %s", here.describe())
+            return there
+
+        if self._verified is None:
+            raise SplitMismatch(self._unconfirmed_message(here, there))
+        logger.info(
+            "Split provenance OK by partition: %s was confirmed, so %s comes "
+            "from the same wall and holds no training donor.",
+            self._verified.describe(), here.describe())
         return there
+
+    def _unconfirmed_message(self, here: SplitFingerprint,
+                             there: SplitFingerprint) -> str:
+        return (
+            f"Cannot confirm {here.describe()}: this checkpoint recorded "
+            f"{there.describe()}, and that split has not been checked in this "
+            f"run. A different split is safe only once the recorded one is "
+            f"shown to be unchanged, because that is what proves the donor "
+            f"wall has not moved. Score the recorded split first -- "
+            f"`--splits {there.split} {here.split}` does it in the right "
+            f"order."
+        )
 
     def _unrecorded(self, here: SplitFingerprint) -> None:
         """A checkpoint saved before fingerprints existed."""

@@ -255,8 +255,15 @@ def main() -> None:
         from endo_model.evaluation.expression_baseline import ReservoirSampler
         reservoir = ReservoirSampler(args.baseline_cells, seed=exp_cfg.seed)
 
+    # ONE guard across every split. It confirms the checkpoint's recorded
+    # split first and then admits the others from the same partition, which
+    # it cannot do if it is rebuilt each iteration. See
+    # data/split_fingerprint.py: a fresh guard per split refused `test` on
+    # the grounds that its name is not `val`.
+    guard = SplitGuard()
+
     parts, metas, split_tags = [], [], []
-    for split in args.splits:
+    for split in sorted(args.splits, key=lambda s: s != "val"):
         logger.info("Building the %s split with %d metadata columns",
                     split, len(ALL_COLUMNS))
         loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
@@ -266,7 +273,7 @@ def main() -> None:
         # out from? A mismatch scores the model partly on cells it trained on,
         # and the resulting numbers look like a better model.
         if split != "train":
-            SplitGuard().check(payload, loader.dataset)
+            guard.check(payload, loader.dataset)
         order = sampler_order(loader)
         extra = loader.dataset.extra_obs
         logger.info("Embedding %d cells from %s", len(order), split)

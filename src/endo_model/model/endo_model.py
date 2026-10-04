@@ -75,7 +75,8 @@ class EndoFoundationModel(nn.Module):
             n_frequencies=config.tokens.n_frequencies,
             mlp_hidden=config.tokens.mlp_hidden,
         )
-        self.dsbn = DSBN(config.n_studies, config.d_token)
+        self.dsbn = DSBN(config.n_studies, config.d_token,
+                         learn_affine=config.dsbn_learn_affine)
 
         # ── Encoders ────────────────────────────────────────────────────────
         self.token_constructor = TokenConstructor(

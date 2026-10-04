@@ -48,12 +48,41 @@ class DSBN(nn.Module):
     """
 
     def __init__(self, n_studies: int, d_token: int,
-                 momentum: float = 0.1, eps: float = 1e-5) -> None:
+                 momentum: float = 0.1, eps: float = 1e-5,
+                 learn_affine: bool = True) -> None:
         super().__init__()
         self.bn = PerStudyBatchNorm(n_studies, d_token, momentum, eps)
         self.gamma = nn.Embedding(n_studies, d_token)  # per-study scale
         self.beta = nn.Embedding(n_studies, d_token)   # per-study shift
         self.reset_affine()
+        self.learn_affine = bool(learn_affine)
+        if not self.learn_affine:
+            self.freeze_affine()
+
+    def freeze_affine(self) -> None:
+        """Hold the per-study affine at the identity for the whole run.
+
+        WHAT THIS MAKES DSBN. Pure per-study normalisation: study variation
+        is removed from the tokens and none is put back. The 704 parameters
+        that remain are frozen at scale one and shift zero, so they cannot
+        differ by study and cannot carry study identity downstream.
+
+        WHY THAT MIGHT MATTER. Conditioning the decoder on study removes its
+        NEED for study identity in the latent, but only if the latent does
+        not already have a SUPPLY of it. DSBN's learned affine is exactly
+        such a supply, applied at layer one, upstream of the group encoders,
+        the aggregation, the latent and the adversary. The m3 wave added the
+        decoder's door while leaving this one open, and study_knn barely
+        moved.
+
+        WHAT IT COSTS. A batch-norm affine exists to restore representational
+        power the normalisation removed, and per-domain affines are what make
+        scGPT's DomainSpecificBatchNorm1d domain-specific. Freezing them is a
+        real restriction, not a free win, and it is the reason this is a flag
+        rather than the default.
+        """
+        self.gamma.weight.requires_grad_(False)
+        self.beta.weight.requires_grad_(False)
 
     def reset_affine(self) -> None:
         """Start the affine at the identity, as a batch-norm affine should.

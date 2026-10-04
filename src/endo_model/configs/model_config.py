@@ -295,6 +295,10 @@ class ModelConfig:
     # latent's obligation to carry it, which is the same argument
     # tissue and platform already have. See embeddings/study_encoder.py.
     d_study: int = 0
+    # False holds DSBN's per-study scale and shift at the identity, so
+    # DSBN only REMOVES study variation and never re-injects it. See
+    # model/embeddings/dsbn.py:freeze_affine.
+    dsbn_learn_affine: bool = True
     n_groups: Optional[int] = None    # populated from vocabulary at runtime
     n_studies: Optional[int] = None   # populated from data config at runtime
     tokens: TokenConfig = field(default_factory=TokenConfig)
@@ -353,6 +357,7 @@ class ModelConfig:
             d_tissue=int(d.get("d_tissue", 16)),
             d_disease=int(d.get("d_disease", 0)),
             d_study=int(d.get("d_study", 0)),
+            dsbn_learn_affine=bool(d.get("dsbn_learn_affine", True)),
             loss=LossConfig.from_dict(d.get("loss", {})),
             n_groups=d.get("n_groups"),
             n_studies=d.get("n_studies"),

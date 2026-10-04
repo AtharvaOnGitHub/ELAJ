@@ -1,0 +1,223 @@
+name: m4_tight_dab
+description: >
+  THE M-SERIES, WAVE TWO. Both m1 arms trained a variational autoencoder
+  with no working batch correction, on an input that names the study. This
+  wave fixes both and asks whether the biology comes back.
+
+  WHAT m1 MEASURED, AND WHY IT WAS WASTED. DAB contributed 0.0000x of
+  reconstruction's gradient for sixteen epochs. The loss-scaling fix of
+  28 September removed a hidden factor of n_measured from the dab term, and
+  the configs still carried lambda_dab 0.01 from the old units, so the
+  effective pressure fell from about 70 to 0.005. Three measurements agreed:
+  train_dab fell 1.1377 to 0.2098 against ln(11) = 2.40 chance, study_knn
+  climbed to 0.88, and patient_knn climbed 0.4737 to 0.6121 across the run.
+  The Gaussian UMAP showed fifteen-plus islands, one per study.
+
+  AND THE OTHER HALF WAS IN THE INPUT. Each study measured a different gene
+  panel, so the DNS mask is identical within a study and different between
+  studies. No normalisation touches it: it is about which genes exist. With
+  the adversary inert, nothing opposed it at all.
+
+  THE SELECTOR CHANGED, AND NOT BY CHOICE. m1 selected on
+  phase_knn_xdonor. On the validation split, phase chance is 0.664 against
+  0.380 on val+test, so val's phase labels are dominated by one or two
+  classes and the metric is near-degenerate there. Its whole range across
+  sixteen epochs was 0.030, inside the +/-0.04 noise band the cross-donor
+  function's own docstring records at 40 donors. That was selection on
+  noise. This wave selects on nb and GUARDS on study_knn <= 0.5: the best
+  reconstruction among checkpoints that are not study-fragmented. If no
+  checkpoint clears the guard, every one is penalised equally, ranking falls
+  back to nb, and the guard becomes a pass/fail flag we can read.
+
+  PHASE IS NOW REPORTED, NOT CHASED. The head stays on, the block probe
+  stays on, and phase_knn_circ against phase_knn_gauss still measures the
+  paper's central claim every second epoch. But the honest phase number
+  comes from score_arm on val+test at k=100, once, at the end.
+
+  w_cls 40 IS NOW MEASURED, NOT GUESSED. The first m2 attempt ran at 500
+  and the gradient balance, fixed so it can see the term at all, read
+  cls 5.492e-04 against nb 1.879e-04: 2.9234x reconstruction. The head was
+  driving the latent. Worse, it can only drive it from the FOUR studies
+  that carry phase, because batches hold one study and the other seven
+  contribute exactly zero, so a dominant cls term is an asymmetric force
+  separating labelled studies from unlabelled ones. That is the fragmenting
+  we are trying to remove, applied by our own objective.
+
+  The term is linear in w_cls, so 500 x (0.25 / 2.9234) = 42.8. 40 should
+  land near 0.23x nb, beside DAB at about 0.22x. Confirm it at epoch 1:
+  the report now waits for a batch that HAS labelled cells, because the
+  first two epochs of the 500 run drew unlabelled batches and read
+  0.0000x, which says nothing at all.
+
+  TELL THE DECODER THE STUDY. Every wave so far has adjusted the wrong side
+  of a contradiction.
+
+  THE CONTRADICTION. The decoder's context is d_agg + d_tissue + d_platform
+  + d_disease. Study is not in it, because d_study defaults to 0 and no m1
+  or m2 config set it. The negative binomial still has to reproduce
+  study-specific expression: depth, capture efficiency, which genes exist.
+  The only route from study identity to the decoder is THROUGH THE LATENT.
+  DAB then penalises the latent for carrying exactly that. The encoder is
+  handed two demands it cannot both meet and resolves them the only way it
+  can: keep study in a form the decoder can use and the 2,827-parameter
+  adversary cannot read.
+
+  THE MEASUREMENT. Across m2_cls40's twelve epochs the correlation between
+  the adversary's own loss and donor kNN is +0.883, and against study kNN
+  +0.890. The blinder the adversary, the more identity the latent holds.
+  v1_pool showed the same sign at +0.232; with a working adversary it is
+  now unmistakable. train_dab climbed 1.482 to 1.936 while patient_knn
+  climbed 0.455 to 0.601.
+
+  WHAT IT EXPLAINS. Why lambda 420 was worse than 140, both at epoch 2 and
+  at the gradient (more pressure bought better hiding, not less storing).
+  Why equalising the input gene count changed nothing: the demand
+  originates at the decoder, not the input. And why five waves of walking
+  lambda_dab from 0.2 to zero all failed.
+
+  WHY IT IS NOT ALREADY SETTLED. v1_studydec did set d_study 16, but with
+  lambda_dab 0, n_circular 0, no gene masking, and the DSBN train/eval
+  defect still present, so its UMAPs and study_knn were read through the
+  wrong normalisation. Its train_nb of 0.3731 was the best of the v series.
+  The idea has never had a fair test.
+
+  BACK TO A LATENT THAT CANNOT AFFORD TO KEEP EVERYTHING.
+
+  THE REGRESSION, LOCATED. d_z was 16 in r8_direction (d_gauss 8 +
+  n_circular 4) and 16 in c1_combined (16 + 0). The v series doubled it to
+  32 and the m series ran 24. Donor mixing collapsed over exactly that
+  change. At d_z 16, ELAJ scored patient kNN 0.3674 against PCA 0.6628,
+  scVI 0.6488 and scANVI 0.6507, and kept 67 of 100 neighbours after the
+  same-donor exclusion where the baselines keep 49 to 51. That column is
+  withdrawn for split contamination, but the contamination pushes patient
+  kNN UP -- a donor you trained on is easier to identify -- so 0.3674 is a
+  ceiling, not a flattering estimate.
+
+  WHY THE WIDENING WAS DONE, AND WHY IT WAS WRONG. v1_pool's own
+  description: "Sixteen dimensions is what is left AFTER an adversary takes
+  directions away, and that is too few." The extra room was not spent on
+  biology. It was spent keeping donor and study identity, because nothing
+  charged for them once reconstruction stopped needing them.
+
+  AND IT EXPLAINS THE RELIANCE MEASUREMENT. On m3_study_raw, telling the
+  decoder the WRONG study costs 0.0149 nats per gene while giving it the
+  WRONG latent costs 0.1118, a ratio of 7.5. The study embedding is nearly
+  unused: the decoder reads study out of the latent, where it already sits
+  rent-free. A latent that cannot afford it has to drop it, and the decoder
+  then has to use the embedding we gave it. THE PREDICTION IS THAT
+  reliance_study RISES IN THIS ARM. If it does not, conditioning is not the
+  mechanism and d_study should come out.
+
+  THE COMBINATION NOBODY HAS RUN. r8 starved the latent without telling the
+  decoder the study, and paid in biology: cross-donor family 0.9115 against
+  the baselines' 0.98. The m series fed the latent and told the decoder, and
+  paid in donor-blindness. This starves it AND tells the decoder, so the
+  technical signal has somewhere to go that is not the latent.
+
+  R8'S ADVERSARIAL PRESSURE, RESTATED. lambda_dab 0.02 x w_dab 0.5 in
+  pre-fix units was an effective coefficient of about 140; 280 x 0.5 is 140
+  here. Higher than anything the m series ran, and deliberately so: m2
+  showed coefficient 210 WORSE than 70 at d_z 32, and the reading that
+  reconciles that with r8 is that an adversary only works when the latent
+  has no room to hide in. At 16 dimensions there is no room.
+
+  EVERYTHING ELSE HELD: d_study 16, gene_mask_target 12500, w_cls 40,
+  DSBN correct, CCE off, selector nb guarded on study_knn.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m4_tight_dab/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  # Patience stays at 8. What changes is that warm-up epochs are now
+  # ignored ENTIRELY rather than being allowed to set the bar while
+  # barred from stopping the run. m2_cls40's bar was epoch 3, posted
+  # while beta_kl was still ramping, and nothing later beat it.
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 6
+
+  # The rule, fixed before the run. See the description.
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.5
+  training.block_probe_every: 2
+  # Epochs 5, 10, 15, 20, 25 plus the best and the last, rather
+  # than a top-k by a metric still under investigation.
+  training.keep_every_epochs: 5
+
+  # ── THE TWO FIXES m1 EXISTS TO MOTIVATE ──────────────────────────────────
+  # 1. Every cell shows the encoder 12,500 measured genes, whatever its
+  #    study's panel holds (13,144 for study 5 up to 15,056 for study 1).
+  #    The per-study DNS pattern was a perfect study fingerprint in the
+  #    input, and m1's Gaussian latent fragmented into one island per study.
+  #    This closes the gene-COUNT half of that signal outright. It cannot
+  #    close the identity half: masking only subtracts, so a panel stays a
+  #    subset. See training/gene_masking.py.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.free_bits: 0.25
+  model.loss.w_dab: 0.5
+
+  # beta_max 0.5 x w_kl_circ 0.1 = 0.05 on the circular KL. The arm that
+  # left this at 1.0 ran at 0.5 and pinned every circular dimension.
+  model.loss.w_kl_circ: 0.1
+
+  # v1_pool's adversarial pressure, restated in post-fix units. m1 measured
+  # dab at 1.59e-5 of nb's gradient at lambda 0.01; pre-fix, dab was not
+  # divided by n_measured, so v1_pool effectively ran at 1.59e-5 x 14,000 =
+  # 0.22 x nb. This arm asks whether that pressure, which failed on its own,
+  # succeeds once the input shortcut is gone.
+  model.dab.lambda_dab: 280.0
+
+  # OFF. w_cce 0.05 carried over from before the 28 September scaling
+  # fix, where it was an effective 700 (0.05 x n_measured). After the
+  # fix it is 0.05, and the gradient balance measured it at 0.0005x
+  # reconstruction: inert, while still costing a second encoder pass
+  # on every fourth step. This is the DAB unit bug in its twin, which
+  # we fixed for DAB and never checked for CCE. Turned off rather
+  # than guessed at: if it comes back it comes back from a gradient
+  # measurement, as lambda_dab did.
+  model.cce.enabled: false
+  model.cce.lambda_cce: 0.05
+  # ON, unlike every v-series arm. r5_cce showed CCE suppressing the
+  # circular branch: the Gaussian block grows, cosine normalisation drowns
+  # the fixed-norm circular block, and concentration decays. With the
+  # circle now central to the claim, this is not optional.
+  model.cce.block_normalise: true
+  model.cce.every: 4
+
+  # THE PHASE HEAD. Linear on purpose: a hidden layer would learn the
+  # classification inside the head and leave the latent unseparated, which
+  # is the opposite of the pressure this exists to apply.
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 40.0
+
+  # d_z = d_gauss + 2 * n_circular = 24 + 8 = 32, the same width as v1_pool.
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  # THE CHANGE THIS WAVE IS FOR. See the description.
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: true
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

@@ -64,21 +64,31 @@ class DecoderReliance:
         self.max_batches = int(max_batches)
 
     @torch.no_grad()
-    def measure(self, model, batches, nb_loss) -> dict[str, float]:
+    def measure(self, model, batches, nb_loss, device=None) -> dict[str, float]:
         """`{reliance_study, reliance_latent, reliance_ratio}`.
 
         Args:
             model:   The EndoFoundationModel, already in eval mode.
-            batches: An iterable of batches already on the right device.
+            batches: An iterable of batches. A DataLoader yields them on the
+                     CPU, so pass `device` and they are moved here. Taking
+                     them as given is what made every reliance number NaN in
+                     the m3 wave: each batch raised a device mismatch, every
+                     one was caught and logged, and the metric was simply
+                     absent from sixteen epochs of two runs.
             nb_loss: Callable (x_meas, mu_hat, theta) -> scalar tensor, the
                      composite's own `nb_loss`, so the penalties are in the
                      units of the metric they are read beside.
+            device:  Where the model lives. None assumes the batches are
+                     already there.
         """
+        from endo_model.training.batch_device import to_device
         real, no_study, no_latent, seen = 0.0, 0.0, 0.0, 0
         for i, batch in enumerate(batches):
             if i >= self.max_batches:
                 break
             try:
+                if device is not None:
+                    batch = to_device(batch, device)
                 scores = self.one_batch(model, batch, nb_loss)
             except Exception as exc:                            # noqa: BLE001
                 logger.warning("decoder reliance failed on batch %d (%s: %s); "

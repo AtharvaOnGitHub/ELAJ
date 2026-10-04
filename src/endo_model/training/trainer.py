@@ -542,7 +542,7 @@ class Trainer:
             try:
                 metrics.update(self.decoder_reliance.measure(
                     self.model, self.val_loader,
-                    self.composite_loss.nb_loss))
+                    self.composite_loss.nb_loss, device=self.device))
             except Exception as exc:                        # noqa: BLE001
                 logger.warning("decoder reliance failed (%s: %s)",
                                type(exc).__name__, exc)

@@ -5,12 +5,19 @@ description: >
   to the seed, so the pair is a controlled read on one question: should ECS
   see pairs of cells from DIFFERENT studies?
 
-  WHY THE QUESTION EXISTS AT ALL. scGPT trains on mixed batches, so their ECS
-  pairs span studies. PerStudyBatchSampler puts one study in each of our
-  batches, so ours do not. Reproducing their term faithfully in our data path
-  therefore requires supplying cross-study partners from somewhere, and
-  LatentBuffer holds the last eight batches of cell embeddings, detached, as
-  reference points. Eight batches is eight other studies.
+  WHY THE QUESTION EXISTS, AND IT IS NOT THE REASON FIRST WRITTEN HERE. This
+  arm is a DEPARTURE from scGPT, not a closer reproduction of it. Their
+  integration script sets per_seq_batch_sample = True and builds
+  SubsetsBatchSampler subsets by np.where(batch_labels_array == batch_label),
+  so every scGPT batch holds one study and their ECS pairs are same-study,
+  exactly as the sibling arm's are. Checked in the source after the opposite
+  was assumed.
+
+  So the question is ours, not theirs: ECS is the only term in either model
+  that reads cells in pairs, which makes it the only term whose behaviour
+  depends on who shares a batch. Asking it to see across studies is a new
+  idea, and LatentBuffer holds the last eight batches of cell embeddings,
+  detached, as reference points. Eight batches is eight other studies.
 
   WHY NOT MIXED BATCHES INSTEAD. That is the direct fix, and PerStudyBatchNorm
   already removed the correctness reason for single-study batches. What blocks

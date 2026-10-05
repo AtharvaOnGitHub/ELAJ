@@ -29,13 +29,23 @@ description: >
       dropout     0.1 -> 0.0, because handicapping the classifier is the
                   defect
 
-  WHAT IS NOT THE PROBLEM, AND WAS CHECKED. Batch composition.
+  WHAT IS NOT THE PROBLEM, AND WAS CHECKED TWICE. Batch composition.
   PerStudyBatchSampler puts one study in a batch, but every layer of the
   discriminator is row-wise, softmax cross entropy computes all eleven logits
   for each cell, and the gradient on one cell already raises its own study's
   logit and lowers the other ten. The K-way contrast lives inside a single
   row. There is no BatchNorm in the discriminator, so no statistic is
   confounded with the label either. Single-study batches do not starve it.
+
+  AND SCGPT TRAINS THE SAME WAY, WHICH SETTLES IT. Their integration script
+  sets per_seq_batch_sample = True and builds SubsetsBatchSampler subsets by
+  np.where(batch_labels_array == batch_label): one study per subset, one
+  subset per batch. Their encoder requires it, because DSBN selects its
+  normaliser with int(batch_labels[0].item()) and would otherwise normalise a
+  whole batch by the first cell's study. Their criterion_dab is a per-cell
+  cross entropy summed into one loss under one optimiser, with no alternating
+  discriminator step. The DAB that moves integration metrics was trained on
+  single-study batches.
 
   LAMBDA IS DELIBERATELY UNCHANGED, AND IS NOT COMPARABLE. lambda_dab 336 at
   w_dab 0.5 is coefficient 168, exactly m4_tight16 and m4_edge_starved. Held

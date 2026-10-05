@@ -246,12 +246,12 @@ class ECSConfig:
     the sign is counter-intuitive and the risk for our fragmented embeddings
     is written down there.
 
-    `buffer_batches` is the only part with no scGPT counterpart. They train
-    on mixed batches so their pairs span studies; `PerStudyBatchSampler` gives
-    us one study per batch, so without a buffer ECS only ever sees same-study
-    pairs. Non-zero holds that many previous batches as extra reference
-    points, which are other studies. 0 keeps the term within-study, and that
-    is the setting that cannot work against the adversary.
+    `buffer_batches` is the only part with no scGPT counterpart, and 0 is the
+    faithful setting: their batches hold one study each, so their pairs are
+    same-study exactly as ours are. Non-zero holds that many previous batches
+    as extra reference points, which are other studies. That is a departure
+    from scGPT, and the only setting in which ECS can work against the
+    adversary.
     """
 
     enabled: bool = False

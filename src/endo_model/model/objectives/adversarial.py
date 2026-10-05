@@ -51,13 +51,32 @@ better-aimed gradient to the encoder at the same `lambda_dab`, and
 worse. `lambda_dab` is therefore not comparable across this change and should
 be re-calibrated from the gradient report rather than carried over.
 
-WHAT IS NOT THE PROBLEM. Batch composition. `PerStudyBatchSampler` puts one
-study in each batch, and that does not handicap this network: every layer here
-is row-wise, softmax cross entropy computes all `n_studies` logits for each
-cell, and the gradient on one cell already pushes its own study's logit up and
-the other ten down. The K-way contrast is inside a single row, not across the
-batch. There is no BatchNorm anywhere in this module, so no statistic is
-confounded with the label either.
+WHAT IS NOT THE PROBLEM, AND THIS IS SETTLED FROM THEIR SOURCE. Batch
+composition. `PerStudyBatchSampler` puts one study in each batch, and that
+does not handicap this network: every layer here is row-wise, softmax cross
+entropy computes all `n_studies` logits for each cell, and the gradient on one
+cell already pushes its own study's logit up and the other ten down. The K-way
+contrast is inside a single row, not across the batch. There is no BatchNorm
+anywhere in this module, so no statistic is confounded with the label either.
+
+scGPT's own setup confirms that rather than merely permitting it. Nothing in
+their DAB path reads cells jointly: `AdversarialDiscriminator` is Linear,
+LeakyReLU and LayerNorm, and `criterion_dab` is a per-cell
+`nn.CrossEntropyLoss` summed into one `loss` under one optimiser with no
+alternating discriminator step. Their encoder REQUIRES single-study batches,
+because DSBN picks its normaliser with
+`batch_label = int(batch_labels[0].item())` and so normalises a whole
+minibatch by whichever study the FIRST cell belongs to. They enforce it:
+`per_seq_batch_sample = True`, and `SubsetsBatchSampler` subsets built by
+`np.where(batch_labels_array == batch_label)`, one study per subset and one
+subset per batch. The DAB that moves integration metrics is trained the way
+we train.
+
+One place we are now stricter than they are. `PerStudyBatchNorm` indexes its
+statistics by the id carried with each ROW, so our DSBN is correct on a mixed
+batch and `batch_labels[0]` is not. If mixed batches are ever wanted here,
+DSBN is no longer the obstacle; `_build_gene_queries`' per-study gene layout
+is.
 """
 
 import torch

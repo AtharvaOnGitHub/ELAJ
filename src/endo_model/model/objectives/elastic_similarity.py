@@ -48,13 +48,20 @@ is in the pair:
 
 `PerStudyBatchSampler` puts one study in a batch, so with no reference buffer
 every pair is same-study and only the first two rows above can occur: ECS is
-then a purely within-study sharpener and cannot fight the adversary. Supply a
-cross-study reference through `LatentBuffer` and the last two rows come into
-play as well, which is closer to what scGPT's mixed batches do and is the more
-aggressive of the two settings.
+then a purely within-study sharpener and cannot fight the adversary.
 
-Both are worth one arm. Neither is obviously right, and the first one is the
-one that cannot undo DAB's work.
+AND THAT IS SCGPT'S ECS, NOT AN APPROXIMATION OF IT. Their integration script
+sets `per_seq_batch_sample = True` and builds `SubsetsBatchSampler` subsets by
+`np.where(batch_labels_array == batch_label)`, so every one of their batches
+holds a single study too. Their `torch.mm(cell_emb_normed,
+cell_emb_normed.t())` therefore pairs same-study cells exactly as this does
+with the buffer off. Checked in the source, because the opposite was assumed
+here first.
+
+Supplying a cross-study reference through `LatentBuffer` brings the last two
+rows into play and is a DEPARTURE from scGPT rather than a closer
+reproduction of it. It is the more aggressive setting and the only one that
+can undo DAB's work, so it is the sibling arm.
 
 THE ONE DELIBERATE DIFFERENCE. scGPT keeps the zeroed diagonal inside the
 mean, so their reported value is diluted by the B self-pairs and sits a

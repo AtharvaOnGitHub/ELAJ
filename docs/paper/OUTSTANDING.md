@@ -28,11 +28,11 @@ instead:
 
 | item | gates | gated by |
 |---|---|---|
-| per-split scoring | quoting any number without a caveat | nothing |
+| licence audit | **submission** | nothing |
 | `PUBLICATION_PLAN` §0 | the introduction | nothing |
 | figure list | the figure day | nothing |
 | Methods draft | — | nothing; model subsection moves at the fork |
-| licence audit | **submission** | nothing |
+| Methods selection sentence | nothing; it closes an objection | nothing |
 | intersection vocabulary | nothing this round | nothing |
 
 **The single point of failure is `m4_tight16` landing on 7 October.** If it
@@ -43,16 +43,18 @@ alone, which is the third row of the fork table.
 
 ## Start now, no GPU
 
-- [ ] **Per-split scoring in `validate_latent`.** `validation.csv` pools val
-      and test. Blocks quoting any number without a selection caveat.
+- [ ] **Licence audit (R3).** Per study: licence, may processed data be
+      redistributed, citation requirement. Accessions in
+      `data_collation/configs/datasets.yaml`; the three `garcia_alonso_2021`
+      entries have none recorded. **Can block submission on its own.**
 - [ ] **`PUBLICATION_PLAN` §0 reframing.** Blocks the introduction.
 - [ ] **Figure list: which arm each figure needs.** Blocks the figure day.
 - [ ] **Draft Methods.** Corpus, vocabulary, model, protocol. The model
       subsection moves if `m4_tight16` wins.
-- [ ] **Licence audit (R3).** Per study: licence, may processed data be
-      redistributed, citation requirement. Accessions in
-      `data_collation/configs/datasets.yaml`; the three `garcia_alonso_2021`
-      entries have none recorded. Can block submission.
+- [ ] **One Methods sentence on selection.** "The reported checkpoint was
+      selected by reconstruction loss on the validation donors; all reported
+      metrics are label-based and played no part in selection." Closes the
+      only protocol objection a reviewer can raise about val+test scoring.
 - [ ] **Cost the intersection vocabulary.** Genes common to all 11 studies,
       and surviving group sizes. CPU. For the revision round, not this one.
 
@@ -65,6 +67,15 @@ alone, which is the third row of the fork table.
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days
+
+## If there is spare time
+
+- [ ] **Split the score by val and test.** Not for fairness: the protocol is
+      symmetric and the baselines sit on the same cells. For curiosity with
+      a real question behind it. Phase chance is 0.664 on val against 0.380
+      on val+test, so val's phase labels are lopsided and the two halves are
+      different difficulties. We do not know which half 0.7514 comes from.
+      About 45 extra minutes on a scoring pass.
 
 ## The fork, 7 October
 

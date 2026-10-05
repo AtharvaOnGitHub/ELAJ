@@ -117,17 +117,24 @@ and it comes before any scoring pass.
 - [ ] `m4_tight16` finishes (~7 Oct)
 - [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
       --skip-probe`, 3 h, **not** the 12 h default
-- [ ] **Queue `m5_adversary`** the moment a card frees. scGPT's
-      discriminator shape plus ECS, on the clean wall, otherwise
-      `m4_tight16` field for field.
-- [ ] **Read its epoch-1 gradient balance before the run is trusted.**
-      `lambda_dab` 336 was calibrated against a 64-unit classifier and a
-      competent one delivers a different gradient at the same lambda;
-      `w_ecs` 1400 is a starting point and the term is linear in it. Both
-      numbers are confirmed or rescaled from that one report, the way
-      `w_cls` 500 became 40.
-- [ ] `m5_adversary_cross` only if the sibling clears the guard. One field
-      differs: cross-study ECS pairs.
+- [ ] **`m5_rent2` starts now.** free_bits 0.25 to 0.1667, which is an
+      allowance of 2.00 nats at 12 KL dimensions: `edge_starved`'s rent at
+      `m4_tight16`'s width, with the circular branch kept. Differs from
+      `m4_tight16` in that one field and nothing else, checked
+      field-by-field.
+- [ ] **`m5_rent0` queues behind `m4_tight16`.** free_bits 0.0, the extreme
+      of the same lever. **Kill rule, fixed before the run: if median kappa
+      falls below 1e-2 on more than one circular dimension by epoch 6, kill
+      it and give the card back.** Removing the floor removes the only thing
+      stopping a circular dimension from sitting on flat ground.
+- [ ] Together with `m4_tight16` these give 3.00 / 2.00 / 0.00 nats at fixed
+      width: a dose-response curve on the one mechanism with a demonstrated
+      monotone effect, where width and allowance have been confounded all
+      campaign.
+- [ ] `m5_adversary` and `m5_adversary_cross` are built and tested, and they
+      WAIT. The adversary is a measured failure (loss correlates +0.890 with
+      study kNN) and ECS sharpens an embedding whose problem is
+      fragmentation. Neither gets a card before the rent arms report.
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days

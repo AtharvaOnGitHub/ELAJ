@@ -1,0 +1,138 @@
+name: m5_rent2
+description: >
+  THE PRICE OF THE LATENT, NOT THE STRENGTH OF THE ADVERSARY. One field
+  differs from m4_tight16: free_bits 0.25 to 0.1667. Everything else is that
+  arm, field for field, including its 64-unit adversary.
+
+  WHY THIS AND NOT THE NEW ADVERSARY. Three mechanisms have been tried
+  against donor identity in the latent and two of them are measured failures.
+  Adversarial pressure: across m2_cls40's twelve epochs the correlation
+  between the adversary's own loss and donor kNN is +0.883, and against study
+  kNN +0.890, so the better the encoder fools the classifier the MORE
+  identity sits in neighbour distance. It buys concealment, not invariance,
+  and walking lambda from 0.2 to 0 across five waves found nothing.
+  Decoder conditioning: on m3_study_raw a wrong study costs the decoder
+  0.0149 nats per gene against 0.1118 for a wrong latent, a ratio of 7.5, so
+  the study embedding is nearly unused and the latent is still where the
+  decoder reads study from.
+
+  THE THIRD MECHANISM IS THE ONLY ONE THAT HAS EVER MOVED THE METRIC, and it
+  is the price of latent capacity. Every arm in this project has paid
+  free_bits 0.25 per dimension and nothing has ever changed it, so the
+  allowance has only ever moved when the WIDTH moved. Those two have been
+  confounded for the whole campaign.
+
+  THE ARITHMETIC, CORRECTED. free_bits is nats per KL DIMENSION, and the KL
+  sums over d_gauss + n_circular. It is not d_z: d_z counts each angle twice
+  because the latent hands it downstream as a (cos, sin) pair, while the KL
+  charges once per angle. EVIDENCE 7k had this wrong by that factor for every
+  arm with a circular branch.
+
+      arm                KL dims   free_bits   allowance        result
+      m3_study_raw            24        0.25     6.00 nats   0.6173 patient, 0.9834 family
+      c1 era, d_z 16          16        0.25     4.00 nats   0.3674 patient, 0.9115 family
+      m4_tight16              12        0.25     3.00 nats   in flight
+      m4_edge_starved          8        0.25     2.00 nats   ~0.48 patient, ~0.98 family
+      THIS ARM                12      0.1667     2.00 nats
+
+  Naming one of 11 studies costs ln(11) = 2.398 nats. Naming one of 254
+  donors costs ln(254) = 5.537. m3_study_raw's 6.00 sits above BOTH, so its
+  latent could name the donor rent-free and no adversary could charge for it;
+  that arm gave patient kNN 0.6173. m4_edge_starved's 2.00 sits below both
+  and gave roughly 0.48 with family intact at 0.98. Between those two points
+  donor-blindness improves by 0.14 while cross-donor family moves 0.003.
+
+  SO THE TRADE-OFF WE HAVE BEEN PLANNING AROUND MAY NOT EXIST IN FIXED CODE.
+  The 0.9115 family that made d_z 16 unpublishable came from a run with the
+  loss-scaling defect, two DSBN bugs, no gene masking and no decoder
+  conditioning. The only tight arm with all four fixed is edge_starved, and
+  its family is 0.98.
+
+  WHAT THIS ARM IS FOR. edge_starved bought its 2.00 nats by being 8
+  dimensions wide with no circular branch. This arm buys the same 2.00 nats
+  at 12 KL dimensions WITH the circular branch, by pricing them instead of
+  removing them. If the allowance is the lever, this lands near edge_starved's
+  donor-blindness with m4_tight16's room for biology, and it does so with the
+  branch the paper's central claim rests on. If WIDTH was the lever all along,
+  it lands on m4_tight16 and the question is closed the other way. Either
+  reading separates two things that have never been separated here.
+
+  WHAT WOULD MAKE THIS THE PAPER'S MODEL: patient kNN near 0.45 or below with
+  cross-donor family 0.97 or better, which beats every baseline on
+  donor-blindness by 0.2 while matching them on biology. WHAT WOULD CLOSE IT
+  THE OTHER WAY: family falling to the low 0.9s, which says the trade-off is
+  intrinsic after all and the honest paper is about the frontier.
+
+  NO KILL RULE BEYOND THE USUAL. Early stopping on nb with warm-up 6 and
+  patience 8, guard on study_knn <= 0.5. Nothing here is a new mechanism, so
+  there is no new failure mode to watch for.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m5_rent2/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 6
+
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.5
+  training.block_probe_every: 2
+  training.keep_every_epochs: 5
+
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_dab: 0.5
+  model.loss.w_kl_circ: 0.1
+
+  # ── THE ONE FIELD THAT DIFFERS FROM m4_tight16 ───────────────────────────
+  model.loss.free_bits: 0.1667
+
+  # PINNED TO m4_tight16's ADVERSARY, which is not the repository default any
+  # more. The October rebuild (three 256-unit LeakyReLU layers with LayerNorm)
+  # lives in m5_adversary and is a SECOND change; taking it here would confound
+  # the rent with the adversary and neither arm would answer anything. ECS is
+  # off for the same reason.
+  model.dab.hidden_dim: 64
+  model.dab.n_layers: 2
+  model.dab.normalise: false
+  model.dab.dropout: 0.1
+  model.dab.lambda_dab: 336.0
+
+  model.cce.enabled: false
+  model.cce.lambda_cce: 0.05
+  model.cce.block_normalise: true
+  model.cce.every: 4
+
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 40.0
+
+  # d_z = 8 + 2*4 = 16, and 8 + 4 = 12 KL DIMENSIONS. m4_tight16's shape.
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

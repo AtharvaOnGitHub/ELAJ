@@ -942,9 +942,43 @@ through r8 and c1 and became 32 in the v series and 24 in the m series.
 | baselines | — | 0.6488–0.6628 | 49–51 | 0.9822–0.9866 |
 
 `free_bits` 0.25 per dimension has never changed, so the rent-free allowance
-is 4.00 nats at d_z 16 and 6.00 at 24. Naming one of 269 donors costs
-ln(269) = 5.59 nats; one of 11 studies costs ln(11) = 2.40. The allowance
-crosses the donor threshold exactly where the behaviour changes.
+has only ever moved when the width moved. Those two have been confounded for
+the whole campaign, which is what wave m5's rent arms exist to separate.
+
+**THE ALLOWANCE ARITHMETIC, CORRECTED 6 OCTOBER 2026.** This section said
+4.00 nats at d_z 16 and 6.00 at 24. The first figure was wrong whenever the
+arm had a circular branch. `free_bits` is nats per KL DIMENSION and
+`_reduce` clamps the per-dimension mean before summing, applied separately to
+each branch, so the allowance is
+
+    (d_gauss + n_circular) x free_bits
+
+and not `d_z x free_bits`. `d_z` counts each angle twice, because the latent
+hands it downstream as a (cos, sin) pair, while the KL charges once per
+angle. Gaussian-only arms were unaffected; every arm with a circle was
+overstated by `n_circular x free_bits`.
+
+| arm | d_gauss | n_circular | KL dims | allowance | patient kNN ↓ | kept /100 | family ↑ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `m3_study_raw` | 24 | 0 | 24 | **6.00** | 0.6173 | 53 | 0.9834 |
+| c1 era, `c1_ref` | 16 | 0 | 16 | **4.00** | ≤0.3674 | 67 | 0.9115 |
+| `m4_tight16` | 8 | 4 | 12 | **3.00** | in flight | | |
+| `m4_edge_starved` | 8 | 0 | 8 | **2.00** | ~0.48 | | ~0.98 |
+| baselines | — | — | — | — | 0.6488–0.6628 | 49–51 | 0.9822–0.9866 |
+
+Naming one of 11 studies costs ln(11) = 2.398 nats; one of 254 donors costs
+ln(254) = 5.537. `m3_study_raw`'s 6.00 sits above BOTH thresholds, so its
+latent could name the donor rent-free and no adversary could charge for it.
+`m4_edge_starved`'s 2.00 sits below both. Between those two clean points
+donor-blindness improves by 0.14 while cross-donor family moves 0.003.
+
+**So the trade-off the campaign has been planning around may not exist in
+fixed code.** The 0.9115 family that made d_z 16 unpublishable came from a
+run carrying the loss-scaling defect, two DSBN bugs, no gene masking and no
+decoder conditioning. The only tight arm with all four fixed is
+`edge_starved`, whose family is 0.98. That is the reading wave m5's rent arms
+are built on, and it is a stronger reading than anything the adversary or the
+decoder conditioning has produced.
 
 
 ## 7l. What scGPT's DAB does that ours did not, read from their source

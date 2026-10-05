@@ -1,0 +1,113 @@
+name: m5_rent0
+description: >
+  THE EXTREME OF THE SAME LEVER. free_bits 0.0: nothing rent-free, every nat
+  the latent stores priced against reconstruction. One field from m4_tight16,
+  the same field as m5_rent2, pushed as far as it goes.
+
+  THE POINT OF RUNNING BOTH. m5_rent2 asks whether the allowance is the lever
+  at all by matching edge_starved's 2.00 nats at a wider latent. This asks
+  what happens when there is no allowance to cross any threshold with:
+  ln(11) = 2.398 nats for a study and ln(254) = 5.537 for a donor are both
+  unreachable for free, and the KL charges from the first nat. Three points on
+  one line at fixed width, 3.00 against 2.00 against 0.00, with everything
+  else held: that is a dose-response curve on the only mechanism in this
+  project with a demonstrated monotone effect.
+
+  THE RISK, AND IT IS REAL. free_bits exists because a quiet circular
+  dimension cannot climb back: at kappa ~ 3e-4 the KL is about kappa^2/4 and
+  the slope is kappa/2 ~ 1.5e-4, so the dimension is not being crushed, it is
+  stuck on flat ground. Run s0_lr_high lost 7 of 8 circular dimensions that
+  way. Not charging for the first free_bits nats is what stops a dimension
+  being pushed there at all, and this arm removes that protection from the
+  branch the paper's central claim rests on.
+
+  WHY IT IS STILL WORTH A CARD. The protection was introduced while the KL
+  was mis-scaled, and the circular branch now runs at beta_max 0.5 times
+  w_kl_circ 0.1, an effective 0.05 against reconstruction at 1.0. If the
+  branch survives that without a floor, free_bits was a crutch for a bug and
+  the latent can be priced properly. If it collapses, free_bits is
+  load-bearing, m5_rent2 is the answer, and we know the boundary rather than
+  assuming it.
+
+  THE KILL RULE, FIXED BEFORE THE RUN. block_probe_every 2 reports
+  phase_knn_circ against phase_knn_gauss every second epoch and the metrics
+  carry median kappa. **If median kappa falls below 1e-2 on more than one
+  circular dimension by epoch 6, kill it and give the card back.** That is
+  the collapse threshold the kl_check_no_dab run established, it is visible
+  within a quarter of the run, and the arm is not worth 28 hours to watch a
+  branch die slowly. kappa_floor 1.0 is set, so a reading below that floor is
+  itself the signal that the floor is being fought.
+
+  IF IT SURVIVES TO EPOCH 10 WITH THE CIRCLE ALIVE, it is the strongest
+  donor-blindness result this project can produce, and it costs nothing we
+  have not already paid for.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m5_rent0/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 6
+
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.5
+  training.block_probe_every: 2
+  training.keep_every_epochs: 5
+
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_dab: 0.5
+  model.loss.w_kl_circ: 0.1
+
+  # ── THE ONE FIELD THAT DIFFERS FROM m4_tight16 ───────────────────────────
+  model.loss.free_bits: 0.0
+
+  # PINNED TO m4_tight16's ADVERSARY, which is not the repository default any
+  # more. The October rebuild (three 256-unit LeakyReLU layers with LayerNorm)
+  # lives in m5_adversary and is a SECOND change; taking it here would confound
+  # the rent with the adversary and neither arm would answer anything. ECS is
+  # off for the same reason.
+  model.dab.hidden_dim: 64
+  model.dab.n_layers: 2
+  model.dab.normalise: false
+  model.dab.dropout: 0.1
+  model.dab.lambda_dab: 336.0
+
+  model.cce.enabled: false
+  model.cce.lambda_cce: 0.05
+  model.cce.block_normalise: true
+  model.cce.every: 4
+
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 40.0
+
+  # d_z = 8 + 2*4 = 16, and 8 + 4 = 12 KL DIMENSIONS. m4_tight16's shape.
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

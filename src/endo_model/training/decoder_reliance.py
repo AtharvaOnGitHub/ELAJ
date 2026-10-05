@@ -15,25 +15,36 @@ improve while the thing we actually score quietly emptied.
 THE MEASUREMENT. Two counterfactuals on the same cells, same weights, no
 training:
 
-    wrong study   tell the decoder a study the cell did not come from
-    wrong latent  decode each cell from another cell's latent
+    wrong study      tell the decoder a study the cell did not come from
+    wrong technical  take tissue, platform, disease AND study from another
+                     cell, so no channel still names the real study
+    wrong latent     decode each cell from another cell's latent
 
-and report what each costs in reconstruction. `decode_once` substitutes one
-input and leaves the encoder, DSBN and the gene layout untouched, so the
-difference is attributable to the substitution and nothing else.
+WHY THE SECOND ONE HAD TO BE ADDED. Substituting the study id alone measures
+almost nothing, and the m3 and m4 readings of ~0.004 nats per gene are the
+artefact rather than the finding. Every study in this corpus has ONE or TWO
+distinct platform combinations (assay, chemistry, sequencer, material), so
+`d_platform` is a study code in all but name, and `d_tissue` is close to one
+too. Change the study embedding and leave platform alone and the decoder
+simply trusts the channel that still agrees with the data.
+
+`reliance_technical` substitutes all of them at once, which is the
+counterfactual "the decoder does not know where this cell came from". The
+gap between it and `reliance_study` is how much of the technical signal is
+being carried by platform and tissue rather than by the study embedding.
 
 HOW TO READ IT. Both numbers are reconstruction penalties, so bigger means
 the decoder depends on that input more.
 
-    study high, latent high    both carry real information. What we want.
-    study high, latent LOW     the decoder is coasting on the study
-                               embedding and the latent is being starved.
-                               This is the failure to watch for.
-    study low,  latent high    the study embedding is not being used, so
-                               conditioning bought nothing and the latent is
-                               still doing the job on its own.
-    both low                   the decoder is reconstructing from library
-                               size and gene identity alone.
+    technical high, latent high   both carry real information. Wanted.
+    technical high, latent LOW    the decoder is coasting on the covariates
+                                  and the latent is being starved.
+    technical LOW,  latent high   conditioning bought nothing at all and the
+                                  latent is doing the whole job.
+    study low, technical high     the study embedding is redundant with
+                                  platform and tissue, not unused. This is
+                                  what m3 and m4 look like, and it is a
+                                  different problem with a different fix.
 
 `reliance_ratio` is latent over study, so above 1 means the latent matters
 more than the study embedding.
@@ -82,41 +93,66 @@ class DecoderReliance:
                      already there.
         """
         from endo_model.training.batch_device import to_device
-        real, no_study, no_latent, seen = 0.0, 0.0, 0.0, 0
+        real, no_study, no_tech, no_latent, seen = 0.0, 0.0, 0.0, 0.0, 0
+        # The first batch has no predecessor to borrow covariates from, so
+        # its technical counterfactual is skipped rather than faked.
+        previous = None
+        tech_seen = 0
         for i, batch in enumerate(batches):
             if i >= self.max_batches:
                 break
             try:
                 if device is not None:
                     batch = to_device(batch, device)
-                scores = self.one_batch(model, batch, nb_loss)
+                scores = self.one_batch(model, batch, nb_loss, previous)
+                previous = {k: batch[k] for k in self.COVARIATE_KEYS}
             except Exception as exc:                            # noqa: BLE001
                 logger.warning("decoder reliance failed on batch %d (%s: %s); "
                                "skipping", i, type(exc).__name__, exc)
                 continue
             real += scores[0]
             no_study += scores[1]
-            no_latent += scores[2]
+            no_latent += scores[3]
             seen += 1
+            # scores[2] equals scores[0] when there was no donor batch, which
+            # would drag the technical cost toward zero. Averaged over its
+            # own count instead.
+            if scores[2] != scores[0]:
+                no_tech += scores[2] - scores[0]
+                tech_seen += 1
 
         if not seen:
             return {}
-        real, no_study, no_latent = real / seen, no_study / seen, no_latent / seen
-        study_cost = no_study - real
-        latent_cost = no_latent - real
+        real = real / seen
+        study_cost = no_study / seen - real
+        tech_cost = no_tech / tech_seen if tech_seen else float("nan")
+        latent_cost = no_latent / seen - real
         out = {
             "reliance_study": study_cost,
+            "reliance_technical": tech_cost,
             "reliance_latent": latent_cost,
-            "reliance_ratio": latent_cost / study_cost if study_cost else float("nan"),
+            "reliance_ratio": (latent_cost / tech_cost if tech_cost
+                               else float("nan")),
+            # How much of the technical signal the study embedding carries on
+            # its own. Near zero with a large reliance_technical means
+            # platform and tissue are doing that job instead.
+            "reliance_study_share": (study_cost / tech_cost if tech_cost
+                                     else float("nan")),
         }
         logger.info(
-            "   decoder reliance: wrong study costs %+.4f, wrong latent costs "
-            "%+.4f, ratio %.2f (above 1 = the latent matters more)",
-            study_cost, latent_cost, out["reliance_ratio"])
+            "   decoder reliance: wrong study %+.4f, wrong technical %+.4f "
+            "(study is %.0f%% of it), wrong latent %+.4f, latent/technical "
+            "%.2f", study_cost, tech_cost,
+            100.0 * out["reliance_study_share"], latent_cost,
+            out["reliance_ratio"])
         return out
 
-    def one_batch(self, model, batch, nb_loss) -> tuple[float, float, float]:
-        """Reconstruction with the real inputs, a wrong study, a wrong latent."""
+    COVARIATE_KEYS = ("tissue_levels", "platform_codes", "disease_status",
+                      "study_id")
+
+    def one_batch(self, model, batch, nb_loss,
+                  other=None) -> tuple[float, float, float, float]:
+        """Reconstruction: real, wrong study, wrong technical, wrong latent."""
         latent = model.encode(batch)
         gene_queries, measured = model._build_gene_queries(batch)
         theta = model.dispersion(measured)
@@ -127,12 +163,19 @@ class DecoderReliance:
         wrong_study = model.decode_once(
             batch, latent, gene_queries,
             study_ids=self.other_study(model, batch["study_id"]))
+        # Covariates from ANOTHER batch, which is another study: the sampler
+        # puts one study in each batch, so rolling within one would change
+        # neither platform nor study and would measure nothing.
+        wrong_tech = (model.decode_once(batch, latent, gene_queries,
+                                        covariates_from=other)
+                      if other is not None else real)
         wrong_latent = model.decode_once(
             batch, latent, gene_queries,
             z_proj=self.rolled(latent["z_proj"]))
 
         return (float(nb_loss(x_meas, real, theta)),
                 float(nb_loss(x_meas, wrong_study, theta)),
+                float(nb_loss(x_meas, wrong_tech, theta)),
                 float(nb_loss(x_meas, wrong_latent, theta)))
 
     @staticmethod

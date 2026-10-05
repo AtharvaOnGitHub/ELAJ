@@ -70,7 +70,8 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def read_obs(path: str, columns: list[str]) -> dict:
+def read_obs(path: str, name: str, columns: list[str],
+             hierarchy=None) -> dict:
     """The named obs columns plus the barcodes, without the matrix.
 
     `backed='r'` keeps X on disk: a study's obs is a few MB where its counts
@@ -78,12 +79,22 @@ def read_obs(path: str, columns: list[str]) -> dict:
     """
     import anndata as ad
 
+    from endo_model.data.dataset import (
+        _TISSUE_STRATIFY_LEVEL, _tissue_level_matrix,
+    )
+
     adata = ad.read_h5ad(path, backed="r")
     out = {"n_cells": int(adata.n_obs),
            "obs_names": [str(x) for x in adata.obs_names]}
     for column in columns:
         out[column] = ([str(v) for v in adata.obs[column]]
                        if column in adata.obs.columns else [])
+    # The REAL stratification level, built by the dataset's own function. An
+    # earlier version passed tissue_codes=None, which changed the strata and
+    # made the split comparison meaningless: every sample read "unassigned"
+    # in both studies and compared equal.
+    out["tissue_codes"] = _tissue_level_matrix(
+        adata.obs, name, hierarchy)[:, _TISSUE_STRATIFY_LEVEL]
     adata.file.close()
     return out
 
@@ -146,9 +157,7 @@ def describe_pair(name_a: str, name_b: str, a: dict, b: dict,
         if len(here) > 1:
             disagreeing.append((s, splits_a[s], splits_b[s]))
     lines += ["", f"**Shared samples split differently: {len(disagreeing)} "
-                  f"of {sample['shared']}.** (Rebuilt without tissue "
-                  f"stratification, so read this as evidence that a "
-                  f"disagreement EXISTS, not as the trainer's exact split.)"]
+                  f"of {sample['shared']}.**"]
     if disagreeing:
         lines += ["", "| sample | in " + name_a + " | in " + name_b + " |",
                   "|---|---|---|"]
@@ -177,6 +186,12 @@ def main() -> None:
         str(Path(root) / args.config) if not Path(args.config).is_absolute()
         else args.config, root=root)
 
+    hierarchy = None
+    if getattr(data_cfg, "tissue_hierarchy_csv", None):
+        from endo_model.data.tissue_hierarchy import TissueHierarchy
+        hierarchy = TissueHierarchy(
+            str(Path(root) / data_cfg.tissue_hierarchy_csv))
+
     studies = data_cfg.resolve_studies(root)
     logger.info("%d studies in the corpus", len(studies))
 
@@ -184,30 +199,32 @@ def main() -> None:
     for study in studies:
         path = str(Path(root) / study.path)
         logger.info("Reading obs: %s", study.name)
-        loaded[study.name] = read_obs(path, [SAMPLE_COLUMN, DONOR_COLUMN])
+        loaded[study.name] = read_obs(path, study.name,
+                                     [SAMPLE_COLUMN, DONOR_COLUMN],
+                                     hierarchy)
 
     # The run's own donor assignment, rebuilt the way the dataset builds it.
-    # `patients` is PER CELL, not per donor, and `tissue_codes` None disables
-    # tissue stratification. Without the real tissue codes the strata differ
-    # from the trainer's, so the rebuilt assignment is indicative: it shows
-    # THAT two studies split a shared sample differently, not which exact
-    # split the trainer chose. The sample and barcode overlaps above need no
-    # assignment at all and are exact.
+    # `patients` is PER CELL, and `tissue_codes` is the stratification level
+    # the dataset uses, so this reproduces the trainer's own assignment.
     per_study = [
         StudyPatients(study_id=i, name=name,
                       patients=list(d.get(DONOR_COLUMN, [])),
-                      tissue_codes=None)
+                      tissue_codes=d["tissue_codes"])
         for i, (name, d) in enumerate(loaded.items())
     ]
-    try:
-        assignments, _ = assign_splits(
-            per_study, data_cfg.val_fraction, data_cfg.test_fraction,
-            exp_cfg.seed)
-    except Exception as exc:                                    # noqa: BLE001
-        logger.warning("Could not rebuild the split (%s: %s); the report will "
-                       "show overlaps without split disagreement.",
-                       type(exc).__name__, exc)
-        assignments = {}
+    # No try/except. A failure here used to leave every sample "unassigned"
+    # in both studies, which compares EQUAL and reports no leakage: the
+    # quietest possible way to answer the question wrongly.
+    assignments, _ = assign_splits(
+        per_study, data_cfg.val_fraction, data_cfg.test_fraction,
+        exp_cfg.seed)
+    counts: dict[str, int] = {}
+    for split in assignments.values():
+        counts[split] = counts.get(split, 0) + 1
+    logger.info("Rebuilt split over %d donors: %s", len(assignments), counts)
+    if not assignments:
+        raise SystemExit("the split rebuilt to nothing; the report would be "
+                         "vacuous, so it is not written")
 
     splits = {name: split_of_each_sample(d, assignments)
               for name, d in loaded.items()}

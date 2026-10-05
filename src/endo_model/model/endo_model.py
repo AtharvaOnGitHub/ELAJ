@@ -254,7 +254,8 @@ class EndoFoundationModel(nn.Module):
 
     def decode_once(self, batch: dict, latent: dict, gene_queries: Tensor,
                     study_ids: Tensor | None = None,
-                    z_proj: Tensor | None = None) -> Tensor:
+                    z_proj: Tensor | None = None,
+                    covariates_from: dict | None = None) -> Tensor:
         """Predicted counts from one latent and one set of covariates.
 
         Split out of `forward` so that a probe can run it again with ONE
@@ -280,22 +281,40 @@ class EndoFoundationModel(nn.Module):
                           study, or None for the real one.
             z_proj:       (B, d_agg) to decode from instead of the latent's,
                           or None for the real one.
+            covariates_from: another batch to take EVERY technical
+                          covariate from -- tissue, platform, disease and
+                          study together, cycled to this batch's length.
+                          Substituting study alone measures nothing when
+                          platform already identifies the study, which it
+                          does here: every study has one or two distinct
+                          platform combinations, so `d_platform` is a study
+                          code in all but name. It must come from ANOTHER
+                          batch, because batches hold one study and rolling
+                          within one changes neither platform nor study.
 
         Returns:
             (B, G_meas) predicted counts.
         """
-        tissue = self.decoder_tissue(batch["tissue_levels"])   # (B, d_tissue)
+        def take(key: str) -> Tensor:
+            if covariates_from is None:
+                return batch[key]
+            other = covariates_from[key]
+            rows = torch.arange(batch[key].shape[0],
+                                device=other.device) % other.shape[0]
+            return other[rows]
+
+        tissue = self.decoder_tissue(take("tissue_levels"))    # (B, d_tissue)
         platform = (
-            self.decoder_platform(batch["platform_codes"])      # (B, d_platform)
+            self.decoder_platform(take("platform_codes"))       # (B, d_platform)
             if self.decoder_platform is not None else None
         )
         disease = (
-            self.decoder_disease(batch["disease_status"])       # (B, d_disease)
+            self.decoder_disease(take("disease_status"))        # (B, d_disease)
             if self.decoder_disease is not None else None
         )
         study = (
-            self.decoder_study(batch["study_id"] if study_ids is None
-                               else study_ids)                  # (B, d_study)
+            self.decoder_study(study_ids if study_ids is not None
+                               else take("study_id"))           # (B, d_study)
             if self.decoder_study is not None else None
         )
         log_mu = self.decoder(

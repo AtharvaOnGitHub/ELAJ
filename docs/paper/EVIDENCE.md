@@ -978,3 +978,154 @@ crosses the donor threshold exactly where the behaviour changes.
 | **v1 vocabulary genes** | **15,496** | `build_vocabulary_v1_55184585.log` |
 | **v1 groups, and their sizes** | **44, from 247 to 493 genes** | same |
 | c1 vocabulary genes and groups | 15,495 in 45 groups | `vocabulary.json` |
+
+---
+
+## 10. Corpus limitations to state in the paper
+
+Not bugs. Established facts about the corpus that constrain what may be
+claimed, moved here from OUTSTANDING so that file stays a checklist.
+
+### 0.1 wang_2022 labels are correct, and reveal a three-way confound
+
+**The label question is closed.** All four GSE218044 samples are adenomyotic
+uterine muscle layer, stratified by symptom rather than by disease:
+
+| sample | characteristics |
+|---|---|
+| GSM6733366 | Uterine muscle layer, Adenomyosis tissue1 (Pain) |
+| GSM6733367 | Uterine muscle layer, Adenomyosis tissue2 (Pain) |
+| GSM6733368 | Uterine muscle layer, Adenomyosis tissue1 (Painfree) |
+| GSM6733369 | Uterine muscle layer, Adenomyosis tissue2 (Painfree) |
+
+There are no control samples, so `default: adenomyosis` with no column is the
+correct encoding for a study that is genuinely uniform, and
+`UBERON:0001296` (myometrium) is right. No fix needed.
+
+**What it exposes instead.** Three labels partition the corpus identically:
+
+| label | studies that can produce it |
+|---|---|
+| `disease_status = adenomyosis` | **wang_2022 only** |
+| `UBERON:0001296` (myometrium) | **wang_2022 only** |
+| `study = wang_2022` | itself |
+
+So adenomyosis, myometrium, and one study of four patients are the same set of
+49,606 cells. Nothing in the corpus can separate them.
+
+Four consequences, none of them a bug and all of them things a reviewer will
+find:
+
+1. **No adenomyosis-specific claim is supportable.** Any such claim is a claim
+   about a single study of four donors, and cannot be distinguished from a
+   batch effect.
+2. **The decoder's tissue conditioning for myometrium is study conditioning.**
+   Tissue level 3 exists only in wang_2022's cells.
+3. **`c1_dab` is in direct tension with it.** The adversarial term removes
+   study identity from the latent. Since adenomyosis *is* wang_2022, turning
+   it on removes the adenomyosis signal along with the study. That interaction
+   has to be stated when `c1_dab` is read, and it is a reason its adenomyosis
+   rows will look worse for a reason that is not the model's fault.
+4. **`c1_dx` gives the decoder what is effectively a study indicator** for
+   those cells, which partly defeats holding disease out of the encoder.
+
+**Recommendation:** keep wang_2022, as decided, and treat it as a distinct
+tissue context rather than as evidence about adenomyosis. State the confound
+in Limitations. Do not report an adenomyosis row in any results table without
+it attached.
+
+**Also noted, not a defect.** The Pain / Painfree stratification exists in GEO
+and is not carried into our obs. Nothing in this paper models pain, so it is
+not needed, but it is recorded here in case a later analysis wants it.
+
+### 0.2 The vocabulary is the pathway-annotated half of the transcriptome
+
+Measured by `scripts/audit_vocabulary_coverage.py`
+(`Outputs/vocab_coverage.csv`).
+
+| | genes |
+|---:|---|
+| union of what the eleven corpus studies measure | **30,962** |
+| in the vocabulary | **15,495** (50.0%) |
+| dropped | **15,477** (50.0%) |
+
+**The cause is `emit_vocabulary`**, which drops every gene in no group,
+unconditionally. The build runs `--grouping hierarchical`, where
+`--drop-unassigned` is not even read: the drop is structural. Genes reach a
+group through the Reactome and GO roll-up, and whatever the roll-up does not
+place is gone. It is not study exclusion: `duempelmann_2026` was in the build and still lost 10,667 of
+its 25,225 genes, and per-study coverage runs 58% to 80% across the board.
+
+**This is an architectural requirement, not a defect.** Every gene must belong
+to a group the group encoder can attend over coherently. A 15,000-gene
+"unassigned" group would carry no biological structure and would dominate the
+attention cost, which is quadratic in group size.
+
+**But it is an inclusion criterion and the Methods must say so.** The accurate
+sentence is *"genes assignable to a curated pathway"*, not *"the union of
+genes across the corpus"*. It carries the bias of the pathway databases:
+well-studied protein-coding genes are over-represented, and long non-coding
+RNAs, novel open reading frames, and pseudogenes are largely absent. An
+endometriosis-relevant gene outside every curated pathway cannot be modelled.
+
+**The baseline comparison is unaffected and fair.** `extract_corpus_matrix`
+gives every baseline the same 15,495 genes (`201,472 cells x 15,495 genes` in
+the sweep log), so PCA, scVI, and scANVI see exactly what ELAJ sees.
+
+**The EXCLUDE mismatch costs 11 genes.** Measured, not estimated, by
+`scripts/dry_run_vocabulary.py` running the real builder on the corrected gene
+list: 15,495 genes now against 15,496 rebuilt, **+11 gained and 10 lost**.
+
+All 11 gained are wang_2022's and measured by no other corpus study, so the
+mismatch is exactly this and no more. 1,791 became 11 because wang's exclusive
+genes are almost entirely absent from Reactome and GO, so they never reach a
+group whatever the gene list says. The 10 lost are olfactory receptors,
+lactalbumin, a keratin-associated protein, and sperm proteins, none of them
+endometrial.
+
+An earlier estimate here put the figure near 900 by applying the 50% pathway
+base rate to 1,791. Wrong by roughly eighty times, because entry is not a coin
+flip: it depends on the hierarchy containing the gene at all.
+
+**Orphaned rows are a non-issue: 10 genes.** `garcia_alonso_2021_c`'s panel is
+almost entirely covered by `_a` and `_b`, so excluding it costs essentially no
+dead embedding rows.
+
+**Decision: do not rebuild.** Eleven genes, none measured by any study but
+wang, is not worth renumbering every gene index and invalidating every
+checkpoint from r1 onward.
+
+- [x] `EXCLUDE` now derived from the corpus config, so the drift cannot recur
+- [x] dry run: 11 genes, decided not to rebuild
+- [ ] Methods: "genes assignable to a curated pathway", with the 15,495 of
+      30,962 figure and the database-bias caveat
+
+### 0.2b The grouping is sensitive to which studies are in the corpus
+
+The dry run turned up a separate finding. Changing the input gene list by about
+6% (wang_2022's 1,791 in, garcia_alonso_2021_c's out) took the grouping from
+**45 groups to 43**, with several groups substantially resized: one went 256 to
+503 genes, another 264 to 446, another 270 to 490.
+
+Much of the apparent churn is naming. Group names encode the merge that
+produced them (`..._plus_29_more`), so a group that picked up six more member
+nodes is renamed while holding the same genes:
+`go_dna_alkylation_..._plus_84_more` (384 genes) becomes `..._plus_90_more`
+(384 genes). The resized ones are real.
+
+`UnionCutStrategy` merges hierarchy nodes until each clears `min_size=250`, so
+a small change in gene counts can tip a node over the floor and cascade through
+the merge order.
+
+**Why this matters beyond the rebuild.** C2 claims the grouping carries biology
+rather than only cost. If the partition moves this much on a 6% change of
+corpus, a reviewer can ask how much of it is biology and how much is corpus
+composition. It sharpens the random-grouping ablation rather than undermining
+it: the comparison to beat is not only random groups but the same algorithm on
+a slightly different corpus.
+
+- [ ] re-run the dry run and report the adjusted Rand index between the two
+      partitions, which the script now computes and which separates a renamed
+      group from a genuinely different one
+- [ ] decide whether a grouping-stability panel belongs beside the
+      random-grouping ablation

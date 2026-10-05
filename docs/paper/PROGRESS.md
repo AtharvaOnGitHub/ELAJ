@@ -188,3 +188,44 @@ settles it is per-term gradient norms at the latent, which nothing logs.
 
 ---
 
+---
+
+## Settled, do not reopen
+
+Nothing here is ever a top-five priority. It is kept so that a question
+already settled is not reopened.
+
+**Scoring `c1_ref` for its own sake.** Its `val_family_knn` of 0.918 is a
+within-donor number from the training loop's label probe, not the cross-donor
+number the paper reports, so it is not comparable to scVI's 0.971 as it
+stands. Scoring it would make it comparable. Worth doing **only if the paper
+carries a "before the token fix" row**, which is a writing decision and not
+yet made. `c1_baselines` is needed regardless and sits in §2.
+
+**The bf16 precision question.** Log round-trip error 0.76% to 1.21%, raw
+counts 0% to 0.27%, against Poisson shot noise of 1.8% to 10%. The noise
+floor dominates, so the number format is not the bottleneck. Parked.
+
+**Super-group encoders.** An abstract grouping of the 45 groups into a few
+super-groups before the cell summary. Held because the `n_cls` sweep showed
+the aggregation is not where the loss is, and the token sweep found the cause
+elsewhere. Revisit only if `c1_combined`'s 396 summary tokens choke the
+aggregation.
+
+**A free direction vector per gene (`gene_table`).** 495,776 parameters and
+it scored **below** the 960-parameter factorised version, 0.794 against
+0.811. Closed by the token sweep.
+
+**Fourier and MLP count maps.** 0.562 and 0.742 against the control's 0.691
+and `scale`'s 0.760. Closed by the token sweep.
+
+**Readout width (`n_cls` above 1).** Eight times the width moved cell family
+from 0.691 to 0.708. Closed by the `n_cls` sweep.
+
+**Deferred code findings.** D3 (`infer.py` rows cannot be joined back to
+cells), B6 (`evaluate.py` drops tails), B7 (`EXCLUDE` against
+`exclude_studies`), A4 (duempelmann fractional counts). None affects a paper
+number.
+
+**The Genome Biology lane.** `PUBLICATION_PLAN.md` §9. Only if the campaign
+cannot bring the latent above scVI.

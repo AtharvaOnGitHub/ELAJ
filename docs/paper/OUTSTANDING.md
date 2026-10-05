@@ -1,441 +1,78 @@
-# What is left, by part of the paper
+# What is left
 
-Updated **5 October 2026**, 7 days from the 12 October deadline.
+**5 October 2026. 7 days to the 12 October deadline.**
 
-**Nothing finished belongs in this file.** It goes to
-[`PROGRESS.md`](PROGRESS.md) if it is provenance, or
-[`EVIDENCE.md`](EVIDENCE.md) if it is a finding. Claims and schedule are in
-[`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md).
-
-Priority runs 1 to 5 within each section. §8 is out of scope; nothing there
-is ever a top-five item.
-
-> ## Where we are, in three lines
->
-> One clean scored ELAJ column exists (SCOREBOARD §5b). Cross-donor
-> menstrual phase 0.7514 beats scVI's 0.7013; patient kNN 0.6173 is a
-> regression against ELAJ's own d_z 16 ceiling of 0.3674, and the UMAPs
-> fragment to match.
->
-> `m4_tight16` is the last experiment and decides which of three papers this
-> is. It lands 7 October.
->
-> Compute is the binding constraint. Two cards, seven days, no second wave.
+A checklist, and only that. Nothing finished goes here: provenance to
+[`PROGRESS.md`](PROGRESS.md), findings to [`EVIDENCE.md`](EVIDENCE.md),
+claims and schedule to [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md).
 
 ---
 
-## 0. Data provenance defects, still open
+## Start now, no GPU
 
-Three corpus-level limitations that have to be WRITTEN rather than fixed:
-none is a bug any more, and each changes what the paper may claim. The four
-that are closed are in PROGRESS.md.
+- [ ] **Per-split scoring in `validate_latent`.** `validation.csv` pools val
+      and test. Blocks quoting any number without a selection caveat.
+- [ ] **`PUBLICATION_PLAN` §0 reframing.** Blocks the introduction.
+- [ ] **Figure list: which arm each figure needs.** Blocks the figure day.
+- [ ] **Draft Methods.** Corpus, vocabulary, model, protocol. The model
+      subsection moves if `m4_tight16` wins.
+- [ ] **Licence audit (R3).** Per study: licence, may processed data be
+      redistributed, citation requirement. Accessions in
+      `data_collation/configs/datasets.yaml`; the three `garcia_alonso_2021`
+      entries have none recorded. Can block submission.
+- [ ] **Cost the intersection vocabulary.** Genes common to all 11 studies,
+      and surviving group sizes. CPU. For the revision round, not this one.
 
-### 0.1 wang_2022 labels are correct, and reveal a three-way confound
+## On the cards
 
-**The label question is closed.** All four GSE218044 samples are adenomyotic
-uterine muscle layer, stratified by symptom rather than by disease:
+- [ ] `m4_edge_starved` finishes (~5 Oct +14 h)
+- [ ] `m4_tight16` finishes (~7 Oct)
+- [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
+      --skip-probe`, 3 h, **not** the 12 h default
+- [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
+      removed, C-3 Gaussian-only, no-phase-head reference
+- [ ] Fire the queue 8 Oct, both cards, unattended through the writing days
 
-| sample | characteristics |
+## The fork, 7 October
+
+Which paper this is. Resolve on the 7th, not the 9th.
+
+| `m4_tight16` lands at | the paper is |
 |---|---|
-| GSM6733366 | Uterine muscle layer, Adenomyosis tissue1 (Pain) |
-| GSM6733367 | Uterine muscle layer, Adenomyosis tissue2 (Pain) |
-| GSM6733368 | Uterine muscle layer, Adenomyosis tissue1 (Painfree) |
-| GSM6733369 | Uterine muscle layer, Adenomyosis tissue2 (Painfree) |
+| patient kNN ~0.40, family 0.97+ | corrects batch effects without losing biology |
+| ~0.40, family ~0.91 | the frontier between donor-blindness and fidelity |
+| near `m3_study_raw` | one metric ahead of scVI, stated plainly |
 
-There are no control samples, so `default: adenomyosis` with no column is the
-correct encoding for a study that is genuinely uniform, and
-`UBERON:0001296` (myometrium) is right. No fix needed.
+## Figures
 
-**What it exposes instead.** Three labels partition the corpus identically:
+| | content | status |
+|---|---|---|
+| 1 | architecture | not started |
+| 2 | diagnosis chain: stage table, `n_cls`, token sweep | evidence complete |
+| 3 | width curve | evidence complete |
+| 4 | benchmark table against PCA, scVI, scANVI | waits on the fork |
+| 5 | ablations | waits on the queue |
+| 6 | the demonstration | not chosen |
 
-| label | studies that can produce it |
+## Claims with no evidence
+
+| claim | needs |
 |---|---|
-| `disease_status = adenomyosis` | **wang_2022 only** |
-| `UBERON:0001296` (myometrium) | **wang_2022 only** |
-| `study = wang_2022` | itself |
-
-So adenomyosis, myometrium, and one study of four patients are the same set of
-49,606 cells. Nothing in the corpus can separate them.
-
-Four consequences, none of them a bug and all of them things a reviewer will
-find:
-
-1. **No adenomyosis-specific claim is supportable.** Any such claim is a claim
-   about a single study of four donors, and cannot be distinguished from a
-   batch effect.
-2. **The decoder's tissue conditioning for myometrium is study conditioning.**
-   Tissue level 3 exists only in wang_2022's cells.
-3. **`c1_dab` is in direct tension with it.** The adversarial term removes
-   study identity from the latent. Since adenomyosis *is* wang_2022, turning
-   it on removes the adenomyosis signal along with the study. That interaction
-   has to be stated when `c1_dab` is read, and it is a reason its adenomyosis
-   rows will look worse for a reason that is not the model's fault.
-4. **`c1_dx` gives the decoder what is effectively a study indicator** for
-   those cells, which partly defeats holding disease out of the encoder.
-
-**Recommendation:** keep wang_2022, as decided, and treat it as a distinct
-tissue context rather than as evidence about adenomyosis. State the confound
-in Limitations. Do not report an adenomyosis row in any results table without
-it attached.
-
-**Also noted, not a defect.** The Pain / Painfree stratification exists in GEO
-and is not carried into our obs. Nothing in this paper models pain, so it is
-not needed, but it is recorded here in case a later analysis wants it.
-
-### 0.2 The vocabulary is the pathway-annotated half of the transcriptome
-
-Measured by `scripts/audit_vocabulary_coverage.py`
-(`Outputs/vocab_coverage.csv`).
-
-| | genes |
-|---:|---|
-| union of what the eleven corpus studies measure | **30,962** |
-| in the vocabulary | **15,495** (50.0%) |
-| dropped | **15,477** (50.0%) |
-
-**The cause is `emit_vocabulary`**, which drops every gene in no group,
-unconditionally. The build runs `--grouping hierarchical`, where
-`--drop-unassigned` is not even read: the drop is structural. Genes reach a
-group through the Reactome and GO roll-up, and whatever the roll-up does not
-place is gone. It is not study exclusion: `duempelmann_2026` was in the build and still lost 10,667 of
-its 25,225 genes, and per-study coverage runs 58% to 80% across the board.
-
-**This is an architectural requirement, not a defect.** Every gene must belong
-to a group the group encoder can attend over coherently. A 15,000-gene
-"unassigned" group would carry no biological structure and would dominate the
-attention cost, which is quadratic in group size.
-
-**But it is an inclusion criterion and the Methods must say so.** The accurate
-sentence is *"genes assignable to a curated pathway"*, not *"the union of
-genes across the corpus"*. It carries the bias of the pathway databases:
-well-studied protein-coding genes are over-represented, and long non-coding
-RNAs, novel open reading frames, and pseudogenes are largely absent. An
-endometriosis-relevant gene outside every curated pathway cannot be modelled.
-
-**The baseline comparison is unaffected and fair.** `extract_corpus_matrix`
-gives every baseline the same 15,495 genes (`201,472 cells x 15,495 genes` in
-the sweep log), so PCA, scVI, and scANVI see exactly what ELAJ sees.
-
-**The EXCLUDE mismatch costs 11 genes.** Measured, not estimated, by
-`scripts/dry_run_vocabulary.py` running the real builder on the corrected gene
-list: 15,495 genes now against 15,496 rebuilt, **+11 gained and 10 lost**.
-
-All 11 gained are wang_2022's and measured by no other corpus study, so the
-mismatch is exactly this and no more. 1,791 became 11 because wang's exclusive
-genes are almost entirely absent from Reactome and GO, so they never reach a
-group whatever the gene list says. The 10 lost are olfactory receptors,
-lactalbumin, a keratin-associated protein, and sperm proteins, none of them
-endometrial.
-
-An earlier estimate here put the figure near 900 by applying the 50% pathway
-base rate to 1,791. Wrong by roughly eighty times, because entry is not a coin
-flip: it depends on the hierarchy containing the gene at all.
-
-**Orphaned rows are a non-issue: 10 genes.** `garcia_alonso_2021_c`'s panel is
-almost entirely covered by `_a` and `_b`, so excluding it costs essentially no
-dead embedding rows.
-
-**Decision: do not rebuild.** Eleven genes, none measured by any study but
-wang, is not worth renumbering every gene index and invalidating every
-checkpoint from r1 onward.
-
-- [x] `EXCLUDE` now derived from the corpus config, so the drift cannot recur
-- [x] dry run: 11 genes, decided not to rebuild
-- [ ] Methods: "genes assignable to a curated pathway", with the 15,495 of
-      30,962 figure and the database-bias caveat
-
-### 0.2b The grouping is sensitive to which studies are in the corpus
-
-The dry run turned up a separate finding. Changing the input gene list by about
-6% (wang_2022's 1,791 in, garcia_alonso_2021_c's out) took the grouping from
-**45 groups to 43**, with several groups substantially resized: one went 256 to
-503 genes, another 264 to 446, another 270 to 490.
-
-Much of the apparent churn is naming. Group names encode the merge that
-produced them (`..._plus_29_more`), so a group that picked up six more member
-nodes is renamed while holding the same genes:
-`go_dna_alkylation_..._plus_84_more` (384 genes) becomes `..._plus_90_more`
-(384 genes). The resized ones are real.
-
-`UnionCutStrategy` merges hierarchy nodes until each clears `min_size=250`, so
-a small change in gene counts can tip a node over the floor and cascade through
-the merge order.
-
-**Why this matters beyond the rebuild.** C2 claims the grouping carries biology
-rather than only cost. If the partition moves this much on a 6% change of
-corpus, a reviewer can ask how much of it is biology and how much is corpus
-composition. It sharpens the random-grouping ablation rather than undermining
-it: the comparison to beat is not only random groups but the same algorithm on
-a slightly different corpus.
-
-- [ ] re-run the dry run and report the adjusted Rand index between the two
-      partitions, which the script now computes and which separates a renamed
-      group from a genuinely different one
-- [ ] decide whether a grouping-stability panel belongs beside the
-      random-grouping ablation
-
-## 1. Next, in order
-
-**P0. `m4_tight16` must finish and be scored.** d_z 16 with `d_study`,
-masking, `w_cls` 40 and the DSBN fixes. It is the only remaining experiment
-and it decides which arm the paper is about. Launched 5 October, finishes
-about 7 October, scores in three hours after that. Everything in §3 and §5
-waits on which arm wins, and nothing else can start it earlier.
-
-**P1. Per-split scoring, so any number is quotable.** `validation.csv` pools
-val and test, and the checkpoint was selected on `val_nb`, so every figure in
-SCOREBOARD §5b carries a selection caveat. The split tags already travel
-through `validate_latent`; only the reporting pools them. No GPU, half a day,
-and it fixes the caveat permanently for every arm scored from here.
-
-**P2. Score `m4_edge_starved`.** d_z 8 locates the biology cliff from below.
-Useful whichever way `m4_tight16` goes, and it is a three-hour job on a card
-that frees about 14 hours before `m4_tight16` does.
-
-**P3. The ablation queue, written now and fired unattended.** C-1 random
-grouping, C-2 DNS removed, C-3 Gaussian-only, and the no-phase-head
-reference. These run on both cards through the writing days and need no
-supervision, but the queue has to exist before 8 October or it will not be
-assembled under time pressure.
-
-**P4. The intersection vocabulary, costed but not run.** Gene masking closes
-the gene-COUNT half of the study fingerprint and cannot close the identity
-half; only a vocabulary restricted to genes all eleven studies measured can.
-Nobody has measured what that costs in genes or in group sizes. CPU only.
-It is P4 because it cannot be acted on inside seven days, and it is the first
-thing to try if there is a revision round.
-
----
-
-## 1c. What depends on what
-
-The one-run bottleneck of 28 September is gone: a clean scored column exists.
-What remains is a short chain into the deadline, and one branch of work that
-does not touch a GPU at all.
-
-```
-  m4_edge_starved (running, ep 12)        m4_tight16 (launched 5 Oct)
-        | finishes ~5 Oct +14h                  | finishes ~7 Oct
-        v                                       v
-  score (3 h) ---------------------------> WHICH ARM IS THE PAPER'S MODEL
-                                                |
-                    +---------------------------+---------------------------+
-                    v                           v                           v
-            ablation queue (P3)        main table + figures          the framing:
-            both cards, 8-12 Oct       SCOREBOARD, EVIDENCE          beat-the-baseline
-            unattended                                               or the frontier
-```
-
-**On the GPU chain, in order.** Nothing can be parallelised further: two
-cards are already committed, and scoring an arm needs the arm.
-
-| | needs | gives |
-|---|---|---|
-| `m4_tight16` finishing | a card until ~7 Oct | the only remaining experiment |
-| scoring it | the run, 3 h, `--baselines` + `--skip-probe` | the model choice |
-| the ablation queue | the model choice | C-1, C-2, C-3, no-phase-head |
-
-**Off the GPU chain, startable now.** This is where the second worker should
-be, and it is all writing-critical.
-
-| | needs | blocks |
-|---|---|---|
-| per-split scoring (P1) | nothing | quoting ANY number without a caveat |
-| PUBLICATION_PLAN §0 reframing | nothing | the whole introduction |
-| figure list and which arm each needs | nothing | the figure day |
-| intersection vocabulary costing (P4) | nothing, CPU | nothing in this round |
-
-**The fork that decides the paper, and it arrives 7 October.**
-
-*If `m4_tight16` lands near patient kNN 0.40 with cross-donor family 0.97+*,
-ELAJ is donor-blind and biologically competent, the UMAP mixes, and the paper
-is "a model that corrects batch effects without losing biology".
-
-*If it lands at 0.40 with family near 0.91*, the trade-off is intrinsic,
-conditioning does not pay the bill, and the honest paper is about the
-frontier between donor-blindness and biological fidelity, with ELAJ as the
-instrument that measures it. That is a different introduction and a different
-set of figures, which is why the fork has to be resolved by the 7th and not
-the 9th.
-
-*If it lands near `m3_study_raw`*, we publish `m3_study_raw` with one metric
-ahead and say so plainly.
-
-**Out of scope, now explicitly.** The frozen-encoder ladder, the
-transferability gate and the six-knob latent sweep were scheduled for 25
-September and have not started. Seven days does not hold them. They move to
-§8 rather than staying here as items that will not happen.
-
----
-
-## 2. Ready now, no GPU
-
-**`c1_baselines` is no longer wanted, and that settles which vocabulary the
-clean arm uses.** The baselines that exist are `v1_baselines`, on the v1
-vocabulary, and they are the bar the paper quotes. Fitting a second set against
-the c1 vocabulary would cost two hours to make the c-series absolutely
-comparable, and the c-series' value is its internal ranking, which needs no
-baselines at all. **So the clean arm runs on the v1 vocabulary**, where the bar
-is already measured. One decision removed from the critical path.
-
-**P1. Re-run `probe_stages`, with the wall it actually needs.** Job 55326180 was
-cancelled at 12 hours having completed the 90 input-space stages at 4.5 minutes
-each (6.8 hours) and none of the encoder stages, which were the point. Two ways
-to fix it and they can both be taken: raise the wall past 20 hours, and drop the
-per-group input stages, which are now measured and recorded (EVIDENCE.md §7d) so
-re-running them buys nothing.
-
-This also carries the finding that most changes the plan. The input space, before
-any attention, reaches **cross-donor family 0.944** where the latent keeps
-**0.9115**. The signal is being discarded in the compression from 1,440 numbers
-to 16, not missing from the input. The encoder stages are what would say exactly
-where, and they have never been run on a current arm.
-
-**P2. scGPT and Geneformer environments.** Both want their own environment and
-their own tokenisation of the corpus. The plan budgets two days for the
-install alone, and it is on the week-3 critical path today. Login node.
-
-**P3. The licence audit (R3).** See §6 for where to look. It decides what the
-Data Availability statement can say and it can block submission if left late.
-
-**P4. Draft the Methods.** Corpus, vocabulary, model, and validation protocol
-are settled and independent of how the two runs turn out. The thesis Methods
-is the starting point, and
-[`MEASURING_WITHOUT_TRAINING.md`](MEASURING_WITHOUT_TRAINING.md) is most of
-the validation-protocol section already. Lower priority than it looks: two
-architecture bets are pending and the model subsection will move if either
-lands.
-
----
-
-## 3. Results, by figure
-
-| figure | content | status |
-|---|---|---|
-| Fig. 1 | architecture | not started |
-| Fig. 2 | the diagnosis chain: stage table, `n_cls` flat line, token sweep | **evidence complete**, see EVIDENCE.md 2 to 4 |
-| Fig. 3 | width curve: kNN and linear probe against component count | **evidence complete** |
-| Fig. 4 | the benchmark table, ELAJ against scVI, PCA, Harmony, Scanorama | waits on `c1_baselines` and the two arms |
-| Fig. 5 | ablations: random grouping, DNS removed | not started |
-| Fig. 6 | the demonstration | not chosen |
-
----
-
-## 4. The latent programme — OUT OF SCOPE for this submission
-
-The frozen-encoder ladder, the transferability gate and the six-knob latent
-sweep were scheduled for 25 September and never started. Seven days does not
-hold them, and leaving them listed as work pretends otherwise. They are the
-first thing for a revision round; the design notes are in the git history at
-`11e653f~1`.
-
----
-
-## 5. Claims with no evidence yet
-
-From `PUBLICATION_PLAN.md` §2. These are the ones a reviewer asks about.
-
-| claim | what it needs | status |
-|---|---|---|
-| C3 DNS sentinel | the DNS-removed ablation | not started |
-| C4 beats scVI on cross-donor biology | the two running arms, scored | running |
-| C7 the latent is usable | one demonstration | not chosen |
-| C2 the grouping carries biology | the random-grouping ablation at equal sizes and parameters | config not written |
-
-C4 is the one the paper cannot be submitted without. C2 is the one a reviewer
-asks for first.
-
----
-
-## 6. The licence audit: where to look
-
-Everything needed is in `data_collation/configs/datasets.yaml`, which carries
-one entry per study with its source and accession.
-
-| study | source | accession |
-|---|---|---|
-| shih_2022 | GEO | GSE203191 |
-| tan_2022 | GEO | GSE179640 |
-| ferrero_2024 | GEO | GSE247695 |
-| lin_2023 | GEO | GSE214411 |
-| wang_2022 | GEO | GSE218044 |
-| zhang_2022 | GEO | GSE174399 |
-| fonseca_2023 | GEO | GSE213216 |
-| duempelmann_2026 | GEO | GSE266265 |
-| li_2025 | manual download | GSE276193 |
-| marecko_2024 | Reproductive Cell Atlas | E-MTAB-14039 |
-| garcia_alonso_2021_a | CELLxGENE | **not recorded** |
-| garcia_alonso_2021_b | CELLxGENE | **not recorded** |
-| garcia_alonso_2021_c | CELLxGENE | **not recorded**, and excluded from the c1 corpus |
-
-Three things to settle per study:
-
-1. **The licence.** GEO has no single licence: each submission inherits the
-   depositor's terms, so the paper and the submission page both need reading.
-   E-MTAB entries carry an explicit licence on ArrayExpress. CELLxGENE
-   collections state theirs on the collection page.
-2. **Whether processed data may be redistributed.** The distinction that
-   matters for Data Availability is between pointing at an accession, which is
-   always allowed, and shipping our processed AnnData, which often is not.
-3. **Citation requirements.** Several will require citing the original paper
-   rather than only the accession.
-
-Two gaps to close first: the three `garcia_alonso_2021` entries have no
-accession recorded, and `zhang_2022` and `garcia_alonso_2021_c` are in
-`datasets.yaml` but excluded from the c1 corpus, so decide whether they appear
-in the paper at all before auditing them.
-
----
-
-## 7. Reproducibility (R1 to R5)
-
-From `PUBLICATION_PLAN.md` §8. Runs alongside everything; the NMI Reporting
-Summary enforces it.
+| C4 beats scVI on cross-donor biology | the fork. **Cannot submit without it.** |
+| C2 the grouping carries biology | random-grouping ablation, config not written |
+| C3 DNS sentinel | DNS-removed ablation |
+| C7 the latent is usable | one demonstration, not chosen |
+
+## Reproducibility
 
 - [ ] R1 seeds and environment pinned per reported run
-- [ ] R2 weights of the reported configuration deposited, licence decided
-- [ ] R3 licence audit, see §6
-- [ ] R4 the pipeline runnable end to end from the accession list
+- [ ] R2 weights deposited, licence decided
+- [ ] R3 licence audit
+- [ ] R4 pipeline runnable from the accession list
 - [ ] R5 every figure regenerable from a committed script
 
----
+## Out of scope for this submission
 
-## 8. Out of scope, recorded so it is not rediscovered
-
-Nothing here is ever a top-five priority. It is kept so that a question
-already settled is not reopened.
-
-**Scoring `c1_ref` for its own sake.** Its `val_family_knn` of 0.918 is a
-within-donor number from the training loop's label probe, not the cross-donor
-number the paper reports, so it is not comparable to scVI's 0.971 as it
-stands. Scoring it would make it comparable. Worth doing **only if the paper
-carries a "before the token fix" row**, which is a writing decision and not
-yet made. `c1_baselines` is needed regardless and sits in §2.
-
-**The bf16 precision question.** Log round-trip error 0.76% to 1.21%, raw
-counts 0% to 0.27%, against Poisson shot noise of 1.8% to 10%. The noise
-floor dominates, so the number format is not the bottleneck. Parked.
-
-**Super-group encoders.** An abstract grouping of the 45 groups into a few
-super-groups before the cell summary. Held because the `n_cls` sweep showed
-the aggregation is not where the loss is, and the token sweep found the cause
-elsewhere. Revisit only if `c1_combined`'s 396 summary tokens choke the
-aggregation.
-
-**A free direction vector per gene (`gene_table`).** 495,776 parameters and
-it scored **below** the 960-parameter factorised version, 0.794 against
-0.811. Closed by the token sweep.
-
-**Fourier and MLP count maps.** 0.562 and 0.742 against the control's 0.691
-and `scale`'s 0.760. Closed by the token sweep.
-
-**Readout width (`n_cls` above 1).** Eight times the width moved cell family
-from 0.691 to 0.708. Closed by the `n_cls` sweep.
-
-**Deferred code findings.** D3 (`infer.py` rows cannot be joined back to
-cells), B6 (`evaluate.py` drops tails), B7 (`EXCLUDE` against
-`exclude_studies`), A4 (duempelmann fractional counts). None affects a paper
-number.
-
-**The Genome Biology lane.** `PUBLICATION_PLAN.md` §9. Only if the campaign
-cannot bring the latent above scVI.
+Frozen-encoder ladder, transferability gate, six-knob latent sweep. scGPT
+and Geneformer environments: two days of install alone. Scoring `c1_ref`
+for its own sake. Everything in PROGRESS.md under "Settled, do not reopen".

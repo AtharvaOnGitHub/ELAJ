@@ -55,6 +55,12 @@ alone, which is the third row of the fork table.
       selected by reconstruction loss on the validation donors; all reported
       metrics are label-based and played no part in selection." Closes the
       only protocol objection a reviewer can raise about val+test scoring.
+- [ ] **Correct the donor count to 254 everywhere.** `garcia_alonso_2021_b`
+      is the epithelial subset of `_a` and shares all 15 sample IDs, so
+      fifteen donors are counted twice. EVIDENCE §10.4. **Factual error in
+      Methods if left.**
+- [ ] **Write §10.4 as a limitation**, with the 0.7% figure and why it was
+      not fixed.
 - [ ] **Cost the intersection vocabulary.** Genes common to all 11 studies,
       and surviving group sizes. CPU. For the revision round, not this one.
 

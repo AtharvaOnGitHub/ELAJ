@@ -983,6 +983,57 @@ crosses the donor threshold exactly where the behaviour changes.
 
 ## 10. Corpus limitations to state in the paper
 
+### 10.4 `garcia_alonso_2021_b` is a subset of `_a`, and the donor count is 254
+
+Found 5 October from the CellxGene listing. The collection is "Mapping the
+temporal and spatial dynamics of the human endometrium in vivo and in
+vitro" (Garcia-Alonso et al. 2021), and its three datasets map to our three
+studies by cell count exactly: `_a` = Endometrium-All (100,307), `_b` =
+Endometrium-Epithelial (10,729), `_c` = Endometrium-Organoid (118,672,
+already excluded).
+
+`_b` is the epithelial fraction of `_a`, not an independent study:
+
+| Stage | `_a` | `_b` | `_b`/`_a` |
+|---|---:|---:|---:|
+| early-mid-secretory | 30,856 | 2,782 | 9.0% |
+| proliferative | 25,269 | 3,488 | 13.8% |
+| early-secretory | 25,096 | 2,436 | 9.7% |
+| late-secretory | 10,062 | 1,101 | 10.9% |
+| mid-secretory | 9,024 | 922 | 10.2% |
+| total | 100,307 | 10,729 | 10.7% |
+
+**All 15 `source_sample_id` values are shared.** The `patient_id` values do
+not overlap at all, because CellxGene mints a fresh donor UUID per dataset,
+so the two studies present the same fifteen people under thirty identifiers.
+
+**Three consequences.**
+
+*The corpus holds 254 donors, not 269.* Every count in Methods that says
+269 is wrong by fifteen.
+
+*10,729 cells are duplicated*, 0.9% of the 1.2 M training cells.
+
+*There is cross-split leakage the fingerprint guard cannot detect.* Splits
+are assigned by `patient_id`, so those fifteen donors were split
+independently in `_a` and `_b`, and a donor's cells can sit in train under
+one UUID and in val or test under the other. `SplitFingerprint` checks
+whether the donor wall MOVED, not whether two identifiers are the same
+person, so nothing in the pipeline could have caught this.
+
+**Magnitude.** `_b` puts 1,372 cells in test and a similar number in val, so
+about 2,700 of the 382,464 held-out cells, **0.7%**, are affected. Even a
+large per-cell distortion moves a headline metric at the 0.001 level. The
+direction is unfavourable to us for cross-donor agreement, since a cell's
+"other donor" neighbours can include the same person, and favourable for
+patient kNN for the same reason.
+
+**Why it is not fixed.** The correct fix is to drop `_b`, which carries no
+information `_a` lacks. That changes the gene vocabulary, the splits, the
+baselines and every trained checkpoint. It is a campaign restart and was
+found seven days from the deadline.
+
+
 Not bugs. Established facts about the corpus that constrain what may be
 claimed, moved here from OUTSTANDING so that file stays a checklist.
 

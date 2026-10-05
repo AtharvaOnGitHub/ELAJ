@@ -947,6 +947,86 @@ ln(269) = 5.59 nats; one of 11 studies costs ln(11) = 2.40. The allowance
 crosses the donor threshold exactly where the behaviour changes.
 
 
+## 7l. What scGPT's DAB does that ours did not, read from their source
+
+External evidence, gathered 5 October 2026 from the repository rather than
+from the paper, because the paper does not carry the shapes. It is here
+because it decided wave m5 and because two of the four rows belong in
+Methods.
+
+Files: `scgpt/model/model.py`, `scgpt/model/dsbn.py`, `scgpt/data_sampler.py`,
+`examples/finetune_integration.py`.
+
+### The four differences
+
+| | scGPT | ELAJ, r1 to m4 |
+|---|---|---|
+| discriminator | 3 Linear layers at `d_model` 512, LeakyReLU, LayerNorm, no dropout | 1 hidden layer of 64, ReLU, dropout 0.1 |
+| pair-geometry term | ECS, `mean(1 - (cos_sim - 0.8)^2)` | none |
+| batch label to decoder | concatenated into the decoder input | `d_study`, m3 onward only |
+| input genes | `n_hvg` 1200 | ~14,500 |
+
+The first two are wave m5. The third we already had from m3. The fourth is
+left alone: 1,200 highly variable genes is a defensible choice for a corpus
+with no diseased cells, and endometriosis is taken here to be a disease of
+subtlety, so HVG selection is the wrong instrument.
+
+Their remaining settings, for the record: `dab_weight` 1.0, `lambd` 1.0 in
+`grad_reverse`, one optimiser over one summed loss, `DSBN` True,
+`GEPC` True, `explicit_zero_prob` True, `lr` 1e-4, `dropout` 0.2,
+`epochs` 30, `batch_size` 64, `ecs_thres` 0.8.
+
+### ECS sharpens; it does not integrate
+
+```python
+cos_sim = torch.mm(cell_emb_normed, cell_emb_normed.t())
+cos_sim = cos_sim.masked_fill(torch.eye(...).bool(), 0.0)
+cos_sim = F.relu(cos_sim)
+output["loss_ecs"] = torch.mean(1 - (cos_sim - self.ecs_threshold) ** 2)
+```
+
+Minimising `1 - (cos - t)^2` MAXIMISES `(cos - t)^2`, so every pair's
+similarity is driven away from the threshold: pairs above 0.8 are pulled
+tighter, pairs between 0 and 0.8 are pushed apart, pairs at or below 0 are
+untouched because `relu` is flat there. It is an anti-collapse constraint,
+not a second batch-correction pressure, and it is the only constraint either
+model places on the latent's pair geometry. CCE is not its equivalent: CCE
+compares two views of the same cell.
+
+That direction is a risk for us and is recorded as one. Our failure mode is
+fragmentation, 62% same-donor neighbours, which is the opposite of collapse.
+
+### Single-study batches are not the problem, and their setup proves it
+
+This was a live hypothesis here and it is wrong. Nothing in scGPT's DAB path
+reads cells jointly: `AdversarialDiscriminator` is Linear, LeakyReLU and
+LayerNorm, all row-wise, and `criterion_dab` is a per-cell
+`nn.CrossEntropyLoss` summed into one loss under one optimiser with no
+alternating discriminator step.
+
+Their encoder goes further and REQUIRES one study per batch:
+
+```python
+batch_label = int(batch_labels[0].item())
+total_embs = self.dsbn(total_embs.permute(0, 2, 1), batch_label)...
+```
+
+`DomainSpecificBatchNorm1d.forward` takes a single integer and does
+`bn = self.bns[domain_label]`, so a mixed batch would be normalised by
+whichever study its first cell came from. They enforce single-study batches
+with `per_seq_batch_sample = True` and `SubsetsBatchSampler`, whose subsets
+are `np.where(batch_labels_array == batch_label)` and whose `__iter__` yields
+from one subset at a time. **The DAB that moves integration metrics is
+trained on single-study batches, in the same sampler shape as ours.**
+
+Two consequences. ECS with `buffer_batches` 0 IS their ECS, because their
+pairs are same-study too, and the cross-study variant is a departure from
+them rather than a closer reproduction. And `PerStudyBatchNorm` indexes its
+statistics by the id on each row, so our DSBN is correct on a mixed batch
+where `batch_labels[0]` is not: DSBN is no longer what blocks mixed batches
+here, `_build_gene_queries`' per-study gene layout is.
+
+
 ## 8. Pending
 
 | | what it will settle | expected |

@@ -39,6 +39,13 @@ def make_cell(vocab: GeneVocabulary, study_id: int = 0, dns_fraction: float = 0.
         "platform_codes": np.array([1, 2, 1, 1], dtype=np.int64),
         "age": 34.5,
         "disease_status": 0,
+        # -1 is the value seven studies of eleven carry, because they have no
+        # harmonised menstrual phase. Absent here until October 2026, which
+        # made every test in this module an error rather than a failure:
+        # collate_fn reads the key unconditionally and the factory did not
+        # supply it. See dataset.py CellTable.__getitem__ for the contract
+        # this factory is standing in for.
+        "phase_label": -1,
         "patient_id": f"P{seed:04d}",
     }
 

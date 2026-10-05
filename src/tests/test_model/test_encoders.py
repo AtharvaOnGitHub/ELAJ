@@ -204,6 +204,6 @@ class TestAggregationEncoder:
         for name in GROUP_NAMES:
             perturbed = dict(gcd)
             perturbed[name] = perturbed[name] + 5.0
-            assert not torch.allclose(baseline, enc(perturbed, mt)), (
+            assert not torch.allclose(baseline, enc(perturbed)), (
                 f"CELL_CLS ignored group {name}"
             )

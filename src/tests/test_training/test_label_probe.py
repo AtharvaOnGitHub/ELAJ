@@ -144,12 +144,20 @@ class TestTrainerIntegration:
         from endo_model.configs.training_config import TrainingConfig
         from endo_model.training.trainer import Trainer
 
-        class _T(Trainer):
-            def __init__(self):
-                self.config = TrainingConfig(stop_metric=FAMILY_METRIC)
+        from endo_model.training.checkpoint_ranking import CheckpointRanking
 
-        t = _T()
+        # The stub needs `ranking` as well as `config`: `_stop_metric` was
+        # inlined in the Trainer when this test was written and now delegates
+        # to CheckpointRanking, which is built in __init__ and logged there so
+        # the record says what the run selected for. A stub carrying only
+        # `config` raised AttributeError rather than testing the fallback.
+        class _T(Trainer):
+            def __init__(self, metric):
+                self.config = TrainingConfig(stop_metric=metric)
+                self.ranking = CheckpointRanking(metric=metric)
+
+        t = _T(FAMILY_METRIC)
         assert t._stop_metric({"nb": 0.4, FAMILY_METRIC: float("nan")}, 1.0) == 0.4
         assert t._stop_metric({"nb": 0.4, FAMILY_METRIC: 0.8}, 1.0) == -0.8
-        t.config = TrainingConfig(stop_metric="nb")
+        t = _T("nb")
         assert t._stop_metric({"nb": 0.4, FAMILY_METRIC: 0.8}, 1.0) == 0.4

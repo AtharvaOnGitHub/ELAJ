@@ -56,12 +56,24 @@ class TestEarlyStoppingState:
 
 class TestCheckpointManagerRehydrate:
     def test_adopts_existing_checkpoints(self, tmp_path):
+        """A fresh manager must adopt every checkpoint ON DISK and rank them.
+
+        The count is 2 and not 3 because the Trainer's manager carries
+        `RetentionPolicy(every=5)`: of epochs 0, 1 and 2, epoch 1 survives as
+        the best and epoch 2 as the last, and epoch 0 is on no schedule
+        because `scheduled` excludes it by design. This asserted 3 from
+        before retention replaced top-k, so it was testing a pruning rule
+        that no longer exists rather than the rehydration it is named for.
+        Counted off the filesystem so the two can never disagree again.
+        """
         trainer, model, optimizer = _setup(0, 3, tmp_path)
         for epoch, val in ((0, 0.9), (1, 0.4), (2, 0.6)):
             trainer.ckpt_manager.save(model, optimizer, epoch, epoch * 10, val)
+        on_disk = sorted(p.name for p in tmp_path.glob("epoch_*.pt"))
+        assert len(on_disk) == 2, on_disk
         fresh = CheckpointManager(str(tmp_path))
         assert fresh.best_path.name.startswith("epoch_0001_")
-        assert len(fresh._history) == 3
+        assert len(fresh._history) == len(on_disk)
 
     def test_prunes_across_a_restart(self, tmp_path):
         trainer, model, optimizer = _setup(0, 3, tmp_path)

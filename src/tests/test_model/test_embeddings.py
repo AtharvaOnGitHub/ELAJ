@@ -64,13 +64,55 @@ def test_dsbn_output_shape():
     assert out.shape == (B, 10, D)
 
 
-def test_dsbn_different_studies_different_output():
+def test_dsbn_at_initialisation_treats_every_study_alike():
+    """THIS TEST ASSERTED THE OPPOSITE UNTIL OCTOBER 2026, AND THE OPPOSITE
+    WAS THE BUG.
+
+    `gamma` and `beta` are `nn.Embedding` tables, which initialise to a
+    standard normal draw. That gave every study a RANDOM scale and shift
+    before any gradient arrived: about half of each study's features started
+    sign-flipped and some started near zero, switched off for that study. The
+    old assertion that two studies differ at initialisation was satisfied by
+    exactly that defect.
+
+    A batch-norm affine begins at identity, so an UNTRAINED DSBN must be the
+    identity transform for every study, and the per-study behaviour has to be
+    learned rather than drawn. See model/embeddings/dsbn.py, bug 2.
+    """
     dsbn = DSBN(n_studies=3, d_token=D)
     dsbn.train()
     tokens = torch.randn(B, 10, D)
     out0 = dsbn(tokens.clone(), torch.zeros(B, dtype=torch.long))
     out1 = dsbn(tokens.clone(), torch.ones(B, dtype=torch.long))
+    assert torch.allclose(out0, out1)
+
+
+def test_dsbn_different_studies_differ_once_the_affine_is_learned():
+    """The capability the identity initialisation must not cost us.
+
+    Written against the affine directly rather than by training, because a
+    training loop here would test the optimiser. `freeze_affine` is the arm
+    that gives this up on purpose, and dsbn.py says why it is a flag.
+    """
+    dsbn = DSBN(n_studies=3, d_token=D)
+    dsbn.train()
+    with torch.no_grad():
+        dsbn.gamma.weight[1].fill_(2.0)
+        dsbn.beta.weight[1].fill_(0.5)
+    tokens = torch.randn(B, 10, D)
+    out0 = dsbn(tokens.clone(), torch.zeros(B, dtype=torch.long))
+    out1 = dsbn(tokens.clone(), torch.ones(B, dtype=torch.long))
     assert not torch.allclose(out0, out1)
+
+
+def test_dsbn_frozen_affine_stays_at_the_identity():
+    """`learn_affine=False` must leave both tables unlearnable, so study
+    identity cannot be re-injected downstream of the normalisation."""
+    dsbn = DSBN(n_studies=3, d_token=D, learn_affine=False)
+    assert not dsbn.gamma.weight.requires_grad
+    assert not dsbn.beta.weight.requires_grad
+    assert torch.equal(dsbn.gamma.weight, torch.ones_like(dsbn.gamma.weight))
+    assert torch.equal(dsbn.beta.weight, torch.zeros_like(dsbn.beta.weight))
 
 
 # ── TissueHierarchyEncoder ──────────────────────────────────────────────────

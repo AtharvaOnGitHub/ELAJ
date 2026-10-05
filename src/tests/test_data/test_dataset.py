@@ -150,6 +150,10 @@ def test_getitem_keys(two_study_setup):
         "platform_codes",
         "age",
         "disease_status",
+        # Added with the menstrual-phase head in October 2026. collate_fn
+        # reads it unconditionally, so a cell without it is not a missing
+        # feature but a crash.
+        "phase_label",
         "patient_id",
     }
 

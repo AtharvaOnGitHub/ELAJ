@@ -74,7 +74,17 @@ class TestTrainAndEvalAgree:
         for seed in range(80):
             bn(*study_batch(3, 256, shift=7.0, scale=2.0, seed=seed))
 
-        x, ids = study_batch(3, 256, shift=7.0, scale=2.0, seed=999)
+        # 4,096 rows for the comparison batch, not 256, and the reason is
+        # arithmetic rather than taste. Train mode normalises by THIS BATCH's
+        # statistics and eval mode by the running estimate, so the two can
+        # only agree to within the sampling noise of the smaller sample. At
+        # 256 rows and scale 2.0 the standard error of the mean is
+        # 2/sqrt(256) = 0.125, which is a normalised offset around 0.06 per
+        # feature before the running estimate's own noise is added; this test
+        # failed at atol 0.1 on differences of 0.13, which is that noise and
+        # not a defect. At 4,096 rows the same term is 0.016, so 0.1 has real
+        # margin and the assertion tests what it says it tests.
+        x, ids = study_batch(3, 4096, shift=7.0, scale=2.0, seed=999)
         trained = bn(x, ids)
         bn.eval()
         evaluated = bn(x, ids)

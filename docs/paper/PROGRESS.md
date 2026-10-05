@@ -202,6 +202,18 @@ stands. Scoring it would make it comparable. Worth doing **only if the paper
 carries a "before the token fix" row**, which is a writing decision and not
 yet made. `c1_baselines` is needed regardless and sits in §2.
 
+**Whether single-study batches handicap the adversary.** They do not, and
+scGPT's source settles it rather than merely permitting it. Every layer of a
+DAB discriminator is row-wise, softmax cross entropy computes all eleven
+logits per cell so the K-way contrast is inside one row, and there is no
+BatchNorm in the module to confound a statistic with the label. scGPT's own
+DAB is trained on single-study batches and their encoder REQUIRES them:
+DSBN selects its normaliser with `int(batch_labels[0].item())`, enforced by
+`per_seq_batch_sample = True` and `SubsetsBatchSampler`. EVIDENCE 7l.
+ECS is the only term in either model that reads cells in pairs, so it is the
+only one whose behaviour depends on batch composition. Do not reopen this for
+DAB.
+
 **The bf16 precision question.** Log round-trip error 0.76% to 1.21%, raw
 counts 0% to 0.27%, against Poisson shot noise of 1.8% to 10%. The noise
 floor dominates, so the number format is not the bottleneck. Parked.

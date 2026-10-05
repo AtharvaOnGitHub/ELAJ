@@ -21,6 +21,15 @@ from scripts.sweep_architecture import (
 def cfg():
     config = ModelConfig()
     config.n_groups = 44
+    # The sweep's `base` arm is "exactly what the --run config builds today",
+    # and every v-series and m-series config sets cls+pool8, which is the
+    # nine tokens per group the arm descriptions are written against. A bare
+    # ModelConfig defaults to `cls`, one token, which made `base` narrower
+    # than the arm that exists to narrow it: the pool4 test read 5 < 1.
+    # The GROUP readout only. Setting the aggregation one too would make an
+    # aggregation arm that asks for cls+pool8 identical to base, and three
+    # tests exist to check that no arm is a no-op.
+    config.group_encoder.readout = "cls+pool8"
     return config
 
 

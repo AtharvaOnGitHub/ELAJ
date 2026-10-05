@@ -323,8 +323,17 @@ class TestCompositeLoss:
             out = comp(output, batch, current_step=0, total_steps=100)
             contributions.append(float(out["total"] - out["elbo"])
                                  / float(out["dab"]))
+        # rel 1e-4, not 1e-6, and FLOAT32 IS THE REASON RATHER THAN THE
+        # MODEL. `total - elbo` subtracts two numbers of similar size to
+        # recover a much smaller one: elbo is of order a few units and the dab
+        # contribution is a few hundredths, so float32's 1.2e-7 relative
+        # resolution on the operands becomes a relative error of order 1e-5 on
+        # the difference. This read 0.10000138 against 0.09999927 on the HPC,
+        # a relative gap of 2.1e-5, which is arithmetic and not a weighting
+        # bug. 1e-6 was below what the subtraction can resolve and the test
+        # could only pass by luck.
         assert contributions[1] == pytest.approx(2.0 * contributions[0],
-                                                 rel=1e-6)
+                                                 rel=1e-4)
 
     def test_total_is_scalar_finite(self):
         comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0)
@@ -375,8 +384,12 @@ class TestECSInComposite:
                                  w_ecs=0.5)
         a = base(mo, batch, current_step=0, total_steps=100)
         b = weighted(mo, batch, current_step=0, total_steps=100)
+        # rel 1e-3 for the same float32 reason as
+        # test_gene_count_changes_the_weight_the_encoder_feels above: this
+        # recovers a hundredth from the difference of two elbos of order a
+        # few units. It read a relative gap of 1.3e-4 on the HPC.
         assert float(b["elbo"] - a["elbo"]) == pytest.approx(
-            0.5 * float(b["ecs"]) / G_MEAS, rel=1e-5)
+            0.5 * float(b["ecs"]) / G_MEAS, rel=1e-3)
 
     def test_buffer_off_by_default_so_pairs_are_within_batch(self):
         """One study per batch, no buffer, so every pair is same-study. That

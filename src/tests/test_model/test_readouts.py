@@ -219,8 +219,12 @@ class TestFactory:
         assert readout.n_summary(N_CLS) == N_CLS + len(OPERATOR_SETS["pool8"]())
 
     def test_an_unknown_part_is_refused(self):
+        """`pool16` used to be the example here and became a real operator
+        set for the group sweep's `grp_pool16` arm, so the test was asserting
+        that a supported readout is unsupported. The refusal itself is
+        intact; only the example was stale."""
         with pytest.raises(ValueError, match="readout part"):
-            build_readout("cls+pool16")
+            build_readout("cls+pool32")
 
     def test_an_empty_spec_is_refused(self):
         with pytest.raises(ValueError, match="empty"):

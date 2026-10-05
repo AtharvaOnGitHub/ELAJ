@@ -1,6 +1,6 @@
 # What is left
 
-**5 October 2026. 7 days to the 12 October deadline.**
+**6 October 2026. 6 days to the 12 October deadline.**
 
 A checklist, and only that. Nothing finished goes here: provenance to
 [`PROGRESS.md`](PROGRESS.md), findings to [`EVIDENCE.md`](EVIDENCE.md),
@@ -74,11 +74,17 @@ and it comes before any scoring pass.
 
 ## Start now, no GPU
 
-- [ ] **Run the torch test suite on the HPC.** `pytest src/tests -q`. The
-      laptop has no torch, so 58 tests skip there, and the new ones are all
-      in that 58: ECS's sign, the latent buffer, the adversary's shape, and
-      `loss_state` surviving a resume. Nothing should be queued before this
-      passes.
+- [ ] **Re-run the torch test suite on the HPC**, from `src` and not from the
+      repo root, or eight tissue-hierarchy fixtures fail on a relative path:
+
+          cd /rds/homes/a/axw1008/axw1008/src && python -m pytest tests -q
+
+      First run found 16 failures and 31 errors, one of them from this
+      wave and the rest three weeks of rot in tests that only execute where
+      torch exists. All fixed; the point of the re-run is the 58 that skip on
+      the laptop, which is where ECS's sign, the latent buffer, the
+      adversary's shape and `loss_state` all live. **Nothing is queued before
+      this is green.**
 - [ ] **Licence audit (R3).** Per study: licence, may processed data be
       redistributed, citation requirement. Accessions and pasted Data
       Availability statements are in `data_collation/Final 13.xlsx`, which

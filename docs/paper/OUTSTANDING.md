@@ -8,6 +8,39 @@ claims and schedule to [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md).
 
 ---
 
+## Critical path
+
+```
+m4_edge_starved ──┐
+  (~5 Oct +14 h)  │
+                  ├──► score, 3 h each ──► THE FORK ──┬──► ablation queue, 8-12 Oct
+m4_tight16 ───────┘                        (7 Oct)    ├──► Fig 4 and Fig 5
+  (~7 Oct)                                            └──► PUBLICATION_PLAN §0,
+                                                            then the introduction
+```
+
+Two cards are committed to the two runs, so nothing on this chain can start
+earlier. Scoring an arm needs the arm; the fork needs both scores; the queue
+and the figures need the fork.
+
+Everything under **Start now** is off this chain and gates the writing
+instead:
+
+| item | gates | gated by |
+|---|---|---|
+| per-split scoring | quoting any number without a caveat | nothing |
+| `PUBLICATION_PLAN` §0 | the introduction | nothing |
+| figure list | the figure day | nothing |
+| Methods draft | — | nothing; model subsection moves at the fork |
+| licence audit | **submission** | nothing |
+| intersection vocabulary | nothing this round | nothing |
+
+**The single point of failure is `m4_tight16` landing on 7 October.** If it
+slips or dies, the fork resolves on `m3_study_raw` plus `m4_edge_starved`
+alone, which is the third row of the fork table.
+
+---
+
 ## Start now, no GPU
 
 - [ ] **Per-split scoring in `validate_latent`.** `validation.csv` pools val

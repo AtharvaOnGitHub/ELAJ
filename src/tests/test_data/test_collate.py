@@ -8,7 +8,9 @@ import pytest
 torch = pytest.importorskip("torch", reason="torch not installed; skipping collate tests")
 
 from endo_model.data.collate import collate_fn, make_collate_fn
-from endo_model.data.constants import DNS_SENTINEL, N_PLATFORM_CODES
+from endo_model.data.constants import (
+    DNS_SENTINEL, N_PLATFORM_CODES, N_TISSUE_LEVELS,
+)
 from endo_model.data.vocabulary import GeneVocabulary, generate_synthetic_vocabulary
 
 
@@ -23,21 +25,31 @@ def vocab():
     return GeneVocabulary.from_dict(raw)
 
 
-def make_cell(vocab: GeneVocabulary, study_id: int = 0, dns_fraction: float = 0.2, seed: int = 0):
-    """Create a synthetic per-cell dict as returned by EndometriosisDataset.__getitem__."""
-    rng = np.random.default_rng(seed)
-    counts = rng.integers(0, 50, size=vocab.vocab_size).astype(np.float32)
-    # Mark some genes as DNS
-    n_dns = int(vocab.vocab_size * dns_fraction)
-    dns_idxs = rng.choice(vocab.vocab_size, size=n_dns, replace=False)
-    counts[dns_idxs] = float(DNS_SENTINEL)
+def make_cell(vocab: GeneVocabulary, study_id: int = 0, dns_fraction: float = 0.2,
+              seed: int = 0, counts=None, age: float = 34.5):
+    """Create a synthetic per-cell dict as returned by EndometriosisDataset.__getitem__.
+
+    THE ONLY PLACE IN THIS MODULE THAT SPELLS OUT A CELL, and that is the
+    point. Two tests used to build the dict inline, so when `collate_fn`
+    began reading `phase_label` there were three copies to update and only
+    one of them was. `counts` and `age` are overridable precisely so a test
+    that cares about a particular count vector does not need its own copy of
+    the contract.
+    """
+    if counts is None:
+        rng = np.random.default_rng(seed)
+        counts = rng.integers(0, 50, size=vocab.vocab_size).astype(np.float32)
+        # Mark some genes as DNS
+        n_dns = int(vocab.vocab_size * dns_fraction)
+        dns_idxs = rng.choice(vocab.vocab_size, size=n_dns, replace=False)
+        counts[dns_idxs] = float(DNS_SENTINEL)
 
     return {
         "counts": counts,
         "study_id": study_id,
         "tissue_levels": np.array([0, 1, 2, 3], dtype=np.int64),
         "platform_codes": np.array([1, 2, 1, 1], dtype=np.int64),
-        "age": 34.5,
+        "age": age,
         "disease_status": 0,
         # -1 is the value seven studies of eleven carry, because they have no
         # harmonised menstrual phase. Absent here until October 2026, which
@@ -48,6 +60,41 @@ def make_cell(vocab: GeneVocabulary, study_id: int = 0, dns_fraction: float = 0.
         "phase_label": -1,
         "patient_id": f"P{seed:04d}",
     }
+
+
+def test_make_cell_matches_the_dataset_contract(vocab):
+    """`make_cell` stands in for `CellTable.cell`, so their keys must agree.
+
+    THE TEST THAT WOULD HAVE CAUGHT `phase_label`. The dataset gained the key
+    with the menstrual-phase head, `collate_fn` began reading it
+    unconditionally, and this module's factory did not supply it: twenty-nine
+    tests across two files ERRORED with a KeyError, which reads as a broken
+    test rather than a stale fixture. Compared against the real method rather
+    than a hardcoded list, so the next key added to the dataset fails here,
+    once, with a message that names it.
+
+    A stub panel because only the key set is under test; `panel.counts` is
+    `StudyPanel`'s business and is covered in test_dataset.py.
+    """
+    from endo_model.data.dataset import CellTable
+
+    class _Panel:
+        def counts(self, row):
+            return np.zeros(vocab.vocab_size, dtype=np.float32)
+
+    table = CellTable()
+    table.panels = [_Panel()]
+    table.panel_index = np.zeros(1, np.int32)
+    table.panel_row = np.zeros(1, np.int64)
+    table.study_id = np.zeros(1, np.int64)
+    table.tissue_levels = np.zeros((1, N_TISSUE_LEVELS), np.int64)
+    table.platform_codes = np.zeros((1, N_PLATFORM_CODES), np.int64)
+    table.age = np.zeros(1, np.float64)
+    table.disease_status = np.zeros(1, np.int64)
+    table.phase_label = np.full(1, -1, np.int64)
+    table.patient_id = np.array(["P0"], dtype=object)
+
+    assert set(table.cell(0)) == set(make_cell(vocab))
 
 
 @pytest.fixture()
@@ -156,16 +203,7 @@ def test_library_size_excludes_dns(vocab):
     counts[1] = 5.0
     counts[2] = 0.0
     # All other genes are DNS
-    cell = {
-        "counts": counts,
-        "study_id": 0,
-        "tissue_levels": np.zeros(4, dtype=np.int64),
-        "platform_codes": np.zeros(N_PLATFORM_CODES, dtype=np.int64),
-        "age": 30.0,
-        "disease_status": 0,
-        "patient_id": "P0",
-    }
-    batch = collate_fn([cell], vocab)
+    batch = collate_fn([make_cell(vocab, counts=counts, age=30.0)], vocab)
     # Library size = 10 + 5 + 0 = 15; DNS positions contribute 0
     assert batch["library_size"][0].item() == pytest.approx(15.0)
 
@@ -173,16 +211,8 @@ def test_library_size_excludes_dns(vocab):
 def test_library_size_all_dns(vocab):
     """A cell with all genes DNS should have library_size = 0."""
     counts = np.full(vocab.vocab_size, float(DNS_SENTINEL), dtype=np.float32)
-    cell = {
-        "counts": counts,
-        "study_id": 0,
-        "tissue_levels": np.zeros(4, dtype=np.int64),
-        "platform_codes": np.zeros(N_PLATFORM_CODES, dtype=np.int64),
-        "age": float("nan"),
-        "disease_status": 0,
-        "patient_id": "P0",
-    }
-    batch = collate_fn([cell], vocab)
+    batch = collate_fn(
+        [make_cell(vocab, counts=counts, age=float("nan"))], vocab)
     assert batch["library_size"][0].item() == 0.0
 
 

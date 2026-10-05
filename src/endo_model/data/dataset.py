@@ -43,6 +43,7 @@ from endo_model.data.constants import (
     N_TISSUE_LEVELS,
     PHASE_UNLABELLED,
 )
+from endo_model.data.donor_identity import DonorAliases
 from endo_model.data.panel import StudyPanel
 from endo_model.data.splits import StudyPatients, assign_splits, log_coverage
 from endo_model.data.study_platform import StudyPlatform
@@ -64,6 +65,10 @@ _TISSUE_LEVEL_COLUMNS = (
 # something the decoder's conditioning actually distinguishes. microsite would
 # split peritoneum four ways over a handful of fonseca_2023 donors.
 _TISSUE_STRATIFY_LEVEL = 2
+
+# obs column naming the material a cell came from. Two donor ids that
+# share one are the same person; see data/donor_identity.py.
+_SAMPLE_COLUMN = "source_sample_id"
 
 
 def _load_tissue_names(path: Optional[str]) -> dict[int, str]:
@@ -434,6 +439,10 @@ class LoadedCorpus:
     """
     studies: list[_LoadedStudy]
     split_assignments: dict[str, str]
+    # Keyed by CANONICAL donor id, so every per-cell lookup must go
+    # through `aliases` first. Reading a raw patient_id against this
+    # would miss and silently default the cell to train.
+    aliases: DonorAliases = field(default_factory=DonorAliases)
 
     @property
     def n_cells(self) -> int:
@@ -547,6 +556,23 @@ def load_corpus(
             phase=_phase_label_codes(adata.obs, name),
         ))
 
+    # ── One person, one donor id ──────────────────────────────────────────
+    # CELLxGENE mints a donor UUID per dataset, so garcia_alonso_2021_b's
+    # fifteen people carried fifteen ids that none of _a's fifteen matched,
+    # and the splitter assigned the same person twice. Seven landed on
+    # opposite sides of the wall. Resolving aliases BEFORE the split means a
+    # person is assigned once and cannot be in train under one id and held
+    # out under another; cells that a conflict would have orphaned simply
+    # follow their donor. See data/donor_identity.py.
+    aliases = DonorAliases()
+    for s in studies:
+        samples = (s.adata.obs[_SAMPLE_COLUMN].astype(str).tolist()
+                   if _SAMPLE_COLUMN in s.adata.obs.columns else None)
+        aliases.add_study(s.patients, samples)
+    logger.info(aliases.describe())
+    for name, ids in aliases.aliased().items():
+        logger.info("  one donor %r is also known as %s", name, ids[1:])
+
     # Build patient -> split assignment, stratified by study AND by tissue.
     # Column 2 of the level matrix is tissue_type: the level where
     # endometrium and myometrium separate, and the finest one with enough
@@ -554,7 +580,8 @@ def load_corpus(
     split_assignments, coverage = assign_splits(
         [
             StudyPatients(
-                study_id=s.study_id, name=s.name, patients=s.patients,
+                study_id=s.study_id, name=s.name,
+                patients=aliases.resolve_all(s.patients),
                 tissue_codes=s.tissue[:, _TISSUE_STRATIFY_LEVEL],
             )
             for s in studies
@@ -571,7 +598,9 @@ def load_corpus(
         sum(1 for v in split_assignments.values() if v == "val"),
         sum(1 for v in split_assignments.values() if v == "test"),
     )
-    return LoadedCorpus(studies=studies, split_assignments=split_assignments)
+    return LoadedCorpus(studies=studies,
+                        split_assignments=split_assignments,
+                        aliases=aliases)
 
 
 # ---------------------------------------------------------------------------
@@ -720,9 +749,12 @@ class EndometriosisDataset:
             local_idx_arr = np.asarray(study_local_idxs, dtype=np.int64)
 
             # Select cells belonging to the requested split
+            # Through the aliases: split_assignments is keyed by canonical
+            # donor, and a raw id would miss and default the cell to train.
             cell_indices = [
                 i for i, pid in enumerate(study.patients)
-                if loaded.split_assignments.get(pid, "train") == split
+                if loaded.split_assignments.get(
+                    loaded.aliases.canonical(pid), "train") == split
             ]
             # Disease filter before the subsample cap, so the cap applies to
             # the cells actually being kept rather than to a pool the filter
@@ -786,8 +818,13 @@ class EndometriosisDataset:
                 "age": np.asarray(study.age[cell_idx_arr], dtype=np.float64),
                 "disease_status": np.asarray(study.disease[cell_idx_arr], dtype=np.int64),
                 "phase_label": np.asarray(study.phase[cell_idx_arr], dtype=np.int64),
+                # CANONICAL, not the study's own id. Every cross-donor
+                # metric excludes a cell's own donor's neighbours, and two
+                # ids for one person would let that person's cells count as
+                # cross-donor against each other.
                 "patient_id": np.asarray(
-                    [study.patients[i] for i in cell_indices], dtype=object),
+                    [loaded.aliases.canonical(study.patients[i])
+                     for i in cell_indices], dtype=object),
             }))
         return CellTable.build(blocks)
 

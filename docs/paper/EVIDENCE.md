@@ -846,6 +846,69 @@ each later pass measures.
 
 ---
 
+## 7j. `m3_study_raw`: the first clean ELAJ column, and what it does not show
+
+`outputs/m_series/m3_study_raw`, scored by job 56163132 on the same 382,464
+held-out cells as `v1_baselines`, same k, same chance definitions. The split
+guard verified the partition, so this column is not subject to the defect
+that withdrew `c1_combined`.
+
+**The arm.** d_z 24 (24 Gaussian, no circular), `d_study` 16 conditioning the
+decoder, `gene_mask_target` 12,500, `w_cls` 40 on menstrual phase, DAB
+coefficient 3.5, DSBN with per-study running statistics and an identity-
+initialised affine, CCE off.
+
+| | PCA-16 | scVI | scANVI | `m3_study_raw` |
+|---|---:|---:|---:|---:|
+| cross-donor menstrual phase ↑ | 0.6477 | 0.7013 | 0.6903 | **0.7514** |
+| cross-donor cell family ↑ | **0.9866** | 0.9822 | 0.9835 | 0.9834 |
+| kNN menstrual phase ↑ | 0.8611 | 0.8645 | 0.8662 | **0.8825** |
+| kNN cell family ↑ | **0.9897** | 0.9870 | 0.9873 | 0.9874 |
+| fine cell type, kNN ↑ | 0.5091 | 0.5303 | **0.5323** | 0.5221 |
+| disease stage, cross-donor ↑ | 0.1317 | 0.3317 | **0.3390** | 0.2815 † |
+| **patient kNN ↓** | 0.6628 | 0.6488 | 0.6507 | **0.6173** |
+| neighbours kept of 100, family | 51 | 50 | 49 | 53 |
+
+† p = 0.259. Not distinguishable from no signal. `EndometriosisGrade`
+cross-donor is −0.0017 at p = 0.318, which every method also fails.
+
+**What is real.** Cross-donor menstrual phase 0.7514 against scVI's 0.7013,
+at p = 0.005 against a permutation null of 0.12. It is the hardest metric in
+the table and the paper's target.
+
+**WHAT THIS COLUMN IS NOT.** Reading it as "ELAJ beats the baselines" is
+wrong in three ways, and the third is the one that matters.
+
+*It does not beat them generally.* Cell family is below PCA, fine cell type
+is below scANVI, and disease stage is both below scANVI and not significant.
+One metric is ahead.
+
+*The checkpoint was selected on val, and val is half of what was scored.*
+Selection used `val_nb` alone, never phase or donor identity, so the
+optimism should be small, but the baselines had no selection step at all. A
+test-only re-score is needed before the number is quotable.
+
+*AND PATIENT kNN IS A REGRESSION AGAINST ELAJ'S OWN PRIOR RESULT.* 0.6173
+edges the baselines by 0.03, which is not the comparison that matters. At
+d_z 16 ELAJ reached **≤ 0.3674** (SCOREBOARD §2, a ceiling because the
+contamination there pushes patient kNN up). Neighbours kept of 100 tells the
+same story without any withdrawal caveat: **67 at d_z 16, 53 here, 49 to 51
+for the baselines.** The latent has drifted back toward the baselines on the
+one axis ELAJ ever won by a margin.
+
+**The UMAPs are not a misreading.** 62% of a cell's thirty nearest
+neighbours being its own donor IS a donor-structured embedding, and the
+picture showing one study per island is the same fact drawn. A 2D projection
+exaggerates separation, but it is not inventing it here, and this field
+reports UMAPs as a matter of course. The metric and the figure agree.
+
+**What it leaves open.** The combination that has never been run is d_z 16
+WITH the m-series fixes. The 0.3674 column came from a d_z 16 model that had
+no decoder conditioning, no gene masking, broken loss scaling and two DSBN
+defects, and it paid for its donor-blindness in biology: cross-donor cell
+family 0.9115 against 0.9834 here. Whether that cost survives `d_study` is
+the open question, and it is the one worth the remaining compute.
+
 ## 8. Pending
 
 | | what it will settle | expected |

@@ -275,6 +275,48 @@ ELAJ column reads *not scored*.
 
 ---
 
+## 5b. The m-series column, scored 5 October 2026
+
+`m3_study_raw`, job 56163132, on the same 382,464 held-out cells as the
+baselines in §2. Split verified by the fingerprint guard, so this one is not
+withdrawable the way `c1_combined` was. Full arm description and the
+negative results in EVIDENCE §7j.
+
+| | PCA-16 | scVI | scANVI | `m3_study_raw` |
+|---|---:|---:|---:|---:|
+| cross-donor menstrual phase ↑ | 0.6477 | 0.7013 | 0.6903 | **0.7514** |
+| cross-donor cell family ↑ | **0.9866** | 0.9822 | 0.9835 | 0.9834 |
+| kNN menstrual phase ↑ | 0.8611 | 0.8645 | 0.8662 | **0.8825** |
+| kNN cell family ↑ | **0.9897** | 0.9870 | 0.9873 | 0.9874 |
+| fine cell type, kNN ↑ | 0.5091 | 0.5303 | **0.5323** | 0.5221 |
+| **patient kNN ↓** | 0.6628 | 0.6488 | 0.6507 | **0.6173** |
+| neighbours kept of 100 | 51 | 50 | 49 | 53 |
+
+**One metric ahead, not a sweep.** Cross-donor menstrual phase is genuinely
+ahead of the best baseline by 0.05 at p = 0.005. Cell family, fine cell type
+and disease stage are all behind. The column is a result, not a win.
+
+**Patient kNN is the problem, and it is a regression against ELAJ itself.**
+0.6173 beats the baselines by 0.03, which is a margin of no consequence
+beside §2's d_z 16 figure of **≤ 0.3674**. Neighbours kept of 100 says it
+without the withdrawal caveat attached to that figure: 67 at d_z 16, 53
+here, 49 to 51 for the baselines. Donor-blindness is the one axis ELAJ ever
+won by a wide margin and this column has given most of it back.
+
+**The UMAPs agree with the metric.** Roughly 62% of a cell's thirty nearest
+neighbours come from its own donor, which is what one-study-per-island looks
+like when it is drawn. The figure is not a projection artefact to be argued
+away: this field reports UMAPs, and a fragmented one is read as a model that
+has not corrected batch effects, because that is what it is.
+
+**Caveat on provenance.** The checkpoint was selected on `val_nb`, and val is
+half of the scored cells. Selection never touched phase or donor identity, so
+the optimism should be small, but the baselines had no selection step. A
+test-only re-score settles it and should be run before anything here is
+quoted.
+
+---
+
 ## 6. Reference only: superseded corpora
 
 > **REMOVE BEFORE SUBMISSION.** Nothing in this section can appear in the

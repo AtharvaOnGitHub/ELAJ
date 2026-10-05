@@ -909,6 +909,44 @@ defects, and it paid for its donor-blindness in biology: cross-donor cell
 family 0.9115 against 0.9834 here. Whether that cost survives `d_study` is
 the open question, and it is the one worth the remaining compute.
 
+## 7k. Three things the m-series settled
+
+Each of these cost a wave and is a result rather than a repair. The repairs
+are in PROGRESS.md.
+
+**More adversarial pressure is worse, not better.** `m2_masked` and
+`m2_masked_hard` differed in `lambda_dab` alone, same mask, same `w_cls`,
+same seed. Coefficient 210 gave `study_knn` 0.8650 at epoch 2 against
+coefficient 70's 0.8123, `patient_knn` 0.5510 against 0.5244, and the gap
+widened from 0.008 at epoch 1 to 0.053 at epoch 2. Tripling the coefficient
+also bought only 14% more gradient, 0.3285x nb to 0.3751x: gradient reversal
+is linear in lambda for a FIXED discriminator, and ours trains alongside and
+adapts. The encoder learns to conceal study identity from the classifier
+while leaving it in neighbour distance.
+
+**Conditioning the decoder on study did not work, and the reason is
+measurable.** On `m3_study_raw`, telling the decoder a study the cell is not
+from costs 0.0149 nats per gene; decoding from another cell's latent costs
+0.1118. A ratio of 7.5. The study embedding is nearly unused, because at
+d_z 24 the latent carries study rent-free and the decoder reads it there.
+Conditioning removes the decoder's NEED for study in the latent; it does not
+remove it from the latent, and nothing else was charging for it.
+
+**Latent width is what traded donor-blindness against biology.** d_z was 16
+through r8 and c1 and became 32 in the v series and 24 in the m series.
+
+| | d_z | patient kNN ↓ | kept /100 | cross-donor family ↑ |
+|---|---:|---:|---:|---:|
+| c1 era | 16 | ≤0.3674 | 67 | 0.9115 |
+| `m3_study_raw` | 24 | 0.6173 | 53 | 0.9834 |
+| baselines | — | 0.6488–0.6628 | 49–51 | 0.9822–0.9866 |
+
+`free_bits` 0.25 per dimension has never changed, so the rent-free allowance
+is 4.00 nats at d_z 16 and 6.00 at 24. Naming one of 269 donors costs
+ln(269) = 5.59 nats; one of 11 studies costs ln(11) = 2.40. The allowance
+crosses the donor threshold exactly where the behaviour changes.
+
+
 ## 8. Pending
 
 | | what it will settle | expected |

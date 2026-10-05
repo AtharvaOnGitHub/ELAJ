@@ -215,9 +215,13 @@ def main() -> None:
     # No try/except. A failure here used to leave every sample "unassigned"
     # in both studies, which compares EQUAL and reports no leakage: the
     # quietest possible way to answer the question wrongly.
+    # Fractions and seed live on data_cfg.splits, and the seed is the SPLIT's
+    # own, not the experiment's: dataset.py passes data_cfg.splits.seed, so
+    # using exp_cfg.seed here would rebuild a different wall and report
+    # disagreements that the trainer never made.
     assignments, _ = assign_splits(
-        per_study, data_cfg.val_fraction, data_cfg.test_fraction,
-        exp_cfg.seed)
+        per_study, data_cfg.splits.val_fraction, data_cfg.splits.test_fraction,
+        data_cfg.splits.seed)
     counts: dict[str, int] = {}
     for split in assignments.values():
         counts[split] = counts.get(split, 0) + 1

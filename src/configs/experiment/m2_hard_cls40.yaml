@@ -166,3 +166,16 @@ overrides:
   model.tokens.value_part: gene_direction
   model.group_encoder.readout: cls+pool8
   model.aggregation_encoder.readout: cls+pool8
+
+  # ── PINNED, OCTOBER 2026: THE ADVERSARY THIS ARM ACTUALLY RAN ────────────
+  # The base model config now carries scGPT's discriminator shape (three
+  # 256-unit LeakyReLU layers with LayerNorm, no dropout). This arm ran
+  # against one 64-unit ReLU layer with dropout 0.1, and its numbers mean
+  # nothing against any other shape. Pinned so a re-run or a resume
+  # reproduces the model that produced the scoreboard column rather than
+  # silently inheriting the new one. See configs/experiment/m5_adversary.yaml
+  # for the arm that changes it on purpose.
+  model.dab.hidden_dim: 64
+  model.dab.n_layers: 2
+  model.dab.normalise: false
+  model.dab.dropout: 0.1

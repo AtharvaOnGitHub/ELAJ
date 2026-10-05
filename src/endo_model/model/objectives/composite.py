@@ -20,7 +20,9 @@ from torch import Tensor
 
 from .adversarial import DABClassifier
 from .cce_embedding import cce_embedding
+from .elastic_similarity import ElasticCellSimilarity
 from .label_classification import MaskedCrossEntropy, masked_correct
+from .latent_buffer import LatentBuffer
 from .contrastive import InfoNCELoss
 from .kl_divergence import GaussianKLLoss, PowerSphericalKLLoss
 from .reconstruction import NegativeBinomialLoss
@@ -55,13 +57,18 @@ class CompositeLoss(nn.Module):
         w_dab: float = 1.0,
         w_cce: float = 0.0,
         w_cls: float = 0.0,
+        w_ecs: float = 0.0,
         cls_label_smoothing: float = 0.0,
         lambda_dab_max: float = 1.0,
         cce_temperature: float = 0.1,
         cce_block_normalise: bool = False,
         cce_circular_weight: float = 1.0,
-        dab_hidden_dim: int = 64,
-        dab_dropout: float = 0.1,
+        dab_hidden_dim: int = 256,
+        dab_dropout: float = 0.0,
+        dab_n_layers: int = 3,
+        dab_normalise: bool = True,
+        ecs_threshold: float = 0.8,
+        ecs_buffer_batches: int = 0,
         beta_max: float = 1.0,
         warmup_fraction: float = 0.20,
         free_bits: float = 0.0,
@@ -80,6 +87,7 @@ class CompositeLoss(nn.Module):
         self.w_dab = w_dab
         self.w_cce = w_cce
         self.w_cls = w_cls
+        self.w_ecs = w_ecs
         # Built whatever the weight, so a run with w_cls 0 still
         # REPORTS phase accuracy without optimising for it. That is
         # the honest control for an arm that does optimise for it.
@@ -98,8 +106,17 @@ class CompositeLoss(nn.Module):
             n_studies=n_studies,
             hidden_dim=dab_hidden_dim,
             dropout=dab_dropout,
+            n_layers=dab_n_layers,
+            normalise=dab_normalise,
         )
         self.cce = InfoNCELoss(temperature=cce_temperature) if w_cce > 0.0 else None
+        # Built whatever the weight, for the same reason the phase head is:
+        # a run with w_ecs 0 still REPORTS the pair geometry it is not
+        # optimising, which is the control for an arm that optimises it.
+        self.ecs = ElasticCellSimilarity(threshold=ecs_threshold)
+        # Only ECS reads this. Every other term here is row-wise, so no other
+        # term can tell which cells shared a batch. See latent_buffer.py.
+        self.ecs_buffer = LatentBuffer(capacity=ecs_buffer_batches)
         self.cce_block_normalise = cce_block_normalise
         self.cce_circular_weight = cce_circular_weight
         # Printed once, from the first batch, because n_measured is not known
@@ -121,11 +138,13 @@ class CompositeLoss(nn.Module):
         self._weights_reported = True
         logger.info(
             "Objective weights per gene, against reconstruction 1.0: "
-            "kl_gauss %.4g, kl_circ %.4g, cce %.4g, dab %.4g "
-            "(lambda_dab_max %.4g x w_dab %.4g); %d measured genes",
-            self.w_kl_gauss, self.w_kl_circ, self.w_cce,
+            "kl_gauss %.4g, kl_circ %.4g, cce %.4g, ecs %.4g, dab %.4g "
+            "(lambda_dab_max %.4g x w_dab %.4g); %d measured genes; "
+            "ecs threshold %.3g, buffer %d batches",
+            self.w_kl_gauss, self.w_kl_circ, self.w_cce, self.w_ecs,
             self.lambda_dab_max * self.w_dab,
             self.lambda_dab_max, self.w_dab, n_measured,
+            self.ecs.threshold, self.ecs_buffer.capacity,
         )
 
     def _embedding(self, model_output: dict[str, Tensor]) -> Tensor:
@@ -142,6 +161,50 @@ class CompositeLoss(nn.Module):
             block_normalise=self.cce_block_normalise,
             circular_weight=self.cce_circular_weight,
         )
+
+    def train(self, mode: bool = True) -> "CompositeLoss":
+        """Switch mode, and drop the ECS reference buffer when it changes.
+
+        Two reasons the buffer must not cross the boundary. A validation
+        embedding must never become a reference point for a training step,
+        and a training embedding must never become one for a validation
+        measurement; and `val_ecs` has to mean the same thing every epoch,
+        which it cannot if it depends on how many batches preceded it.
+
+        This also puts the module's dropout in the right mode for the first
+        time. Nothing ever called `eval()` on CompositeLoss, so the DAB
+        classifier's dropout was active during validation in every run to
+        date — which inflated `val_dab` by handicapping the classifier only
+        on the validation side. It is 0 by default now, so the effect is
+        gone forward as well as fixed.
+        """
+        changed = mode != self.training
+        super().train(mode)
+        if changed:
+            self.ecs_buffer.clear()
+        return self
+
+    def _ecs_loss(self, model_output: dict[str, Tensor],
+                  batch) -> tuple[Tensor, int]:
+        """ECS over this batch's pairs, and how many studies the buffer holds.
+
+        The reference is read BEFORE this batch is pushed, so the current
+        cells appear once — as the left side of the pair matrix and its
+        leading block — and not twice.
+
+        Nothing is buffered outside training. During validation the reference
+        is None, so `val_ecs` is a within-batch number and comparable across
+        epochs.
+        """
+        embedding = self._embedding(model_output)
+        reference = self.ecs_buffer.reference() if self.training else None
+        loss = self.ecs(embedding, reference)
+        held = self.ecs_buffer.studies_held()
+        if self.training:
+            study_id = batch.get("study_id") if isinstance(batch, dict) \
+                else getattr(batch, "study_id", None)
+            self.ecs_buffer.push(embedding, study_id)
+        return loss, held
 
     def _phase_loss(self, model_output: dict[str, Tensor],
                     batch) -> tuple[Tensor, int]:
@@ -305,6 +368,14 @@ class CompositeLoss(nn.Module):
         cce_per_gene = cce_loss / n_measured
         dab_per_gene = dab_loss / n_measured
 
+        # ECS is a per-PAIR mean, so it is already a single bounded scalar in
+        # [0, 1] rather than a sum over genes or over latent dimensions. It
+        # takes the same division as the other per-cell terms for the same
+        # reason: it is a price on the latent's geometry, and it should be
+        # weighed against the reconstruction evidence in the batch.
+        ecs_loss, ecs_studies = self._ecs_loss(model_output, batch)
+        ecs_per_gene = ecs_loss / n_measured
+
         # The phase head is per-cell like `cce` and `dab`, so it takes
         # the same division. Without it a w_cls of 0.1 would be an
         # effective 1,400 and would flatten the reconstruction in one
@@ -318,6 +389,11 @@ class CompositeLoss(nn.Module):
             + beta_kl * self.w_kl_gauss * kl_gauss
             + beta_kl * self.w_kl_circ * kl_circ
             + self.w_cce * cce_per_gene
+            # In `elbo` and not beside `dab`, because this is a constraint on
+            # the latent rather than an adversary's own loss: it is priced
+            # against reconstruction the way the KL terms are, and it reaches
+            # the encoder directly rather than through a reversal.
+            + self.w_ecs * ecs_per_gene
         )
 
         # What backward() actually descends. The classifier has to be trained
@@ -333,6 +409,13 @@ class CompositeLoss(nn.Module):
             "beta_kl": torch.tensor(beta_kl),
             "dab": dab_loss,
             "cce": cce_loss,
+            "ecs": ecs_loss,
+            # How many studies the reference buffer held when this batch was
+            # scored, so 0 means every pair was same-study: either the buffer
+            # is off, or it is the first step of the epoch. That is a
+            # legitimate setting and a silent failure if it was not the one
+            # intended, which is why it is a column. See latent_buffer.py.
+            "ecs_studies": torch.tensor(float(ecs_studies)),
             # NOT detached: GradientBalance differentiates the terms it
             # reports, and a detached one is silently skipped.
             "cls": cls_loss,

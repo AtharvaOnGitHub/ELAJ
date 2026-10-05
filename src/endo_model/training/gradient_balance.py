@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # The order the report prints in: reconstruction first, because everything else
 # is read as a fraction of it.
-TERMS = ("nb", "kl_gauss", "kl_circ", "cce", "dab", "cls")
+TERMS = ("nb", "kl_gauss", "kl_circ", "cce", "ecs", "dab", "cls")
 
 
 class GradientBalance:
@@ -85,6 +85,11 @@ class GradientBalance:
             "kl_gauss": beta_kl * c.w_kl_gauss,
             "kl_circ": beta_kl * c.w_kl_circ,
             "cce": c.w_cce / max(n_measured, 1),
+            # ECS is the term whose right weight is least obvious, because
+            # it is a mean over pairs rather than a sum over anything. This
+            # report is the only place its pressure can be read against the
+            # others before an arm commits to a weight.
+            "ecs": getattr(c, "w_ecs", 0.0) / max(n_measured, 1),
             "dab": c.w_dab / max(n_measured, 1),
             # Per cell like cce and dab, so divided the same way. Its
             # absence from this report is why m1 ran two days with DAB

@@ -177,3 +177,49 @@ class TestRetiredModuleNames:
         CheckpointManager.load(str(path), model2, optimizer2)
         for k, v in model.state_dict().items():
             assert torch.equal(model2.state_dict()[k], v), k
+
+
+class TestLossStateSurvivesAResume:
+    """The study discriminator lives on CompositeLoss, not on the model, and
+    until October 2026 nothing saved it. The optimiser state WAS saved, and
+    the optimiser is built over both sets of parameters, so a resume
+    restored Adam's moments for an adversary that had just been
+    re-initialised at random. Every train_dab reading after a resume was a
+    measurement of a fresh classifier."""
+
+    def test_adversary_weights_are_written_to_the_checkpoint(self, tmp_path):
+        trainer, model, optimizer = _setup(3, 2, tmp_path)
+        trainer.fit()
+        path = sorted(tmp_path.glob("epoch_*.pt"))[-1]
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        assert "loss_state" in payload
+        assert any(k.startswith("dab.") for k in payload["loss_state"])
+
+    def test_resume_restores_them_exactly(self, tmp_path):
+        trainer, model, optimizer = _setup(3, 2, tmp_path)
+        trainer.fit()
+        path = sorted(tmp_path.glob("epoch_*.pt"))[-1]
+        trained = {k: v.clone() for k, v in trainer.composite_loss.state_dict().items()}
+
+        fresh, model2, optimizer2 = _setup(99, 2, tmp_path / "fresh")
+        # A different seed, so the fresh adversary cannot coincide with the
+        # trained one and a no-op load would fail this test.
+        assert not torch.equal(
+            fresh.composite_loss.state_dict()["dab.classifier.0.weight"],
+            trained["dab.classifier.0.weight"])
+        CheckpointManager.load(str(path), model2, optimizer2,
+                               loss=fresh.composite_loss)
+        for key, value in trained.items():
+            assert torch.equal(fresh.composite_loss.state_dict()[key], value), key
+
+    def test_a_checkpoint_without_loss_state_still_loads(self, tmp_path):
+        """Every v-series and m-series checkpoint predates the field, and a
+        resume of one must warn rather than fail."""
+        trainer, model, optimizer = _setup(3, 2, tmp_path)
+        path = tmp_path / "no_loss_state.pt"
+        torch.save({"epoch": 0, "step": 0, "val_loss": 1.0,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict()}, path)
+        fresh, model2, optimizer2 = _setup(4, 2, tmp_path / "fresh_no_ls")
+        CheckpointManager.load(str(path), model2, optimizer2,
+                               loss=fresh.composite_loss)

@@ -197,8 +197,15 @@ class TestCompositeLoss:
         # mu_gauss_norm is reported, not optimised. Trainer._record copies every
         # key here into metrics.csv, which is the only reason a diagnostic can
         # ride along in this dict at all.
+        #
+        # This set was stale: it predates the phase head, whose three keys
+        # have been returned since early October 2026. Nothing caught it
+        # because this whole module is skipped wherever torch is absent,
+        # which is the laptop the configs are written on.
         expected = {"elbo", "nb", "kl_gauss", "kl_circ", "beta_kl",
-                    "dab", "cce", "mu_gauss_norm", "total"}
+                    "dab", "cce", "ecs", "ecs_studies",
+                    "cls", "cls_cells", "cls_correct",
+                    "mu_gauss_norm", "total"}
         assert expected == set(out.keys())
 
     def test_mu_gauss_norm_is_reported_but_carries_no_gradient(self):
@@ -340,6 +347,80 @@ class TestCompositeLoss:
         out = comp(mo, batch, current_step=50, total_steps=100)
         out["total"].backward()
         assert mo["mu_gauss"].grad is not None
+
+
+# ── ECS inside the composite ────────────────────────────────────────────────
+
+class TestECSInComposite:
+    def test_reported_even_at_weight_zero(self):
+        """The control for an arm that optimises it. `ecs` is measured on
+        every run so the two can be compared on the same column, exactly as
+        the phase head is built whatever w_cls says."""
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_ecs=0.0)
+        out = comp(_make_model_output(torch.arange(G_MEAS)), _make_fake_batch(),
+                   current_step=0, total_steps=100)
+        assert 0.0 <= float(out["ecs"]) <= 1.0
+
+    def test_enters_elbo_linearly_and_per_gene(self):
+        """ECS is a price on the latent, so it is priced like the KL terms:
+        inside `elbo`, divided by the measured gene count, so that w_ecs
+        means what the config says it means."""
+        idxs = torch.arange(G_MEAS)
+        torch.manual_seed(0)
+        mo, batch = _make_model_output(idxs), _make_fake_batch()
+        torch.manual_seed(0)
+        base = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_ecs=0.0)
+        torch.manual_seed(0)
+        weighted = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0,
+                                 w_ecs=0.5)
+        a = base(mo, batch, current_step=0, total_steps=100)
+        b = weighted(mo, batch, current_step=0, total_steps=100)
+        assert float(b["elbo"] - a["elbo"]) == pytest.approx(
+            0.5 * float(b["ecs"]) / G_MEAS, rel=1e-5)
+
+    def test_buffer_off_by_default_so_pairs_are_within_batch(self):
+        """One study per batch, no buffer, so every pair is same-study. That
+        is the setting that cannot work against the adversary, and it has to
+        be the default."""
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_ecs=0.1)
+        out = comp(_make_model_output(torch.arange(G_MEAS)), _make_fake_batch(),
+                   current_step=0, total_steps=100)
+        assert comp.ecs_buffer.capacity == 0
+        assert float(out["ecs_studies"]) == 0.0
+
+    def test_buffer_fills_across_batches_in_training_mode(self):
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_ecs=0.1,
+                             ecs_buffer_batches=4)
+        comp.train()
+        idxs = torch.arange(G_MEAS)
+        for study in range(3):
+            batch = _make_fake_batch()
+            batch["study_id"] = torch.full((B,), study, dtype=torch.long)
+            out = comp(_make_model_output(idxs), batch,
+                       current_step=0, total_steps=100)
+        # Studies 0 and 1 are buffered by the time the third batch is scored;
+        # study 2 is the batch itself and is pushed afterwards.
+        assert float(out["ecs_studies"]) == 2.0
+
+    def test_buffer_is_dropped_when_the_mode_changes(self):
+        """A validation embedding must never become a reference point for a
+        training step, and `val_ecs` has to mean the same thing every epoch."""
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_ecs=0.1,
+                             ecs_buffer_batches=4)
+        comp.train()
+        comp(_make_model_output(torch.arange(G_MEAS)), _make_fake_batch(),
+             current_step=0, total_steps=100)
+        assert len(comp.ecs_buffer) > 0
+        comp.eval()
+        assert comp.ecs_buffer.reference() is None
+
+    def test_nothing_is_buffered_during_validation(self):
+        comp = CompositeLoss(N_STUDIES, D_GAUSS, N_CIRC, w_cce=0.0, w_ecs=0.1,
+                             ecs_buffer_batches=4)
+        comp.eval()
+        comp(_make_model_output(torch.arange(G_MEAS)), _make_fake_batch(),
+             current_step=0, total_steps=100)
+        assert comp.ecs_buffer.reference() is None
 
 
 # ── KL scale relative to the reconstruction term ─────────────────────────────

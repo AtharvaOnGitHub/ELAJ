@@ -177,6 +177,9 @@ class LossConfig:
     # Weight on the menstrual-phase classification head. 0 disables it,
     # which is what every run before October 2026 did implicitly.
     w_cls: float = 0.0
+    # Weight on Elastic Cell Similarity. 0 disables it, which is what every
+    # run before October 2026 did: the term did not exist.
+    w_ecs: float = 0.0
     free_bits: float = 0.0
 
     @classmethod
@@ -187,6 +190,7 @@ class LossConfig:
             w_kl_circ=float(d.get("w_kl_circ", d.get("w_kl_vmf", 1.0))),
             w_dab=float(d.get("w_dab", 1.0)),
             w_cls=float(d.get("w_cls", 0.0)),
+            w_ecs=float(d.get("w_ecs", 0.0)),
             free_bits=float(d.get("free_bits", 0.0)),
         )
 
@@ -198,16 +202,68 @@ class DABConfig:
     The DAB classifier receives gradient-reversed deterministic latent means
     and predicts study_id. The gradient reversal causes the encoder to be
     penalised for producing batch-discriminative representations.
+
+    The shape defaults changed in October 2026, from one 64-unit ReLU layer
+    with dropout to three 256-unit LeakyReLU layers with LayerNorm and none.
+    An adversary the encoder can beat without becoming study-invariant is
+    what every arm from r1 to m4 had. See objectives/adversarial.py.
+
+    A CONSEQUENCE TO CARRY FORWARD: a stronger classifier hands the encoder a
+    larger gradient at the same `lambda_dab`, so the value is not comparable
+    across that change. Re-read it off `GradientBalance` rather than reusing
+    an old arm's number.
     """
 
     lambda_dab: float = 1.0
-    hidden_dim: int = 64
+    hidden_dim: int = 256
+    # Total Linear layers, output layer included. 2 is one hidden layer,
+    # which is the pre-October shape.
+    n_layers: int = 3
+    normalise: bool = True
+    # 0, not 0.1. Dropout handicaps the classifier and the classifier being
+    # handicapped is the defect this is fixing.
+    dropout: float = 0.0
 
     @classmethod
     def from_dict(cls, d: dict) -> "DABConfig":
         return cls(
             lambda_dab=float(d.get("lambda_dab", 1.0)),
-            hidden_dim=int(d.get("hidden_dim", 64)),
+            hidden_dim=int(d.get("hidden_dim", 256)),
+            n_layers=int(d.get("n_layers", 3)),
+            normalise=bool(d.get("normalise", True)),
+            dropout=float(d.get("dropout", 0.0)),
+        )
+
+
+@dataclass
+class ECSConfig:
+    """Elastic Cell Similarity: a constraint on the latent's pair geometry.
+
+    Pushes every pair of cells' cosine similarity AWAY from `threshold`:
+    pairs above it are pulled together, pairs between 0 and it are driven
+    apart. An anti-collapse term, not a batch-correction term. Read
+    objectives/elastic_similarity.py before setting a weight here, because
+    the sign is counter-intuitive and the risk for our fragmented embeddings
+    is written down there.
+
+    `buffer_batches` is the only part with no scGPT counterpart. They train
+    on mixed batches so their pairs span studies; `PerStudyBatchSampler` gives
+    us one study per batch, so without a buffer ECS only ever sees same-study
+    pairs. Non-zero holds that many previous batches as extra reference
+    points, which are other studies. 0 keeps the term within-study, and that
+    is the setting that cannot work against the adversary.
+    """
+
+    enabled: bool = False
+    threshold: float = 0.8
+    buffer_batches: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ECSConfig":
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            threshold=float(d.get("threshold", 0.8)),
+            buffer_batches=int(d.get("buffer_batches", 0)),
         )
 
 
@@ -310,6 +366,7 @@ class ModelConfig:
     loss: LossConfig = field(default_factory=LossConfig)
     cce: CCEConfig = field(default_factory=CCEConfig)
     dab: DABConfig = field(default_factory=DABConfig)
+    ecs: ECSConfig = field(default_factory=ECSConfig)
     classifier: ClassifierConfig = field(default_factory=ClassifierConfig)
 
     @property
@@ -369,5 +426,6 @@ class ModelConfig:
             decoder=DecoderConfig.from_dict(d.get("decoder", {})),
             cce=CCEConfig.from_dict(d.get("cce", {})),
             dab=DABConfig.from_dict(d.get("dab", {})),
+            ecs=ECSConfig.from_dict(d.get("ecs", {})),
             classifier=ClassifierConfig.from_dict(d.get("classifier", {})),
         )

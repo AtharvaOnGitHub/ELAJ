@@ -277,6 +277,13 @@ def main() -> None:
         cce_block_normalise=model_cfg.cce.block_normalise,
         cce_circular_weight=model_cfg.cce.circular_weight,
         dab_hidden_dim=model_cfg.dab.hidden_dim,
+        dab_dropout=model_cfg.dab.dropout,
+        dab_n_layers=model_cfg.dab.n_layers,
+        dab_normalise=model_cfg.dab.normalise,
+        w_ecs=model_cfg.loss.w_ecs if model_cfg.ecs.enabled else 0.0,
+        ecs_threshold=model_cfg.ecs.threshold,
+        ecs_buffer_batches=(model_cfg.ecs.buffer_batches
+                            if model_cfg.ecs.enabled else 0),
         w_nb=model_cfg.loss.w_nb,
         w_kl_gauss=model_cfg.loss.w_kl_gauss,
         w_kl_circ=model_cfg.loss.w_kl_circ,
@@ -296,6 +303,20 @@ def main() -> None:
         model_cfg.loss.free_bits, train_cfg.kl_annealing.beta_max,
         train_cfg.kl_annealing.warmup_fraction, model_cfg.dab.lambda_dab,
     )
+    logger.info(
+        "Adversary: %d Linear layers of %d units, LayerNorm=%s, dropout=%.3g",
+        model_cfg.dab.n_layers, model_cfg.dab.hidden_dim,
+        model_cfg.dab.normalise, model_cfg.dab.dropout,
+    )
+    if model_cfg.ecs.enabled:
+        logger.info(
+            "ECS on: w_ecs=%.4g threshold=%.3g buffer=%d batches. Pairs are "
+            "%s. See objectives/elastic_similarity.py for the direction.",
+            model_cfg.loss.w_ecs, model_cfg.ecs.threshold,
+            model_cfg.ecs.buffer_batches,
+            "within-study only" if model_cfg.ecs.buffer_batches == 0
+            else "cross-study via the reference buffer",
+        )
     if model_cfg.classifier.enabled:
         from endo_model.data.constants import phase_class_names
         logger.info(
@@ -375,7 +396,11 @@ def main() -> None:
         from endo_model.training.checkpointing import CheckpointManager
         logger.info("Resuming from %s", resume_path)
         resume_payload = CheckpointManager.load(
-            str(resume_path), model, optimizer, map_location=str(device)
+            str(resume_path), model, optimizer, map_location=str(device),
+            # Without this the adversary comes back at its random
+            # initialisation while the optimiser restores Adam's moments
+            # for it. See CheckpointManager.save.
+            loss=composite_loss,
         )
 
     # ── Baseline ──────────────────────────────────────────────────────────────

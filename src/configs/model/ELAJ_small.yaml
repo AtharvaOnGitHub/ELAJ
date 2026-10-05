@@ -44,6 +44,30 @@ cce:
   lambda_cce: 0.1
 
 # DAB: Domain Adversarial Batch correction
+#
+# The shape changed in October 2026, from one 64-unit ReLU layer with dropout
+# 0.1 to three 256-unit LeakyReLU layers with LayerNorm and none. Every arm
+# from r1 to m4 beat the old classifier without becoming study-invariant, and
+# study_knn stayed at 0.88 while train_dab fell to 0.21 against ln(11) = 2.40.
+# This is scGPT's AdversarialDiscriminator shape. See
+# objectives/adversarial.py for what each part is for, and note that
+# lambda_dab is NOT comparable across this change: a stronger classifier hands
+# the encoder a different gradient at the same lambda.
 dab:
   lambda_dab: 1.0
-  hidden_dim: 64
+  hidden_dim: 256
+  n_layers: 3
+  normalise: true
+  dropout: 0.0
+
+# ECS: Elastic Cell Similarity. Off here; an arm that wants it sets
+# enabled and model.loss.w_ecs, and should read
+# objectives/elastic_similarity.py first, because the term SHARPENS the
+# embedding and our failure mode is fragmentation rather than collapse.
+ecs:
+  enabled: false
+  threshold: 0.8
+  # 0 keeps every pair within one study, which is what PerStudyBatchSampler
+  # serves. Non-zero holds that many previous batches as cross-study
+  # reference points.
+  buffer_batches: 0

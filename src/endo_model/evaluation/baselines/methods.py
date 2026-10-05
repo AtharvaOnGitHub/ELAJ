@@ -247,7 +247,10 @@ def require_seen_studies(fit: CorpusMatrix, corpus: CorpusMatrix, name: str) -> 
     training cells; the split guarantees that for this corpus, and this
     guarantees it for any other.
     """
-    unseen = sorted(set(np.unique(corpus.study_id)) - set(np.unique(fit.study_id)))
+    # int(), because numpy 2 prints a scalar as `np.int64(7)` and this string
+    # is read by a person looking for a study id.
+    unseen = sorted(int(s) for s in
+                    set(np.unique(corpus.study_id)) - set(np.unique(fit.study_id)))
     if unseen:
         raise ValueError(
             f"{name}: query studies {unseen} have no cells in the fit corpus, "

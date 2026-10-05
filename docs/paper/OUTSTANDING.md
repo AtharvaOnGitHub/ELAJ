@@ -15,8 +15,14 @@ m4_edge_starved ──┐
   (~5 Oct +14 h)  │
                   ├──► score, 3 h each ──► THE FORK ──┬──► ablation queue, 8-12 Oct
 m4_tight16 ───────┘                        (7 Oct)    ├──► Fig 4 and Fig 5
-  (~7 Oct)                                            └──► PUBLICATION_PLAN §0,
-                                                            then the introduction
+  (~7 Oct)             ▲                              └──► PUBLICATION_PLAN §0,
+                       │                                    then the introduction
+       SCORING RULE ───┘
+       for pre-fix arms
+       (decide first)
+
+m5_adversary ──► score ──► does a competent adversary change the fork?
+  (queue after m4_tight16, ~28 h)
 ```
 
 Two cards are committed to the two runs, so nothing on this chain can start
@@ -28,21 +34,51 @@ instead:
 
 | item | gates | gated by |
 |---|---|---|
+| scoring rule for pre-fix arms | **every score, so the fork** | nothing |
 | licence audit | **submission** | nothing |
 | `PUBLICATION_PLAN` §0 | the introduction | nothing |
 | figure list | the figure day | nothing |
 | Methods draft | — | nothing; model subsection moves at the fork |
 | Methods selection sentence | nothing; it closes an objection | nothing |
+| HPC test run | queueing `m5_adversary` | nothing |
 | intersection vocabulary | nothing this round | nothing |
 
 **The single point of failure is `m4_tight16` landing on 7 October.** If it
 slips or dies, the fork resolves on `m3_study_raw` plus `m4_edge_starved`
 alone, which is the third row of the fork table.
 
+**The second is the scoring rule.** Donor aliasing moved the patient wall
+from 269 ids to 254 people, so every arm trained before it sits on a
+different split from the one the current code builds. That decision is below
+and it comes before any scoring pass.
+
 ---
+
+## Decide before anything is scored
+
+- [ ] **How are pre-fix arms scored?** Donor aliasing resolves 30 ids to 15
+      people, so `assign_splits` now builds a 254-donor wall where every arm
+      up to and including `m4_tight16` trained against a 269-id one. Three
+      options, and the choice is a protocol statement in Methods either way:
+      - score them on the **old** wall, at the pre-fix commit: comparable
+        with each other, and the 0.7% leakage stands as §10.4's limitation
+      - score them on the **new** wall: cleaner held-out set, but a person
+        the old run had in train can land in the new test, which is the
+        leakage back by another route
+      - score them on the new wall **excluding the 15 aliased people**:
+        clean, costs a `--exclude-donors` flag, and loses 3.6% of cells
+      `m5_adversary` onward is on the new wall whatever is decided.
+      **Recommendation: the third.** It is the only one that answers "was
+      this donor in train" with no, and the flag is an hour's work against a
+      caveat that would otherwise sit in the Methods.
 
 ## Start now, no GPU
 
+- [ ] **Run the torch test suite on the HPC.** `pytest src/tests -q`. The
+      laptop has no torch, so 58 tests skip there, and the new ones are all
+      in that 58: ECS's sign, the latent buffer, the adversary's shape, and
+      `loss_state` surviving a resume. Nothing should be queued before this
+      passes.
 - [ ] **Licence audit (R3).** Per study: licence, may processed data be
       redistributed, citation requirement. Accessions and pasted Data
       Availability statements are in `data_collation/Final 13.xlsx`, which
@@ -52,9 +88,6 @@ alone, which is the third row of the fork table.
       2023, Front. Mol. Biosci., a re-analysis that used the accession. The
       original submission's paper is what the citation and the licence must
       come from.
-- [ ] **Run `check_donor_overlap`** on the corpus. `E-MTAB-14039` is
-      recorded in the spreadsheet as "313,527 (with overlap)" against the
-      175,376 the corpus holds, so garcia may not be the only pair.
 - [ ] **`PUBLICATION_PLAN` §0 reframing.** Blocks the introduction.
 - [ ] **Figure list: which arm each figure needs.** Blocks the figure day.
 - [ ] **Draft Methods.** Corpus, vocabulary, model, protocol. The model
@@ -78,6 +111,17 @@ alone, which is the third row of the fork table.
 - [ ] `m4_tight16` finishes (~7 Oct)
 - [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
       --skip-probe`, 3 h, **not** the 12 h default
+- [ ] **Queue `m5_adversary`** the moment a card frees. scGPT's
+      discriminator shape plus ECS, on the clean wall, otherwise
+      `m4_tight16` field for field.
+- [ ] **Read its epoch-1 gradient balance before the run is trusted.**
+      `lambda_dab` 336 was calibrated against a 64-unit classifier and a
+      competent one delivers a different gradient at the same lambda;
+      `w_ecs` 1400 is a starting point and the term is linear in it. Both
+      numbers are confirmed or rescaled from that one report, the way
+      `w_cls` 500 became 40.
+- [ ] `m5_adversary_cross` only if the sibling clears the guard. One field
+      differs: cross-study ECS pairs.
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days

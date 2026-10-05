@@ -367,6 +367,10 @@ class Trainer:
                     self.ckpt_manager.save(
                         self.model, self.optimizer,
                         epoch, self.global_step, stop_metric,
+                        # The adversary lives here, not on the model, and
+                        # until October 2026 it was not saved at all. See
+                        # CheckpointManager.save.
+                        loss=self.composite_loss,
                         extra={"train_metrics": train_metrics,
                                "val_metrics": val_metrics,
                                "split_fingerprint": self._split_record,
@@ -433,6 +437,11 @@ class Trainer:
 
     def _train_epoch(self) -> dict[str, float]:
         self.model.train()
+        # CompositeLoss owns parameters of its own — the study classifier —
+        # and a buffer that must not cross the train/eval boundary. Nothing
+        # switched its mode before October 2026, so its dropout ran during
+        # validation too. See CompositeLoss.train.
+        self.composite_loss.train()
         self.logger.reset()
 
         for batch in self.train_loader:
@@ -511,6 +520,7 @@ class Trainer:
     @torch.no_grad()
     def _val_epoch(self) -> dict[str, float]:
         self.model.eval()
+        self.composite_loss.eval()
         val_logger = MetricLogger()
         self._probe_rows = []
 

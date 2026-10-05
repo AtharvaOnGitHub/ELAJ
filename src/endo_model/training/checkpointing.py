@@ -145,6 +145,7 @@ class CheckpointManager:
         step: int,
         val_loss: float,
         extra: dict | None = None,
+        loss: "torch.nn.Module | None" = None,
     ) -> Path:
         """Save a checkpoint and prune old ones.
 
@@ -155,9 +156,25 @@ class CheckpointManager:
             step:      Global step (for naming and metadata).
             val_loss:  Validation loss at this checkpoint.
             extra:     Additional metadata to include.
+            loss:      CompositeLoss, which owns parameters of its own.
 
         Returns:
             Path to the saved checkpoint file.
+
+        `loss_state` WAS MISSING UNTIL OCTOBER 2026, AND IT MATTERED.
+        CompositeLoss owns the study discriminator, and it is not part of
+        `model`, so it was never saved. The phase head is on the model and
+        always was; the adversary is the one that went missing. The
+        OPTIMISER state was saved, and the optimiser is built over both
+        sets of parameters, so a resumed run restored Adam's moments for an
+        adversary whose weights had just been re-initialised at random. The
+        adversary restarted at chance while the encoder carried on, which
+        makes every `train_dab` reading after a resume a measurement of a
+        fresh classifier rather than of the latent.
+
+        Old checkpoints have no `loss_state`. `load` therefore treats it as
+        optional and says so in the log rather than failing, which keeps the
+        v-series and m-series checkpoints loadable.
         """
         fname = self.checkpoint_dir / f"epoch_{epoch:04d}_step_{step:07d}.pt"
         payload = {
@@ -167,6 +184,8 @@ class CheckpointManager:
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
         }
+        if loss is not None:
+            payload["loss_state"] = loss.state_dict()
         if extra:
             payload.update(extra)
         torch.save(payload, fname)
@@ -238,14 +257,17 @@ class CheckpointManager:
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer | None = None,
         map_location: str = "cpu",
+        loss: "torch.nn.Module | None" = None,
     ) -> dict:
-        """Load a checkpoint into model (and optionally optimizer).
+        """Load a checkpoint into model (and optionally optimizer and loss).
 
         Args:
             path:         Path to the .pt checkpoint file.
             model:        Model to load state into.
             optimizer:    Optimizer to restore (optional).
             map_location: torch device string for map_location.
+            loss:         CompositeLoss to restore (optional). See `save` for
+                          what a resume did without it.
 
         Returns:
             The full checkpoint payload dict.
@@ -254,7 +276,31 @@ class CheckpointManager:
         model.load_state_dict(_migrated(payload["model_state"], model))
         if optimizer is not None and "optimizer_state" in payload:
             optimizer.load_state_dict(payload["optimizer_state"])
+        CheckpointManager._restore_loss(loss, payload, path)
         return payload
+
+    @staticmethod
+    def _restore_loss(loss, payload: dict, path: str) -> None:
+        """Put the study discriminator back, if the file carries it.
+
+        Loud about the three cases, because the silent one was the bug: a
+        resume that re-initialised the adversary looked exactly like a resume
+        that restored it, apart from a train_dab that jumped back to chance,
+        which is also what a working adversary looks like.
+        """
+        if loss is None:
+            return
+        state = payload.get("loss_state")
+        if state is None:
+            logger.warning(
+                "%s has no loss_state: it predates October 2026. The study "
+                "discriminator starts from a fresh initialisation, so "
+                "train_dab will read near ln(n_studies) for the first "
+                "epochs regardless of what the latent holds.",
+                path)
+            return
+        loss.load_state_dict(state)
+        logger.info("Restored the loss module's own parameters from %s", path)
 
     @property
     def best_path(self) -> Path | None:

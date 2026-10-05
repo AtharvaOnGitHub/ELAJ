@@ -94,16 +94,51 @@ def test_model_config_cce_from_dict():
 
 
 def test_model_config_dab_defaults():
+    """The October 2026 shape: wider, deeper, normalised, no dropout.
+
+    The old default was one 64-unit layer with dropout 0.1, and every arm
+    from r1 to m4 beat that classifier without becoming study-invariant.
+    """
     cfg = ModelConfig()
     assert cfg.dab.lambda_dab == 1.0
-    assert cfg.dab.hidden_dim == 64
+    assert cfg.dab.hidden_dim == 256
+    assert cfg.dab.n_layers == 3
+    assert cfg.dab.normalise is True
+    assert cfg.dab.dropout == 0.0
 
 
 def test_model_config_dab_from_dict():
-    d = {"dab": {"lambda_dab": 0.5, "hidden_dim": 128}}
+    d = {"dab": {"lambda_dab": 0.5, "hidden_dim": 128, "n_layers": 2,
+                 "normalise": False, "dropout": 0.1}}
     cfg = ModelConfig.from_dict(d)
     assert cfg.dab.lambda_dab == 0.5
     assert cfg.dab.hidden_dim == 128
+    assert cfg.dab.n_layers == 2
+    assert cfg.dab.normalise is False
+    assert cfg.dab.dropout == 0.1
+
+
+def test_model_config_ecs_defaults_are_off():
+    """ECS must not arrive switched on: it changes the objective.
+
+    `enabled` False and `w_ecs` 0 are two independent guards, and train.py
+    requires both before the term reaches the loss.
+    """
+    cfg = ModelConfig()
+    assert cfg.ecs.enabled is False
+    assert cfg.loss.w_ecs == 0.0
+    assert cfg.ecs.threshold == 0.8
+    assert cfg.ecs.buffer_batches == 0
+
+
+def test_model_config_ecs_from_dict():
+    d = {"ecs": {"enabled": True, "threshold": 0.7, "buffer_batches": 8},
+         "loss": {"w_ecs": 0.25}}
+    cfg = ModelConfig.from_dict(d)
+    assert cfg.ecs.enabled is True
+    assert cfg.ecs.threshold == 0.7
+    assert cfg.ecs.buffer_batches == 8
+    assert cfg.loss.w_ecs == 0.25
 
 
 def test_group_encoder_config_from_dict_empty():

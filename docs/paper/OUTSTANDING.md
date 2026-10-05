@@ -1,6 +1,6 @@
 # What is left, by part of the paper
 
-Updated **28 September 2026**, 14 days from the 12 October deadline. Companion
+Updated **5 October 2026**, 7 days from the 12 October deadline. Companion
 to [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md), which holds the claims and the
 schedule, and [`EVIDENCE.md`](EVIDENCE.md), which holds what we already have.
 
@@ -8,26 +8,28 @@ Priority runs 1 to 5 within each section. §0 comes first: a number computed
 on wrong metadata is worse than a number not yet computed. §8 is everything
 deliberately out of scope; nothing there is ever a top-five item.
 
-> ## Where we actually are, in three sentences
+> ## Where we actually are, in four sentences
 >
-> **The architecture result is solid and the fairness question is settled.** The
-> c-series established that the token fix is worth +0.028 cell family and
-> +0.005 `val_nb` on one consistent ruler, and `v1_baselines_transductive`
-> showed the inductive baselines are not a handicap, which is C5's evidence.
+> **The blocking defect of 28 September is cleared.** `m3_study_raw` is scored
+> on the baselines' own 382,464 cells with its split verified by the
+> fingerprint guard, so SCOREBOARD §5b has a real ELAJ column for the first
+> time (EVIDENCE §7j).
 >
-> **No ELAJ number can be published today.** The one scored column was
-> contaminated by a moved split (§0.4), and the arm that was meant to replace it
-> is void (§0.5). This is the single blocking defect and it is one training run
-> plus one scoring job away from fixed.
+> **One metric is ahead and one is a regression.** Cross-donor menstrual
+> phase is 0.7514 against scVI's 0.7013 at p = 0.005, which is the paper's
+> target. Patient kNN is 0.6173 against the baselines' 0.6488 to 0.6628 and
+> against ELAJ's OWN d_z 16 ceiling of 0.3674: the UMAPs fragment because
+> 62% of a cell's neighbours are its own donor, and that is what the number
+> says too.
 >
-> **Nothing on the latent programme has run.** The frozen-encoder ladder, the
-> transferability gate, the latent sweep, and all three required ablations are
-> at zero, and they were scheduled for 25 September.
+> **The remaining scientific question is one run wide.** Donor-blindness and
+> biology have traded against latent width across the whole project, and
+> `m4_tight16` is the first arm to pair r8's d_z 16 with the decoder
+> conditioning that might let it keep the biology.
 >
-> **And as of 28 September, the adversary was never tuned.** `lambda_dab` and
-> `w_cce` carried a hidden weight equal to the measured gene count, so every
-> value chosen across five waves was three orders of magnitude off (§0.6). The
-> code is fixed; nothing has yet run under the corrected units.
+> **Compute is now the binding constraint, not knowledge.** Two cards and
+> seven days is this wave plus scoring plus writing. There is no second
+> experimental wave.
 
 ---
 
@@ -202,7 +204,15 @@ token change, and that has to be stated wherever the two are compared.
 
 ---
 
-### 0.4 Every ELAJ number in the paper rests on a split that moved (open)
+### 0.4 Every ELAJ number in the paper rests on a split that moved (CLOSED 5 October)
+
+> **Closed.** `m3_study_raw` carries a split fingerprint and was scored with
+> the guard verifying it, so SCOREBOARD §5b is not withdrawable the way
+> `c1_combined` was. One late correction: the guard was initially too strict
+> and refused `test` for not being named `val`, which cost a 12-hour job
+> (`fe56aa3`). It now confirms the recorded split and admits the others from
+> that partition. The history below is kept because the failure mode is worth
+> remembering.
 
 The fix in 0.3 changed the (study, tissue) strata, and the split is stratified
 over exactly those, so the patient wall moved with it. `c1_combined` trained
@@ -259,7 +269,18 @@ went out. But that is a guess, and a guess is what moving three variables buys.
 named predecessor on the same split, or the arm is not evidence. With 15 days
 left there is no budget for a second unattributable run.
 
-### 0.6 Every tuned value of `lambda_dab` and `w_cce` is in the wrong units (fixed in code, unmeasured in practice)
+### 0.6 Every tuned value of `lambda_dab` and `w_cce` is in the wrong units (MEASURED 5 October)
+
+> **Measured, and the answer was not more DAB.** `GradientBalance` now
+> reports `dab`, `cls` and `cce` as fractions of reconstruction's pull, and
+> the m-series read them directly. `lambda_dab` 0.01 measured 1.59e-5 of nb,
+> so the r-series values were inert after the fix. Raising it settled the
+> question in the opposite direction: coefficient 210 gave `study_knn` 0.8650
+> against coefficient 70's 0.8123, and tripling the coefficient bought 14%
+> more gradient because the discriminator adapts. `w_cce` was never checked
+> at all until 5 October and measured 0.0005 of nb; CCE is now off (`b1d49f4`).
+> `w_cls` had the same problem in the other direction at 2.92x nb and is now
+> 40. The history below stands.
 
 `nb` is a mean over measured genes, and both KL terms are divided by
 `n_measured` to match it. `cce_loss` and `dab_loss` are per-cell scalars and
@@ -299,37 +320,34 @@ settles it is per-term gradient norms at the latent, which nothing logs.
 
 ## 1. Next, in order
 
-**P0. Calibrate DAB in the corrected units.** Nothing about the adversary is
-known any more (§0.6). It is the term standing between `v1_pool` and a
-reconstruction that beats the study-mean baseline, and it is the one knob whose
-history is entirely uninterpretable. One arm at `lambda_dab: 0.0` and one at a
-chosen effective weight would settle it; the r-series' long-preferred 0.02
-becomes an effective 0.01 under the fix, which is a defensible starting point.
+**P0. `m4_tight16` must finish and be scored.** d_z 16 with `d_study`,
+masking, `w_cls` 40 and the DSBN fixes. It is the only remaining experiment
+and it decides which arm the paper is about. Launched 5 October, finishes
+about 7 October, scores in three hours after that. Everything in §3 and §5
+waits on which arm wins, and nothing else can start it earlier.
 
-**P1. One clean ELAJ column.** Nothing else in the paper matters until the main
-table has a number that can be defended. The next training arm carries the split
-fingerprint, the corrected probe budgets, and the fixed donor accessor, so it is
-the first run whose score is checkable. Until it lands, SCOREBOARD.md §2 has no
-ELAJ column.
+**P1. Per-split scoring, so any number is quotable.** `validation.csv` pools
+val and test, and the checkpoint was selected on `val_nb`, so every figure in
+SCOREBOARD §5b carries a selection caveat. The split tags already travel
+through `validate_latent`; only the reporting pools them. No GPU, half a day,
+and it fixes the caveat permanently for every arm scored from here.
 
-**P2. Re-run `v1_combined`.** Its numbers are void (EVIDENCE.md §7e): it was
-scored on 20,000 cells against `c1_combined`'s 91,598, its cross-donor block
-never ran, and it early-stopped at epoch 8 on a subsampling spike. It is not
-evidence about the v1 vocabulary either way.
+**P2. Score `m4_edge_starved`.** d_z 8 locates the biology cliff from below.
+Useful whichever way `m4_tight16` goes, and it is a three-hour job on a card
+that frees about 14 hours before `m4_tight16` does.
 
-**P3. Re-run `probe_stages` on a checkpoint, with a longer wall.** Job 55326180
-was cancelled at 12 hours having done the 90 input-space stages (4.5 minutes
-each, 6.8 hours) and none of the encoder stages, which were the point. Either
-raise the wall past 20 hours or cut the per-group stages, which are a reference
-and are now measured (EVIDENCE.md §7d).
+**P3. The ablation queue, written now and fired unattended.** C-1 random
+grouping, C-2 DNS removed, C-3 Gaussian-only, and the no-phase-head
+reference. These run on both cards through the writing days and need no
+supervision, but the queue has to exist before 8 October or it will not be
+assembled under time pressure.
 
-**P4. The f1 epoch ladder**, once a clean checkpoint exists.
-
-**Done: the transductive baseline pass.** `v1_baselines_transductive` landed and
-settles P2's old question in the paper's favour — see EVIDENCE.md §7c and
-SCOREBOARD.md §3. Cross-donor family and phase are unmoved by transductive
-fitting, so the inductive baselines are not handicapped; what the neural
-baselines gain is donor identity, +0.069 for scVI. C5 can be written.
+**P4. The intersection vocabulary, costed but not run.** Gene masking closes
+the gene-COUNT half of the study fingerprint and cannot close the identity
+half; only a vocabulary restricted to genes all eleven studies measured can.
+Nobody has measured what that costs in genes or in group sizes. CPU only.
+It is P4 because it cannot be acted on inside seven days, and it is the first
+thing to try if there is a revision round.
 
 ---
 
@@ -355,27 +373,103 @@ baselines gain is donor identity, +0.069 for scVI. C5 can be written.
 | `probes/c1_combined` | **timed out** at the 12 h wall; input stages only, no encoder stages | EVIDENCE.md §7d |
 | ELAJ column of the main table | **withdrawn**, split contamination | §0.4 |
 
+### Done 28 September to 5 October
+
+| | | status of the result |
+|---|---|---|
+| DSBN per-study running statistics (`ee77043`) | train and eval were different operations | in code, in `m2` onward |
+| DSBN affine initialised at identity (`ee77043`) | `nn.Embedding` left the per-study SCALE at a standard normal | same |
+| menstrual phase head (`ee77043`) | masked CE on 4 of 11 studies, class indices from the scorer's own harmoniser | in code, `w_cls` 40 |
+| gene masking (`c78af65`) | every cell shows the encoder 12,500 genes, closing the gene-COUNT fingerprint | in code |
+| `lambda_dab` calibrated from gradients (`2205ff9`) | 0.01 was 0.005 effective after the scaling fix | **settled**: more is worse, see below |
+| CCE found inert and disabled (`b1d49f4`) | the §0.6 unit bug in its twin, never checked | in code |
+| decoder conditioned on study (`d_study` 16) | the scVI pattern, five waves late | **measured as nearly unused**, ratio 7.5 |
+| `DecoderReliance` (`f87b07f`) | what the decoder gets from the embedding against the latent | in code and scored offline |
+| warm-up epochs genuinely ignored (`1768624`) | they set the early-stopping bar while barred from acting on it | in code |
+| retention policy (`1768624`) | every 5th epoch plus best plus last, not top-3 by a ruler under test | in code |
+| split guard admits sibling splits (`fe56aa3`) | it refused `test` for not being called `val` | in code |
+| **`m3_study_raw` scored** (`3632534`) | **the first clean ELAJ column** | **EVIDENCE §7j, SCOREBOARD §5b** |
+
+**What the m-series settled, as findings rather than fixes.**
+
+*More adversarial pressure is worse, not better.* `m2_masked` and
+`m2_masked_hard` differed in lambda alone: coefficient 210 gave `study_knn`
+0.8650 against coefficient 70's 0.8123 at epoch 2, with the gap widening, and
+tripling the coefficient bought only 14% more gradient because the
+discriminator adapts. The encoder learns concealment, not removal.
+
+*Conditioning the decoder on study did not work, and we know why.* A wrong
+study costs the decoder 0.0149 nats per gene against 0.1118 for a wrong
+latent. The embedding is nearly unused because at d_z 24 the latent carries
+study rent-free and the decoder reads it there. This is the direct motivation
+for `m4_tight16`.
+
+*The latent width is the variable that traded donor-blindness for biology.*
+d_z was 16 through r8 and c1 and became 32 in the v series. Patient kNN went
+from ≤0.3674 to 0.6173; cross-donor family went from 0.9115 to 0.9834.
+
 ---
 
-## 1c. Blocked, and on what
+---
 
-Everything below waits on **one clean trained-and-scored arm**. That is the
-whole blocking set; there is no second independent chain.
+## 1c. What depends on what
 
-| | what it is | why it waits |
+The one-run bottleneck of 28 September is gone: a clean scored column exists.
+What remains is a short chain into the deadline, and one branch of work that
+does not touch a GPU at all.
+
+```
+  m4_edge_starved (running, ep 12)        m4_tight16 (launched 5 Oct)
+        | finishes ~5 Oct +14h                  | finishes ~7 Oct
+        v                                       v
+  score (3 h) ---------------------------> WHICH ARM IS THE PAPER'S MODEL
+                                                |
+                    +---------------------------+---------------------------+
+                    v                           v                           v
+            ablation queue (P3)        main table + figures          the framing:
+            both cards, 8-12 Oct       SCOREBOARD, EVIDENCE          beat-the-baseline
+            unattended                                               or the frontier
+```
+
+**On the GPU chain, in order.** Nothing can be parallelised further: two
+cards are already committed, and scoring an arm needs the arm.
+
+| | needs | gives |
 |---|---|---|
-| the ELAJ column of the main table | `score_arm.sh` on a checkpoint whose fingerprint matches | the run |
-| `f1_epochs_03/05/10` | fill in the checkpoint path, three lines | an encoder that is safe to freeze, which means one trained on the current split |
-| the transferability gate | three latent configurations against two encoders | two clean encoders, so it is two runs away, not one |
-| the latent sweep | six knobs, eight arms | the gate |
-| C-1 random grouping | the reviewer's first question | wants the best clean configuration to ablate against |
-| C-2 DNS removed, C-3 Gaussian-only | claims C3 and C6 | same |
+| `m4_tight16` finishing | a card until ~7 Oct | the only remaining experiment |
+| scoring it | the run, 3 h, `--baselines` + `--skip-probe` | the model choice |
+| the ablation queue | the model choice | C-1, C-2, C-3, no-phase-head |
 
-**The one-run bottleneck is the thing to fix about the plan, not just about the
-data.** Two GPUs and a single serial chain means one card is idle. The second
-card should carry an arm that is useful whichever way the first goes: C-1 random
-grouping is the candidate, since it ablates the grouping rather than the latent
-and its answer does not depend on which latent configuration wins.
+**Off the GPU chain, startable now.** This is where the second worker should
+be, and it is all writing-critical.
+
+| | needs | blocks |
+|---|---|---|
+| per-split scoring (P1) | nothing | quoting ANY number without a caveat |
+| PUBLICATION_PLAN §0 reframing | nothing | the whole introduction |
+| figure list and which arm each needs | nothing | the figure day |
+| intersection vocabulary costing (P4) | nothing, CPU | nothing in this round |
+
+**The fork that decides the paper, and it arrives 7 October.**
+
+*If `m4_tight16` lands near patient kNN 0.40 with cross-donor family 0.97+*,
+ELAJ is donor-blind and biologically competent, the UMAP mixes, and the paper
+is "a model that corrects batch effects without losing biology".
+
+*If it lands at 0.40 with family near 0.91*, the trade-off is intrinsic,
+conditioning does not pay the bill, and the honest paper is about the
+frontier between donor-blindness and biological fidelity, with ELAJ as the
+instrument that measures it. That is a different introduction and a different
+set of figures, which is why the fork has to be resolved by the 7th and not
+the 9th.
+
+*If it lands near `m3_study_raw`*, we publish `m3_study_raw` with one metric
+ahead and say so plainly.
+
+**Out of scope, now explicitly.** The frozen-encoder ladder, the
+transferability gate and the six-knob latent sweep were scheduled for 25
+September and have not started. Seven days does not hold them. They move to
+§8 rather than staying here as items that will not happen.
 
 ---
 

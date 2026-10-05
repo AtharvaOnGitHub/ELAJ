@@ -44,9 +44,17 @@ alone, which is the third row of the fork table.
 ## Start now, no GPU
 
 - [ ] **Licence audit (R3).** Per study: licence, may processed data be
-      redistributed, citation requirement. Accessions in
-      `data_collation/configs/datasets.yaml`; the three `garcia_alonso_2021`
-      entries have none recorded. **Can block submission on its own.**
+      redistributed, citation requirement. Accessions and pasted Data
+      Availability statements are in `data_collation/Final 13.xlsx`, which
+      DOES carry the three CELLxGENE dataset UUIDs that `datasets.yaml`
+      lacks. **Can block submission on its own.**
+- [ ] **GSE213216's citation is wrong.** The downloaded PDF is Pei et al.
+      2023, Front. Mol. Biosci., a re-analysis that used the accession. The
+      original submission's paper is what the citation and the licence must
+      come from.
+- [ ] **Run `check_donor_overlap`** on the corpus. `E-MTAB-14039` is
+      recorded in the spreadsheet as "313,527 (with overlap)" against the
+      175,376 the corpus holds, so garcia may not be the only pair.
 - [ ] **`PUBLICATION_PLAN` §0 reframing.** Blocks the introduction.
 - [ ] **Figure list: which arm each figure needs.** Blocks the figure day.
 - [ ] **Draft Methods.** Corpus, vocabulary, model, protocol. The model

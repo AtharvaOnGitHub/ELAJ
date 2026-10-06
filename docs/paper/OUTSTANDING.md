@@ -117,24 +117,30 @@ and it comes before any scoring pass.
 - [ ] `m4_tight16` finishes (~7 Oct)
 - [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
       --skip-probe`, 3 h, **not** the 12 h default
-- [ ] **`m5_rent2` starts now.** free_bits 0.25 to 0.1667, which is an
-      allowance of 2.00 nats at 12 KL dimensions: `edge_starved`'s rent at
-      `m4_tight16`'s width, with the circular branch kept. Differs from
-      `m4_tight16` in that one field and nothing else, checked
-      field-by-field.
-- [ ] **`m5_rent0` queues behind `m4_tight16`.** free_bits 0.0, the extreme
-      of the same lever. **Kill rule, fixed before the run: if median kappa
-      falls below 1e-2 on more than one circular dimension by epoch 6, kill
-      it and give the card back.** Removing the floor removes the only thing
-      stopping a circular dimension from sitting on flat ground.
-- [ ] Together with `m4_tight16` these give 3.00 / 2.00 / 0.00 nats at fixed
-      width: a dose-response curve on the one mechanism with a demonstrated
-      monotone effect, where width and allowance have been confounded all
-      campaign.
+Two shots at the answer, not a comparison. Each is the configuration I would
+bet on for its corner of the space; neither exists to isolate a variable.
+
+- [ ] **`m5_tight` starts now.** d_z 16 with the circle, allowance 1.20 nats
+      against ln(11) = 2.398 for a study, `d_study` 16 so the decoder has
+      somewhere to read technical signal, masking, w_cls 40. The attempt at
+      the paper's model. **Target: patient kNN ≤ 0.45 with family ≥ 0.97.**
+- [ ] **`m5_bare` queues behind `m4_tight16`.** Gaussian only, twelve
+      dimensions, **zero** rent-free allowance. The circle is removed rather
+      than left on flat ground at free_bits 0, so the run spends itself on
+      the question instead of on a branch dying. Dimensions that cannot pay
+      for themselves die, and the surviving width is the measurement.
+      **Target: patient kNN ≤ 0.40 with family ≥ 0.97.** Kill it if the
+      Gaussian block falls to one or two live dimensions with val_nb above
+      the mean-profile baseline: that is a latent that stopped carrying the
+      cell, not one that stopped carrying the donor.
+- [ ] The pair also answers the architecture's central claim without an
+      ablation: if `m5_tight`'s circle beats `m5_bare` on cross-donor phase,
+      the circular latent is demonstrated. If it does not, the claim needs
+      rewriting, and the revision round is a worse place to find that out.
 - [ ] `m5_adversary` and `m5_adversary_cross` are built and tested, and they
-      WAIT. The adversary is a measured failure (loss correlates +0.890 with
-      study kNN) and ECS sharpens an embedding whose problem is
-      fragmentation. Neither gets a card before the rent arms report.
+      WAIT. The adversary's own loss correlates +0.890 with study kNN, and
+      ECS sharpens an embedding whose problem is fragmentation. Neither
+      belongs in a run meant to be the answer.
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days

@@ -1,0 +1,119 @@
+name: m5_bare
+description: >
+  THE OTHER CORNER, AND THE CIRCLE IS GONE ON PURPOSE. Zero rent-free
+  allowance, Gaussian only, twelve dimensions. The circular branch is not at
+  risk here because there is no circular branch: rather than run free_bits 0
+  with a claim-carrying branch sitting on flat ground, this arm removes it and
+  spends the whole run on the question it exists to ask.
+
+  THE QUESTION. With no allowance at all, every nat the latent stores is
+  priced against reconstruction from the first nat. ln(11) = 2.398 nats for a
+  study and ln(254) = 5.537 for a donor are both unreachable for free, and
+  there is no floor anywhere for identity to hide under. If 0.40 patient kNN
+  with family in the high 0.90s is reachable in this architecture, it is
+  reachable here.
+
+  WHAT ZERO RENT DOES TO WIDTH, AND WHY THAT IS A RESULT RATHER THAN A RISK.
+  A Gaussian dimension at mu 0 and logvar 0 has KL 0 and no gradient, so it
+  is on the same flat ground a circular dimension is, and some dimensions
+  will die. At zero rent that is the mechanism working: a dimension survives
+  only if reconstruction pays for it, so the width that remains is a
+  measurement of how much capacity the corpus actually needs. mu_gauss_norm
+  and the per-dimension KL are both reported every epoch, so the surviving
+  width is readable rather than inferred.
+
+  WHY TWELVE AND NOT EIGHT OR SIXTEEN. edge_starved reached ~0.48 patient and
+  ~0.98 family at eight dimensions and then PLATEAUED, gap 0.040, which is
+  what running out of capacity looks like. Twelve dimensions with nothing
+  rent-free is a different regime from eight with 2.00 nats free: more room,
+  and a charge on all of it. That is a judgement about where the answer is,
+  not a point on a curve.
+
+  PHASE HAS NOWHERE ELSE TO GO. With no circular branch the phase head reads
+  the Gaussian block, which is the honest test of whether w_cls 40 can put an
+  ordered, wrapping variable into a Euclidean latent at all. If m5_tight's
+  circle beats this on cross-donor phase, that is the architecture's central
+  claim demonstrated by the pair; if it does not, the claim needs rewriting
+  and better to know now than in the revision round.
+
+  WHAT WOULD MAKE THIS THE PAPER'S MODEL: patient kNN at 0.40 or below with
+  cross-donor family 0.97 or better. It would cost the circular story, and a
+  model that corrects batch effects without losing biology is the stronger
+  paper of the two.
+
+  WHAT WOULD KILL IT: the Gaussian block collapsing to one or two live
+  dimensions with val_nb above the mean-profile baseline, which is a latent
+  that has stopped carrying the cell rather than one that has stopped
+  carrying the donor. Visible in mu_gauss_norm and the KL by epoch 6.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m5_bare/
+seed: 24
+
+overrides:
+  training.max_epochs: 26
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 5
+  training.early_stop_patience: 8
+  training.early_stop_warmup_epochs: 6
+
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.5
+  training.block_probe_every: 2
+  training.keep_every_epochs: 5
+
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  model.loss.w_dab: 0.5
+  model.loss.w_kl_circ: 0.1
+  model.loss.free_bits: 0.0
+
+  # m4_tight16's adversary, pinned because the October rebuild is the
+  # repository default now. Not for attribution: this one is the KNOWN
+  # quantity, and with six days left a card is not worth spending on an
+  # untrained discriminator shape when the measurements say the adversary is
+  # not the lever. m5_adversary carries the rebuild.
+  model.dab.hidden_dim: 64
+  model.dab.n_layers: 2
+  model.dab.normalise: false
+  model.dab.dropout: 0.1
+  model.dab.lambda_dab: 336.0
+
+  # OFF. Measured at 0.0005x reconstruction's gradient, and ECS sharpens an
+  # embedding whose problem is fragmentation. Neither belongs in a run that
+  # is meant to be the answer.
+  model.cce.enabled: false
+  model.ecs.enabled: false
+
+  model.classifier.enabled: true
+  model.classifier.block: gaussian
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 40.0
+
+  model.d_gauss: 12
+  model.n_circular: 0
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  # Kept, and at this rent it finally has a job. The 7.5 ratio that made the
+  # study embedding look useless was measured at d_z 24, where the latent had
+  # room to carry study rent-free and the decoder read it there. Price the
+  # latent and the embedding is the only source left.
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

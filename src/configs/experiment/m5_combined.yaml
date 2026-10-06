@@ -1,0 +1,183 @@
+name: m5_combined
+description: >
+  ONE RUN WITH EVERYTHING THAT HAS NEVER BEEN TRIED. Four changes, each with
+  its own measured reason, and no attempt to attribute the result to one of
+  them. The previous three m5 configs are folded in here and deleted.
+
+  WHAT m4_tight16 LEFT US, from its own metrics.csv and log.
+
+      val_nb            best at EPOCH 1 (0.40441), 0.41103 by epoch 18
+      train_nb          0.4117 -> 0.3726, so the gap grew 0.0015 -> 0.0385
+      val_study_knn     0.6505 -> 0.8208, the guard at 0.5 never once cleared
+      KL on the latent  43.9 nats at epoch 0, 44.3 at epoch 18
+      free_bits floor   12 KL dims x 0.25 = 3.00 nats
+      gradient pull     nb 1.000x, kl_gauss 0.006x -> 0.05x, dab 0.15x ->
+                        0.70x, cls 0.22x -> 0.71x
+      balanced purity   0.714 against a 0.091 floor: 68.5% separated
+
+  1. THE PRICE OF A NAT. w_kl_gauss 20, w_kl_circ 2.0. It has been 1.0 in
+     every config this project has ever run, and the gradient report measures
+     the Gaussian KL at 0.006x to 0.05x of reconstruction's pull on the
+     latent. The term is linear in the weight, so 20 lands it near 1x nb.
+     Effective beta is beta_max x w_kl_gauss = 10, inside the 1-20 band the
+     literature flags for posterior collapse, against the 469 of the only
+     collapse this project has measured.
+
+  2. THE PRICE ARRIVES DURING EPOCH 0, BECAUSE THAT IS WHEN THE LATENT FILLS.
+     warmup_fraction 0.20 -> 0.02. The latent holds 43.9 nats at the end of
+     epoch 0 while beta is still near zero, and once it is full a KL at five
+     percent of reconstruction cannot evict anything. At 0.20 the ramp
+     finishes at epoch 2.4 of 12 and the effective beta during epoch 0 is
+     1.9; at 0.02 it is at full value inside the first half epoch. free_bits
+     stays 0.25, and for the first time it may actually bind: a floor is only
+     a floor when the model is near it, and at 44 nats it was decoration.
+
+  3. AN ADVERSARY WORTH FOOLING. scGPT's AdversarialDiscriminator shape:
+     three 256-unit LeakyReLU layers with LayerNorm and no dropout, against
+     the one 64-unit ReLU layer with dropout 0.1 that every arm from r1 to m4
+     used. On m1 train_dab fell to 0.2098 against chance ln(11) = 2.398 while
+     balanced study purity sat at 0.88 -- the classifier was being beaten and
+     the studies were still separable, because fooling a 2,827-parameter MLP
+     is not removing the information from the geometry.
+
+     lambda_dab 168, half m4_tight16's 336, because a stronger classifier
+     delivers a larger gradient at the same lambda and the m2 pair measured
+     more pressure as worse. CONFIRM IT AT EPOCH 1 from the gradient report,
+     the way w_cls 500 became 40. If dab reads much above 0.5x nb it should
+     come down in the successor, not up.
+
+  4. ECS, THE PAIR-GEOMETRY TERM NEITHER WE NOR ANY BASELINE HAS.
+     mean(1 - (cos - 0.8)^2) over the pairs of a batch, scGPT's elastic cell
+     similarity. READ THE SIGN BEFORE THE WEIGHT: minimising it MAXIMISES
+     (cos - 0.8)^2, so pairs above 0.8 are pulled together and pairs between
+     0 and 0.8 are driven apart. It is an anti-collapse term, not a
+     batch-correction one, and it is the only constraint either model places
+     on the latent's pair geometry. CCE is not its equivalent, because CCE
+     compares two views of the same cell.
+
+     buffer_batches 0, SO THE PAIRS STAY WITHIN ONE STUDY, and that is a
+     decision rather than a default. PerStudyBatchSampler puts one study in
+     each batch, and so does scGPT's SubsetsBatchSampler, so 0 is faithful to
+     them. The cross-study variant would drive apart two cells of the same
+     type in different studies that sit at cosine 0.5 BECAUSE of the batch
+     effect, which is the adversary's work undone by our own objective. With
+     study mixing as the target that variant is actively wrong and it is not
+     in this wave.
+
+     w_ecs 1400 is one tenth of reconstruction by value against about 14,000
+     measured genes. Its GRADIENT is what matters and cannot be predicted
+     from that, so GradientBalance now reports ecs beside nb and dab: read it
+     at epoch 1 and rescale once, the term is linear.
+
+  STUDY LEVEL EVERYWHERE, AND THE GUARD FINALLY BITES. guard_max 0.5 on
+  study_knn was unreachable: the lowest value any arm has recorded at any
+  epoch is 0.6505. Every checkpoint breached, every rank took the same
+  penalty, and ranking fell back to nb in every run, so the guard has been
+  decorative since it was introduced. 0.65 is declared here before the run
+  and means exactly one thing: better study mixing than any arm to date.
+  If nothing clears it the flag reads FAIL and ranking falls back to nb,
+  which is the honest outcome rather than a silent one.
+
+  `val_study_knn` is (agreement - chance) / (1 - chance) on the validation
+  cells, the same construct as the benchmark's new `study-mixing` column, so
+  the number the guard reads and the number the comparison table reports are
+  the same quantity. Donor-level metrics are still computed and are appendix
+  material: cross-donor phase and donor identifiability rise together at
+  r = +0.924, +0.855 and +0.944 across the three m-series arms, and across
+  six methods on the r8 corpus at +0.867, so patient kNN is not a quality
+  axis and nothing here selects on it.
+
+  TWELVE EPOCHS. m4_tight16's best val_nb was epoch 1 and it ran to 18.
+  Warm-up 2 rather than 6, because early stopping ignores warm-up epochs
+  entirely and so could not see its own best epoch. keep_every_epochs 1
+  because epoch 0 was pruned from both m4 arms. At 62.5 min/epoch this is
+  about thirteen hours, and the beta ramp no longer scales with the horizon
+  now that warmup_fraction is 0.02.
+
+  WHAT WOULD MAKE THIS THE PAPER'S MODEL. study_knn under 0.65 with
+  cross-donor family at 0.97 or better and cross-donor phase holding near
+  0.88, plus the latent under 10 nats. WHAT WOULD KILL IT: mu_gauss_norm
+  collapsing toward zero, or median kappa below 1e-2 on more than one
+  circular dimension, with val_nb above the mean-profile baseline of 0.4332,
+  by epoch 3. With the ramp gone the whole risk is front-loaded, so the first
+  three epochs decide it.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m5_combined/
+seed: 24
+
+overrides:
+  training.max_epochs: 12
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 2
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  training.block_probe_every: 2
+  # Every epoch. Epoch 0 was pruned from both m4 arms.
+  training.keep_every_epochs: 1
+
+  training.stop_metric: nb
+  # Study level, and reachable for the first time. 0.5 was below every value
+  # any arm has recorded; 0.65 means better than all of them.
+  training.guard_metric: study_knn
+  training.guard_max: 0.65
+
+  # 12,500 is just under the smallest panel of 13,144, which is as far as
+  # equalising the measured gene COUNT can go. Not scGPT's masked-value
+  # objective, and lowering it would discard biology without weakening the
+  # DNS count fingerprint any further.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  # 1. and 2.
+  training.kl_annealing.warmup_fraction: 0.02
+  model.loss.w_kl_gauss: 20.0
+  model.loss.w_kl_circ: 2.0
+  model.loss.free_bits: 0.25
+
+  # 3.
+  model.dab.hidden_dim: 256
+  model.dab.n_layers: 3
+  model.dab.normalise: true
+  model.dab.dropout: 0.0
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 168.0
+
+  # 4.
+  model.ecs.enabled: true
+  model.ecs.threshold: 0.8
+  model.ecs.buffer_batches: 0
+  model.loss.w_ecs: 1400.0
+
+  # Measured at 0.0005x reconstruction's gradient and costing a second
+  # encoder pass every fourth step.
+  model.cce.enabled: false
+
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
+  # climbed 0.727 to 0.905 while every other axis decayed.
+  model.loss.w_cls: 40.0
+
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

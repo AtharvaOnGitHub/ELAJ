@@ -15,22 +15,27 @@ description: >
                         0.70x, cls 0.22x -> 0.71x
       balanced purity   0.714 against a 0.091 floor: 68.5% separated
 
-  1. THE PRICE OF A NAT. w_kl_gauss 20, w_kl_circ 2.0. It has been 1.0 in
-     every config this project has ever run, and the gradient report measures
-     the Gaussian KL at 0.006x to 0.05x of reconstruction's pull on the
-     latent. The term is linear in the weight, so 20 lands it near 1x nb.
-     Effective beta is beta_max x w_kl_gauss = 10, inside the 1-20 band the
+  1. THE PRICE OF A NAT. w_kl_gauss 30. It has been 1.0 in every config
+     this project has ever run, and the gradient report measures the Gaussian
+     KL at 0.006x to 0.05x of reconstruction's pull on the latent. The term
+     is linear in the weight, so 30 lands it near 1.5x nb. Effective beta is
+     beta_max x w_kl_gauss = 15, the upper end of the 1-20 band the
      literature flags for posterior collapse, against the 469 of the only
-     collapse this project has measured.
+     collapse this project has measured. w_kl_circ is inert here: there is no
+     circular branch.
 
   2. THE PRICE ARRIVES DURING EPOCH 0, BECAUSE THAT IS WHEN THE LATENT FILLS.
-     warmup_fraction 0.20 -> 0.02. The latent holds 43.9 nats at the end of
+     warmup_fraction 0.20 -> 0.05. The latent holds 43.9 nats at the end of
      epoch 0 while beta is still near zero, and once it is full a KL at five
-     percent of reconstruction cannot evict anything. At 0.20 the ramp
-     finishes at epoch 2.4 of 12 and the effective beta during epoch 0 is
-     1.9; at 0.02 it is at full value inside the first half epoch. free_bits
-     stays 0.25, and for the first time it may actually bind: a floor is only
-     a floor when the model is near it, and at 44 nats it was decoration.
+     percent of reconstruction cannot evict anything. At 0.20 over twelve
+     epochs the ramp finishes at epoch 2.4 and the effective beta during
+     epoch 0 averages about 2; at 0.05 it finishes at epoch 0.6, inside the
+     fill, and averages about 10. 0.05 rather than 0.02 leaves reconstruction
+     a few hundred steps to establish itself before the full price lands,
+     which is the job the ramp exists to do. free_bits stays 0.25 over 16
+     Gaussian dimensions, a 4.00-nat allowance, and for the first time it may
+     actually bind: a floor is only a floor when the model is near it, and at
+     44 nats it was decoration.
 
   3. AN ADVERSARY WORTH FOOLING. scGPT's AdversarialDiscriminator shape:
      three 256-unit LeakyReLU layers with LayerNorm and no dropout, against
@@ -64,10 +69,29 @@ description: >
      study mixing as the target that variant is actively wrong and it is not
      in this wave.
 
-     w_ecs 1400 is one tenth of reconstruction by value against about 14,000
-     measured genes. Its GRADIENT is what matters and cannot be predicted
-     from that, so GradientBalance now reports ecs beside nb and dab: read it
-     at epoch 1 and rescale once, the term is linear.
+     w_ecs 50, AND 1400 WAS THE FIRST NUMBER HERE AND WAS WRONG BY MORE
+     THAN AN ORDER OF MAGNITUDE. Every per-cell term enters `total` as
+     weight x value / n_measured, so the value ratio against nb is exact and
+     comparable across terms:
+
+         term  weight  value   % of nb by value   measured gradient
+         dab       84   2.00              2.73%   0.15x -> 0.70x nb
+         cls       40   1.00              0.65%   0.22x -> 0.71x nb
+         ecs     1400   0.50             11.36%   never measured
+         ecs       50   0.50              0.41%   this arm
+
+     1400 put ECS at four times dab's share and seventeen times the phase
+     head's. The two terms we have measured amplified from value to gradient
+     by x26 and x109, and ECS touches mu_gauss MORE directly than either --
+     cls has a linear head in between, dab a three-layer MLP, ECS is a pure
+     function of the embedding -- so at 1400 its gradient would have landed
+     between 3x and 12x nb and it would have owned the objective outright.
+
+     50 puts it at 0.41% by value, between the phase head's share and half of
+     it, which at the measured amplification range is 0.1x to 0.45x nb: a
+     junior term, which is right for one that has never run. GradientBalance
+     reports ecs beside nb and dab, the term is linear in w_ecs, so read it
+     at epoch 1 and rescale once.
 
   STUDY LEVEL EVERYWHERE, AND THE GUARD FINALLY BITES. guard_max 0.5 on
   study_knn was unreachable: the lowest value any arm has recorded at any
@@ -87,6 +111,22 @@ description: >
   six methods on the r8 corpus at +0.867, so patient kNN is not a quality
   axis and nothing here selects on it.
 
+  THE CIRCULAR BRANCH IS GONE, AND d_gauss GOES 8 -> 16 TO PAY FOR IT.
+  n_circular 0, so d_z is d_gauss alone. Keeping d_gauss at 8 would make this
+  a d_z 8 arm, and m4_edge_starved already ran that shape and PLATEAUED with
+  a train-val gap of 0.040, which is what running out of capacity looks like.
+  16 holds the width at m4_tight16's, so what is removed is the circular
+  MECHANISM and not half the latent, and the price in change 1 is what limits
+  capacity instead.
+
+  What goes with it: no kappa, so the kill rule below is mu_gauss_norm and
+  the per-dimension KL only; w_kl_circ, kappa_floor and
+  circular_parameterisation are all inert; the phase head reads the Gaussian
+  block because there is nothing else to read; and the block probe's circular
+  half is skipped, which CompositeProbe already guards on mu_angle.shape[-1].
+  THE PAPER'S CIRCULAR-LATENT CLAIM IS NOT TESTED BY THIS ARM and needs its
+  own run, or the claim needs rewriting.
+
   TWELVE EPOCHS. m4_tight16's best val_nb was epoch 1 and it ran to 18.
   Warm-up 2 rather than 6, because early stopping ignores warm-up epochs
   entirely and so could not see its own best epoch. keep_every_epochs 1
@@ -97,10 +137,10 @@ description: >
   WHAT WOULD MAKE THIS THE PAPER'S MODEL. study_knn under 0.65 with
   cross-donor family at 0.97 or better and cross-donor phase holding near
   0.88, plus the latent under 10 nats. WHAT WOULD KILL IT: mu_gauss_norm
-  collapsing toward zero, or median kappa below 1e-2 on more than one
-  circular dimension, with val_nb above the mean-profile baseline of 0.4332,
-  by epoch 3. With the ramp gone the whole risk is front-loaded, so the first
-  three epochs decide it.
+  collapsing toward zero, or the per-dimension KL flooring at free_bits on
+  most of the sixteen dimensions, with val_nb above the mean-profile baseline
+  of 0.4332, by epoch 3. Effective beta 15 with the ramp compressed to 0.6
+  epochs front-loads the whole risk, so the first three epochs decide it.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
@@ -135,8 +175,9 @@ overrides:
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
   # 1. and 2.
-  training.kl_annealing.warmup_fraction: 0.02
-  model.loss.w_kl_gauss: 20.0
+  training.kl_annealing.warmup_fraction: 0.05
+  model.loss.w_kl_gauss: 30.0
+  # Inert: no circular branch in this arm.
   model.loss.w_kl_circ: 2.0
   model.loss.free_bits: 0.25
 
@@ -152,22 +193,28 @@ overrides:
   model.ecs.enabled: true
   model.ecs.threshold: 0.8
   model.ecs.buffer_batches: 0
-  model.loss.w_ecs: 1400.0
+  # 50, not 1400. See the description: 1400 was 11.4% of nb by value against
+  # the phase head's 0.65%, and the two terms we have measured amplified
+  # value to gradient by x26 and x109.
+  model.loss.w_ecs: 50.0
 
   # Measured at 0.0005x reconstruction's gradient and costing a second
   # encoder pass every fourth step.
   model.cce.enabled: false
 
   model.classifier.enabled: true
-  model.classifier.block: full
+  # Gaussian, because with n_circular 0 there is no other block.
+  model.classifier.block: gaussian
   model.classifier.dropout: 0.0
   model.classifier.label_smoothing: 0.05
   # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
   # climbed 0.727 to 0.905 while every other axis decayed.
   model.loss.w_cls: 40.0
 
-  model.d_gauss: 8
-  model.n_circular: 4
+  # d_z = d_gauss alone now. 16 holds the width at m4_tight16's rather than
+  # dropping to the d_z 8 that m4_edge_starved plateaued at.
+  model.d_gauss: 16
+  model.n_circular: 0
   model.circular_parameterisation: direction
   model.kappa_floor: 1.0
   model.d_platform: 16

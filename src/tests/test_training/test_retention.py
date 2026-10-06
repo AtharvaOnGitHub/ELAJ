@@ -30,13 +30,12 @@ class TestTheSchedule:
         assert {5, 10, 15, 20, 25} <= keep
 
     def test_epoch_zero_is_kept(self):
-        """It used to be refused as "never worth a slot of its own".
+        """Retained as a DIAGNOSTIC, not as a candidate.
 
-        Both m4 arms had their most donor-blind latent at epoch 0, patient
-        kNN 0.3770 and 0.3896 against 0.5291 and 0.4893 by epoch 18, and
-        neither retained it: `scheduled` returned False and epoch 0 was never
-        the best `val_nb`. The most donor-blind model the campaign produced
-        does not exist on disk in either run.
+        Epoch 0 is the most donor-blind checkpoint of every m-series arm and
+        also the worst on cross-donor phase, because the two rise together at
+        r = +0.86 to +0.94. One file is cheap and the start of the trajectory
+        is where that is visible; see RetentionPolicy.scheduled.
         """
         assert RetentionPolicy(every=5).scheduled(0)
         assert 0 in RetentionPolicy(every=5).survivors(

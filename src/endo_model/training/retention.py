@@ -47,17 +47,24 @@ class RetentionPolicy:
     def scheduled(self, epoch: int) -> bool:
         """Is this epoch on the schedule?
 
-        EPOCH 0 IS NOW KEPT, AND IT USED TO BE EXCLUDED. The old reasoning
-        was that the model after one pass is "never worth a slot of its own".
-        The m4 arms contradict that outright: in both of them epoch 0 was the
-        most donor-blind point of a nineteen-epoch run, at patient kNN 0.3770
-        and 0.3896 against 0.5291 and 0.4893 by epoch 18, with cross-donor
-        family already at 0.964 and 0.981. Neither retained it, because
-        `scheduled` refused it and it was never the best `val_nb`, so the most
-        donor-blind model this campaign produced does not exist on disk in
-        either run.
+        EPOCH 0 IS KEPT, AS A DIAGNOSTIC AND NOT AS A CANDIDATE. It used to
+        be refused as "never worth a slot of its own", and one draft of this
+        docstring claimed that refusal had cost us two arms because epoch 0
+        was the most donor-blind point of both. That reading was wrong and it
+        is recorded here so it is not repeated.
 
-        Keeping it costs one file. Not keeping it cost two arms.
+        Across m4_tight16, m4_edge_starved and m3_study_raw the correlation
+        between `val_patient_knn` and `val_phase_knn_xdonor` over epochs is
+        +0.924, +0.855 and +0.944. Donor identifiability and cross-donor
+        menstrual phase rise TOGETHER, so epoch 0 is simultaneously the most
+        donor-blind checkpoint and the WORST one on the metric the paper
+        leads with: phase 0.727 at epoch 0 against 0.905 by epoch 17. It is
+        not a good model, it is an undertrained one, and selecting it would
+        trade the headline result for a kNN number.
+
+        It is retained anyway because one file is cheap and because the start
+        of the trajectory is where that correlation is visible. Nothing here
+        should be read as a reason to select it.
         """
         return bool(self.every) and epoch % self.every == 0
 

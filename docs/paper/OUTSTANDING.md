@@ -1,6 +1,8 @@
 # What is left
 
-**6 October 2026. 6 days to the 12 October deadline.**
+**6 October 2026. 10 October is the gate: by then we know whether the best
+model is reached, or reachable in one training run. 11-12 October is
+writing, figures and ablations.**
 
 A checklist, and only that. Nothing finished goes here: provenance to
 [`PROGRESS.md`](PROGRESS.md), findings to [`EVIDENCE.md`](EVIDENCE.md),
@@ -35,7 +37,6 @@ instead:
 | item | gates | gated by |
 |---|---|---|
 | scoring rule for pre-fix arms | **every score, so the fork** | nothing |
-| licence audit | **submission** | nothing |
 | `PUBLICATION_PLAN` §0 | the introduction | nothing |
 | figure list | the figure day | nothing |
 | Methods draft | — | nothing; model subsection moves at the fork |
@@ -85,11 +86,6 @@ and it comes before any scoring pass.
       the laptop, which is where ECS's sign, the latent buffer, the
       adversary's shape and `loss_state` all live. **Nothing is queued before
       this is green.**
-- [ ] **Licence audit (R3).** Per study: licence, may processed data be
-      redistributed, citation requirement. Accessions and pasted Data
-      Availability statements are in `data_collation/Final 13.xlsx`, which
-      DOES carry the three CELLxGENE dataset UUIDs that `datasets.yaml`
-      lacks. **Can block submission on its own.**
 - [ ] **GSE213216's citation is wrong.** The downloaded PDF is Pei et al.
       2023, Front. Mol. Biosci., a re-analysis that used the accession. The
       original submission's paper is what the citation and the licence must
@@ -117,39 +113,37 @@ and it comes before any scoring pass.
 - [ ] `m4_tight16` finishes (~7 Oct)
 - [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
       --skip-probe`, 3 h, **not** the 12 h default
-**THE MODEL FREEZES 8 OCTOBER, NOT 12.** 62.5 min/epoch measured. Writing
-from the current state needs three days: Figs 1, 4, 5, 6 not started,
-Methods undrafted, licence audit still blocking submission, C2/C3/C7
-unevidenced. That leaves about two days and two cards, 96 card-hours, and
-the order below is by return per hour, not by interest.
+**THE 10 OCTOBER GATE: is the best model reached, or reachable in one run?**
+62.5 min/epoch measured. `max_epochs` 12 with `warmup_fraction` 0.02, so the
+beta ramp no longer depends on the horizon and the earlier objection to a
+short run does not apply. 8 epochs is 8.3 h, 12 is 13.5 h.
 
-- [ ] **Score `m4_edge_starved`. 3 h. Do this first.** It is trained,
-      finished, and has no scored column. Its selected epoch reads patient
-      kNN 0.4650 with cross-donor family 0.9732 on the val probe; if that
-      holds on val+test it is a 0.18 margin on donor-blindness against
-      baselines at 0.6488–0.6628 with family within 0.01. **That may already
-      be the paper, and nobody has looked.**
-- [ ] **Score `m4_tight16`. 3 h.** Same situation. Its best checkpoint is
-      epoch 1, which IS retained.
-      Both: `--baselines outputs/v_series/v1_baselines/benchmark.csv
-      --skip-probe`.
-- [ ] **`m5_priced` on the other card, one arm not two.** `warmup_fraction`
-      0.02 and `w_kl_gauss` 20, so the price arrives during epoch 0, which is
-      when the latent fills to 43.9 nats and stops moving. Decided by epoch 3,
-      about four hours; `guard_max` raised to 0.70 because 0.5 was
-      unreachable, and `keep_every_epochs` 1 because epoch 0 was the best
-      checkpoint of both m4 arms and neither kept it.
-- [ ] **Then the ablations, not a second speculative arm.** C2 "the grouping
-      carries biology" and C3 "DNS sentinel" are asserted in the paper with
-      zero evidence and a reviewer will go there first. Two runs at ~8 h each
-      fit in what is left; a second m5 arm would not.
-
-**Do we have time for 18–19 epoch runs? No, and we do not need them.** Both
-m4 arms were decided by epoch 2 and spent eighteen hours getting worse. 8
-epochs is 8.3 h, 19 is 19.8 h, 26 is 27.1 h. Early stopping at warm-up 2 and
-patience 5 ends `m5_priced` around epoch 7 unless it is still improving, in
-which case it has earned the card.
-
+- [ ] **NOT scoring the m4 arms.** Neither is paper-worthy and the 3 h each
+      buys a column we would not print. Calibrating off `m3_study_raw`, the
+      only arm with both numbers, the val probe runs about 0.04 below the
+      scored figure (probe 0.5743 against scored 0.6173), so
+      `m4_edge_starved` would score near 0.51 and `m4_tight16` near 0.48
+      against baselines at 0.6488–0.6628. Better, but both sit at
+      `study_knn` 0.71–0.76 against `m3`'s 0.83, which is still one island
+      per study, and both reconstruct WORSE than `m3` (0.4069 and 0.4044
+      against 0.3975). `m3_study_raw` stays the scored fallback.
+- [ ] **The axis is the problem, not the tuning.** corr(patient kNN, phase
+      xdonor) over epochs is +0.924, +0.855, +0.944 across the three arms.
+      Phase and donor identity are the same learned structure, so no
+      stopping rule, width, allowance or selector separates them. EVIDENCE
+      §7k.
+- [ ] **The one untried mechanism: adversary on DONOR, not study.**
+      `DABClassifier` predicts `study_id`, eleven classes, while
+      `patient_knn` is donor identifiability over 254 donors and is mostly a
+      within-study quantity. `patient_id` does not reach the Batch at all;
+      `collate_fn` drops it. Needs a train-donor index through
+      dataset → collate → a second gradient-reversed head, reusing
+      `MaskedCrossEntropy` for held-out donors. About 3 h with tests.
+      **This is the run that answers the 10 October gate.**
+- [ ] `m5_priced` is built and is the fallback run if the donor adversary is
+      judged too much change this late: `warmup_fraction` 0.02 and
+      `w_kl_gauss` 20, aimed at the latent filling to 43.9 nats inside
+      epoch 0. It does not address the +0.92 axis, which is its weakness.
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days
@@ -197,7 +191,7 @@ Which paper this is. Resolve on the 7th, not the 9th.
 
 - [ ] R1 seeds and environment pinned per reported run
 - [ ] R2 weights deposited, licence decided
-- [ ] R3 licence audit
+- [x] R3 licence audit — clear
 - [ ] R4 pipeline runnable from the accession list
 - [ ] R5 every figure regenerable from a committed script
 

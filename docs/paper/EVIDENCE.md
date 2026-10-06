@@ -1003,9 +1003,42 @@ made the model monotonically more donor-identifiable, and epoch 0 after a
 single pass was the most donor-blind point of a twenty-hour run. The one term
 that worked is the phase head: `phase_knn_xdonor` climbed 0.727 to 0.905.
 
-Wave m5's arms are `m5_priced` (w_kl_gauss 20, so the KL lands near 1x nb)
-and `m5_masked` (sixty percent of each cell hidden, against the seventeen
-percent every arm so far has used).
+**THE ONE AXIS, AND IT IS THE FINDING THAT DISPOSES OF FOUR WAVES OF
+TUNING.** Over epochs, within each arm:
+
+| | n epochs | corr(patient kNN, phase xdonor) | corr(patient kNN, study kNN) |
+|---|---:|---:|---:|
+| `m4_tight16` | 19 | **+0.924** | +0.987 |
+| `m4_edge_starved` | 19 | **+0.855** | +0.952 |
+| `m3_study_raw` | 17 | **+0.944** | +0.993 |
+
+Cross-donor menstrual phase, the only metric where ELAJ beats scVI, rises in
+lockstep with donor identifiability. Training moves the latent along a single
+axis from (donor-blind, phase-blind) to (donor-identifiable, phase-accurate),
+and every arm sits somewhere on it. Cross-donor family is saturated near
+0.97–0.98 throughout and carries no information about the trajectory, which
+is why its correlation is inconsistent (+0.21, −0.06, −0.79).
+
+So **epoch 0 is not a good model, it is an undertrained one.** It is the most
+donor-blind checkpoint of every arm and simultaneously the worst on phase:
+0.727 against 0.905 by epoch 17 in `m4_tight16`. Selecting it trades the
+headline result for a kNN number.
+
+**And this explains the whole campaign's failures at once.** Five waves of
+walking `lambda_dab` could not move a correlation of +0.92. `d_z` 8 and
+`d_z` 16 behave identically because width does not change the axis, only the
+position on it. `free_bits` is irrelevant because the latent sits 14x above
+the floor. No stopping rule, selector, width or allowance can separate two
+quantities that are the same learned structure.
+
+**What has never been tried is an adversary aimed at the measured quantity.**
+`DABClassifier` predicts `batch["study_id"]`: eleven classes. `patient_knn`
+is donor identifiability over 254 donors, and because a cell's neighbours are
+overwhelmingly from its own study, most of what `patient_knn` measures is
+WITHIN-study donor separation. An eleven-way study adversary applies no
+gradient there. `patient_id` does not even reach the Batch; `collate_fn`
+drops it. The entire campaign has adversarially removed an 11-class variable
+while reporting a 254-class one.
 
 
 ## 7l. What scGPT's DAB does that ours did not, read from their source

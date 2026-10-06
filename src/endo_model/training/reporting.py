@@ -91,17 +91,12 @@ class LatentCollector:
         two. Random within each study because taking the first N of anything
         sorted by sample takes one sample.
         """
-        rng = np.random.default_rng(self.seed)
-        studies = np.unique(study_id)
-        quota = max(1, self.max_cells // max(len(studies), 1))
+        from endo_model.evaluation.study_mixing import balanced_rows
 
-        keep = []
-        for study in studies:
-            rows = np.flatnonzero(study_id == study)
-            if len(rows) > quota:
-                rows = rng.choice(rows, size=quota, replace=False)
-            keep.append(rows)
-        return np.sort(np.concatenate(keep))
+        # One definition, shared with the benchmark's study-mixing battery,
+        # so the purity reported here and the purity in the comparison table
+        # are the same quantity against the same floor.
+        return balanced_rows(study_id, self.max_cells, self.seed)
 
     def stacked(self) -> dict[str, np.ndarray] | None:
         """Everything collected, evenly subsampled across studies."""

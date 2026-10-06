@@ -50,6 +50,38 @@ def expected_purity(study_id: np.ndarray) -> float:
     return float((p ** 2).sum())
 
 
+def balanced_rows(study_id: np.ndarray, max_cells: int,
+                  seed: int = 24) -> np.ndarray:
+    """Row indices for an even, random draw across studies, sorted.
+
+    WHY EVEN AND NOT PROPORTIONAL. Two things, and the second is the one that
+    bites. duempelmann_2026 and fonseca_2023 are 70% of the validation split
+    between them, so a proportional sample describes those two. And the floor
+    a purity has to be read against is sum(p^2) over study shares, which on a
+    proportional draw of this corpus is about 0.24 and is dominated by the one
+    study holding 46% of the cells; on an even draw of eleven studies it is
+    1/11 = 0.091. The measured purity moves with the draw, so two numbers
+    taken different ways are not comparable at all.
+
+    This is the single definition, used by the training loop's per-epoch
+    report and by the benchmark's battery, so ELAJ's purity in one is the
+    same quantity as a baseline's in the other.
+
+    Random within each study because taking the first N of anything sorted by
+    sample takes one sample.
+    """
+    rng = np.random.default_rng(seed)
+    studies = np.unique(study_id)
+    quota = max(1, max_cells // max(len(studies), 1))
+    keep = []
+    for study in studies:
+        rows = np.flatnonzero(study_id == study)
+        if len(rows) > quota:
+            rows = rng.choice(rows, size=quota, replace=False)
+        keep.append(rows)
+    return np.sort(np.concatenate(keep))
+
+
 def project(latent: np.ndarray, n_components: int | None, seed: int = 24) -> np.ndarray:
     """Reduce a latent to `n_components` dimensions by PCA, or return it as-is.
 

@@ -141,6 +141,14 @@ class ScorerSettings:
     # reads `corpus.study_id`, which always exists, so it needs its own
     # switch to be controllable the same way.
     study_mixing: bool = True
+    # Cells for the study neighbour search, drawn evenly across studies.
+    # 20,000 is what the training loop's per-epoch report uses, so the two
+    # purities are the same quantity: an even draw of eleven studies has a
+    # floor of 1/11 = 0.091 where a proportional draw of this corpus has
+    # about 0.24, dominated by the one study holding 46% of the cells.
+    # It is also the difference between a one-second neighbour search and a
+    # quarter-hour one at 380,000 cells in 16 dimensions, per method.
+    study_mixing_max_cells: int = 20000
     knn_labels: tuple[str, ...] = KNN_LABELS
     cross_donor_labels: tuple[str, ...] = CROSS_DONOR_LABELS
     scib_labels: tuple[str, ...] = SCIB_LABELS
@@ -240,8 +248,11 @@ class EmbeddingScorer:
         if not self.settings.study_mixing:
             return []
         n_components = self.settings.study_mixing_components
+        rows_kept = study_mixing.balanced_rows(
+            corpus.study_id, self.settings.study_mixing_max_cells,
+            self.settings.seed)
         got = study_mixing.measure(
-            latent, corpus.study_id, k=self.settings.k,
+            latent[rows_kept], corpus.study_id[rows_kept], k=self.settings.k,
             seed=self.settings.seed, n_components=n_components,
         )
         if not got:

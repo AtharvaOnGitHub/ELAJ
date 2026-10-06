@@ -47,10 +47,19 @@ class RetentionPolicy:
     def scheduled(self, epoch: int) -> bool:
         """Is this epoch on the schedule?
 
-        Epoch 0 is excluded: it is the model after one pass, kept only if it
-        happens to be the best or the last, and never worth a slot of its own.
+        EPOCH 0 IS NOW KEPT, AND IT USED TO BE EXCLUDED. The old reasoning
+        was that the model after one pass is "never worth a slot of its own".
+        The m4 arms contradict that outright: in both of them epoch 0 was the
+        most donor-blind point of a nineteen-epoch run, at patient kNN 0.3770
+        and 0.3896 against 0.5291 and 0.4893 by epoch 18, with cross-donor
+        family already at 0.964 and 0.981. Neither retained it, because
+        `scheduled` refused it and it was never the best `val_nb`, so the most
+        donor-blind model this campaign produced does not exist on disk in
+        either run.
+
+        Keeping it costs one file. Not keeping it cost two arms.
         """
-        return bool(self.every) and epoch > 0 and epoch % self.every == 0
+        return bool(self.every) and epoch % self.every == 0
 
     def survivors(self, entries: list[tuple[int, float]]) -> set[int]:
         """Epochs to keep, from `(epoch, metric)` pairs. Lower metric is better.

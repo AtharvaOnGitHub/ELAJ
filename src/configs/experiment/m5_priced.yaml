@@ -1,58 +1,76 @@
 name: m5_priced
 description: >
-  THE LATENT HAS BEEN FREE FOR THE WHOLE PROJECT. This arm charges for it.
+  ONE ARM, AND IT CHARGES FOR THE LATENT DURING EPOCH 0, BECAUSE THAT IS WHEN
+  THE LATENT FILLS.
 
-  WHAT m4_tight16 SHOWED, from its own metrics.csv and log.
+  WHAT THE TWO FINISHED m4 ARMS SHOW, and they show the SAME thing at d_z 8
+  and at d_z 16, which is why latent width explains none of it.
 
-      val_nb            best at EPOCH 1 (0.40441), 0.41103 by epoch 18
-      train_nb          0.4117 -> 0.3726, so the gap grew 0.0015 -> 0.0385
-      val_patient_knn   0.377 -> 0.529, RISING every epoch
-      val_study_knn     0.650 -> 0.821, guard <= 0.5 breached at epoch 0 and
-                        never cleared once in nineteen epochs
-      KL on the latent  43.9 nats at epoch 0, 44.3 at epoch 18
-      free_bits floor   12 KL dims x 0.25 = 3.00 nats
-      gradient pull     nb 1.000x, kl_gauss 0.006x -> 0.05x, dab 0.15x ->
-                        0.70x, cls 0.22x -> 0.71x
+      arm              ep0 patient  ep18 patient  ep0 family  best val_nb
+      m4_tight16            0.3770        0.5291      0.9638   EPOCH 1
+      m4_edge_starved       0.3896        0.4893      0.9806   epoch 10
 
-  Training made the model MORE donor-identifiable every epoch. Epoch 0, after
-  a single pass, was the most donor-blind point of a twenty-hour run.
+  In both runs the most donor-blind point is EPOCH 0, after a single pass,
+  with cross-donor family already at 0.964 and 0.981. Both then degrade
+  monotonically on patient and study kNN for eighteen more epochs while
+  phase improves. Nineteen epochs and twenty hours each to go backwards on
+  the axis that matters.
 
-  THE REASON IS IN THE LAST TWO ROWS. The latent carries forty-four nats
-  where the rent-free allowance is three, so the floor is not binding and
-  never was: naming one of 254 donors costs ln(254) = 5.537 nats and this
-  latent holds eight times that, paid for willingly, because the KL's pull on
-  the latent is five percent of reconstruction's. Reconstruction wants donor
-  identity and nothing charges enough to refuse it.
+  THE LATENT IS FULL BY THE END OF EPOCH 0: 43.9 nats, against a free_bits
+  floor of 3.00 and ln(254) = 5.537 nats to name a donor. It never moves
+  again; epoch 18 reads 44.3. And the KL's pull on the latent is 0.006x to
+  0.05x of reconstruction's, because `w_kl_gauss` has been 1.0 in every
+  config this project has ever run.
 
-  SO free_bits WAS NEVER A LEVER. An earlier pair of arms in this repository
-  tried to move a floor the model sits forty nats above; they were deleted
-  unrun. The cross-arm correlation between width and patient kNN is real but
-  does not run through the allowance: a wider latent carries more nats
-  because it has more dimensions each paying a negligible price. Width and
-  PRICE were confounded, not width and allowance.
+  SO THE PRICE HAS TO ARRIVE BEFORE THE FILL, AND THAT IS A SCHEDULE
+  QUESTION, NOT A WEIGHT QUESTION. beta ramps from 0 over warmup_fraction of
+  total steps. At 0.20 it completes at epoch 5.2, so even at w_kl_gauss 20
+  the effective beta DURING epoch 0 is 1.92: the latent still fills, and then
+  gets charged for contents it already has. An earlier draft of this arm did
+  exactly that and called it the measured bet; it was misaimed.
 
-  w_kl_gauss DOES NOT APPEAR IN A SINGLE CONFIG IN THIS PROJECT. It has been
-  1.0 for every arm from r1 to m4, and at 1.0 the gradient report measures
-  the Gaussian KL at 0.006x to 0.05x of reconstruction. The term is linear in
-  the weight, so 20 puts it near 1x nb: storing a nat costs about what
-  reconstructing a gene is worth. w_kl_circ goes to 2.0, holding the
-  one-tenth ratio to the Gaussian branch that every arm has used.
+      warmup_fraction   beta full at   effective beta in epoch 0   final
+      0.20 (m4, draft)     epoch 5.2                   0.10 / 1.92   0.5 / 10
+      0.02 (this arm)      epoch 0.5                         10.0        10
 
-  WHERE THE CEILING IS. Effective beta here is beta_max x w_kl_gauss = 0.5 x
-  20 = 10, because both terms are already per gene. Run 50132670 collapsed at
-  an effective 469, which came from the mean-versus-sum defect rather than
-  from a choice. 10 is inside the 1-20 band the literature flags as a
-  collapse risk, which is the point: this is the first arm to enter it
-  deliberately.
+  WHY w_kl_gauss 20 AND NOT 60. A second draft paired warmup_fraction 0.02
+  with w_kl_gauss 60, an effective beta of 30, which is past the 1-20 band
+  the literature flags for posterior collapse and past anything this project
+  has tried. The timing was right and the price was not: with the ramp gone
+  there is nothing left to establish reconstruction first, so the price has
+  to stay inside the explored band. 20 gives an effective beta of 10, which
+  is inside it, and the only collapse this project has measured sat at 469
+  from the mean-versus-sum defect.
 
-  WHAT WOULD MAKE THIS THE PAPER'S MODEL. Latent content falling from 44 nats
-  to under 6, patient kNN at 0.45 or below, study_knn clearing the 0.5 guard
-  for the first time in the campaign, cross-donor family holding at 0.97, and
-  phase holding its gain.
+  TWO CONFIGURATION DEFECTS FIXED HERE, BOTH FOUND IN THE m4 METRICS.
 
-  WHAT WOULD KILL IT. mu_gauss_norm collapsing toward zero with val_nb above
-  the mean-profile baseline, by epoch 3. That is the latent giving up on the
-  cell rather than on the donor, and the first block probe reads it.
+  1. `guard_max` 0.5 on study_knn was UNREACHABLE. The minimum study_knn
+     observed in either arm is 0.6505, at epoch 0, so every checkpoint
+     breached, every rank took the same penalty, and ranking fell back to nb
+     in both runs. The guard has been decorative. 0.70 is reachable at the
+     early epochs only, so it will actually bind, and it is declared here
+     before the run rather than chosen after it. Note for Methods: the guard
+     IS part of selection, so the sentence promising that no reported metric
+     took part is wrong as written and needs to say that selection used
+     reconstruction loss subject to a pre-declared ceiling on study
+     separability, with no biological label involved.
+
+  2. `keep_every_epochs` 3 with epoch 0 excluded from the schedule threw away
+     the best checkpoint of both arms. Epoch 0 is retained now (see
+     training/retention.py) and this arm keeps every epoch, which at the
+     length below is a handful of files.
+
+  WHAT WOULD MAKE THIS THE PAPER'S MODEL. The latent never exceeding 10 nats
+  at any epoch, patient kNN at or below 0.40 holding past epoch 3 instead of
+  decaying from it, study_knn under 0.70 so the guard binds, and cross-donor
+  family at 0.97 or better. Phase is the term that already works: it climbed
+  0.727 to 0.905 on m4_tight16 while every other axis decayed.
+
+  WHAT WOULD KILL IT, AND IT IS READABLE IN FOUR HOURS. mu_gauss_norm
+  collapsing toward zero, or median kappa below 1e-2 on more than one
+  circular dimension, with val_nb above the mean-profile baseline, by epoch
+  3. With the ramp removed this arm's whole risk is front-loaded, so the
+  first three epochs decide it either way.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
@@ -86,9 +104,13 @@ overrides:
   training.diagnostics.latent_every: 3
   training.stop_metric: nb
   training.guard_metric: study_knn
-  training.guard_max: 0.5
+  # 0.70, not 0.5. The minimum study_knn in either m4 arm was 0.6505, so
+  # 0.5 was unreachable and the guard never bound. Declared before the run.
+  training.guard_max: 0.70
   training.block_probe_every: 2
-  training.keep_every_epochs: 3
+  # Every epoch. Epoch 0 was the best checkpoint of both m4 arms and
+  # neither kept it.
+  training.keep_every_epochs: 1
 
   # UNCHANGED AT 12500, AND ON PURPOSE. This masker exists to equalise the
   # measured gene COUNT so the number of DNS tokens stops being a study
@@ -101,7 +123,9 @@ overrides:
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  training.kl_annealing.warmup_fraction: 0.20
+  # 0.02, not 0.20: full price inside the first half epoch, because the
+  # latent is full by the end of epoch 0. See the description.
+  training.kl_annealing.warmup_fraction: 0.02
 
   # ── THE PRICE OF A NAT, WHICH HAS NEVER LEFT 1.0 IN ANY CONFIG ───────────
   model.loss.w_kl_gauss: 20.0

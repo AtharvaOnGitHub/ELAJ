@@ -29,10 +29,18 @@ class TestTheSchedule:
         keep = p.survivors(entries)
         assert {5, 10, 15, 20, 25} <= keep
 
-    def test_epoch_zero_is_not_scheduled(self):
-        """One pass through the data, kept only if it happens to be best or
-        last, never worth a slot of its own."""
-        assert not RetentionPolicy(every=5).scheduled(0)
+    def test_epoch_zero_is_kept(self):
+        """It used to be refused as "never worth a slot of its own".
+
+        Both m4 arms had their most donor-blind latent at epoch 0, patient
+        kNN 0.3770 and 0.3896 against 0.5291 and 0.4893 by epoch 18, and
+        neither retained it: `scheduled` returned False and epoch 0 was never
+        the best `val_nb`. The most donor-blind model the campaign produced
+        does not exist on disk in either run.
+        """
+        assert RetentionPolicy(every=5).scheduled(0)
+        assert 0 in RetentionPolicy(every=5).survivors(
+            [(e, 1.0 - 0.01 * e) for e in range(12)])
 
     def test_every_zero_schedules_nothing(self):
         p = RetentionPolicy(every=0, keep_best=False, keep_last=False)

@@ -117,38 +117,39 @@ and it comes before any scoring pass.
 - [ ] `m4_tight16` finishes (~7 Oct)
 - [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
       --skip-probe`, 3 h, **not** the 12 h default
-Two shots at the answer, not a comparison. Both keep `max_epochs` 26 so the
-beta ramp, the `lambda_dab` ramp and the cosine LR are identical to
-`m4_tight16`; early stopping with warm-up 2 and patience 5 ends the run,
-which on `m4_tight16`'s trajectory is about epoch 7 and seven hours.
-Shortening `max_epochs` would have compressed all three schedules by 2.2x
-and made the arms incomparable with the run they are answering.
+**THE MODEL FREEZES 8 OCTOBER, NOT 12.** 62.5 min/epoch measured. Writing
+from the current state needs three days: Figs 1, 4, 5, 6 not started,
+Methods undrafted, licence audit still blocking submission, C2/C3/C7
+unevidenced. That leaves about two days and two cards, 96 card-hours, and
+the order below is by return per hour, not by interest.
 
-- [ ] **`m5_priced` starts now.** `w_kl_gauss` 20, putting the Gaussian KL
-      near 1x reconstruction's gradient pull where 1.0 measured 0.05x.
-      Effective beta 10. The latent has carried 44 nats against a 3-nat
-      floor all campaign and `w_kl_gauss` has never left 1.0 in any config.
-      **Target: latent under 6 nats, patient kNN ≤ 0.45, `study_knn`
-      clearing the 0.5 guard for the first time, family ≥ 0.97.** Kill if
-      `mu_gauss_norm` collapses with `val_nb` above the mean-profile
-      baseline by epoch 3.
-- [ ] **`m5_upfront` queues behind `m4_tight16`.** `warmup_fraction` 0.20 to
-      0.02 and `w_kl_gauss` 60, effective beta 30. The latent held 43.9 nats
-      at epoch 0 while beta was still near zero: it fills during the ramp,
-      when storage is free, and a 0.05x KL cannot evict it afterwards. This
-      arm never lets it fill. **Target: latent never above 10 nats, patient
-      kNN ≤ 0.45, `val_nb` within 0.01 of 0.40441.** Likelier of the pair to
-      trip its kill rule: past the 1-20 collapse band with no ramp, so kill
-      on `mu_gauss_norm` or kappa by epoch 3 and give the card back.
-- [ ] `gene_mask_target` stays 12500 in both. The masker equalises the
-      measured gene COUNT so the number of DNS tokens stops being a study
-      fingerprint, and 12500 against a smallest panel of 13,144 already
-      does that completely. It is not scGPT's masked-value objective, and
-      lowering it would discard biology without weakening the fingerprint.
-- [ ] `m5_adversary`, `m5_adversary_cross` are built and tested and wait.
-      `m4_tight16`'s `dab` pull climbed 0.15x to 0.70x nb while
-      `patient_knn` climbed with it. Both live arms cut `lambda_dab` to a
-      quarter.
+- [ ] **Score `m4_edge_starved`. 3 h. Do this first.** It is trained,
+      finished, and has no scored column. Its selected epoch reads patient
+      kNN 0.4650 with cross-donor family 0.9732 on the val probe; if that
+      holds on val+test it is a 0.18 margin on donor-blindness against
+      baselines at 0.6488–0.6628 with family within 0.01. **That may already
+      be the paper, and nobody has looked.**
+- [ ] **Score `m4_tight16`. 3 h.** Same situation. Its best checkpoint is
+      epoch 1, which IS retained.
+      Both: `--baselines outputs/v_series/v1_baselines/benchmark.csv
+      --skip-probe`.
+- [ ] **`m5_priced` on the other card, one arm not two.** `warmup_fraction`
+      0.02 and `w_kl_gauss` 20, so the price arrives during epoch 0, which is
+      when the latent fills to 43.9 nats and stops moving. Decided by epoch 3,
+      about four hours; `guard_max` raised to 0.70 because 0.5 was
+      unreachable, and `keep_every_epochs` 1 because epoch 0 was the best
+      checkpoint of both m4 arms and neither kept it.
+- [ ] **Then the ablations, not a second speculative arm.** C2 "the grouping
+      carries biology" and C3 "DNS sentinel" are asserted in the paper with
+      zero evidence and a reviewer will go there first. Two runs at ~8 h each
+      fit in what is left; a second m5 arm would not.
+
+**Do we have time for 18–19 epoch runs? No, and we do not need them.** Both
+m4 arms were decided by epoch 2 and spent eighteen hours getting worse. 8
+epochs is 8.3 h, 19 is 19.8 h, 26 is 27.1 h. Early stopping at warm-up 2 and
+patience 5 ends `m5_priced` around epoch 7 unless it is still improving, in
+which case it has earned the card.
+
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days

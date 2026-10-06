@@ -966,19 +966,46 @@ overstated by `n_circular x free_bits`.
 | `m4_edge_starved` | 8 | 0 | 8 | **2.00** | ~0.48 | | ~0.98 |
 | baselines | — | — | — | — | 0.6488–0.6628 | 49–51 | 0.9822–0.9866 |
 
-Naming one of 11 studies costs ln(11) = 2.398 nats; one of 254 donors costs
-ln(254) = 5.537. `m3_study_raw`'s 6.00 sits above BOTH thresholds, so its
-latent could name the donor rent-free and no adversary could charge for it.
-`m4_edge_starved`'s 2.00 sits below both. Between those two clean points
-donor-blindness improves by 0.14 while cross-donor family moves 0.003.
+**AND THE ALLOWANCE IS NOT A LEVER AT ALL, ESTABLISHED 6 OCTOBER FROM
+`m4_tight16`'s OWN METRICS.** The arithmetic above is right and the
+conclusion drawn from it was wrong. A floor only matters when the model is
+near it, and it is not:
 
-**So the trade-off the campaign has been planning around may not exist in
-fixed code.** The 0.9115 family that made d_z 16 unpublishable came from a
-run carrying the loss-scaling defect, two DSBN bugs, no gene masking and no
-decoder conditioning. The only tight arm with all four fixed is
-`edge_starved`, whose family is 0.98. That is the reading wave m5's rent arms
-are built on, and it is a stronger reading than anything the adversary or the
-decoder conditioning has produced.
+| | epoch 0 | epoch 18 | floor | ln(254) |
+|---|---:|---:|---:|---:|
+| Gaussian KL, nats | 38.5 | 29.1 | | |
+| circular KL, nats | 5.4 | 15.2 | | |
+| **total on the latent** | **43.9** | **44.3** | **3.00** | **5.537** |
+
+The latent carries forty-four nats where the rent-free allowance is three and
+naming a donor costs 5.54. It is fourteen times above the floor and eight
+times above the donor threshold, so no setting of `free_bits` between 0 and
+0.25 changes anything the model does.
+
+**The real quantity is the PRICE of a nat, and it has never been moved.**
+`w_kl_gauss` appears in no config in this repository: it has been 1.0 for
+every arm from r1 to m4, and `m4_tight16`'s gradient report measures the
+Gaussian KL at 0.006x rising to 0.05x of reconstruction's pull on the latent.
+Storing information is effectively free, reconstruction wants donor identity,
+and nothing refuses it.
+
+So the cross-arm correlation between width and patient kNN in the table above
+is real but does not run through the allowance. A wider latent carries more
+nats because it has more dimensions each paying a negligible price. Width and
+price were confounded, not width and allowance.
+
+**What `m4_tight16` adds on top of that.** Its best `val_nb` was epoch 1 at
+0.40441 and nothing in seventeen further epochs beat it, ending at 0.41103,
+while `train_nb` fell 0.4117 to 0.3726: the gap grew 0.0015 to 0.0385.
+`val_patient_knn` rose 0.377 to 0.529 and `val_study_knn` rose 0.650 to
+0.821, breaching the 0.5 guard at epoch 0 and never clearing it. Training
+made the model monotonically more donor-identifiable, and epoch 0 after a
+single pass was the most donor-blind point of a twenty-hour run. The one term
+that worked is the phase head: `phase_knn_xdonor` climbed 0.727 to 0.905.
+
+Wave m5's arms are `m5_priced` (w_kl_gauss 20, so the KL lands near 1x nb)
+and `m5_masked` (sixty percent of each cell hidden, against the seventeen
+percent every arm so far has used).
 
 
 ## 7l. What scGPT's DAB does that ours did not, read from their source

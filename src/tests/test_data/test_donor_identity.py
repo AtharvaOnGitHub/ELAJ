@@ -91,3 +91,40 @@ class TestResolveAll:
         out = a.resolve_all(["x", "z", "y"])
         assert len(out) == 3
         assert out[0] == out[1] != out[2]
+
+
+class TestAliasingCanBeTurnedOff:
+    """`donor_aliasing: false` must reproduce the pre-October-2026 wall.
+
+    Aliasing moved the split, so an arm trained before it cannot be scored
+    against the current one: seven of the fifteen aliased people were
+    assigned to opposite sides, which puts cells the arm TRAINED on into val
+    or test, and `benchmark_baselines.py` has no SplitGuard to refuse them.
+    The switch exists so an old checkpoint is scored on its own wall.
+    """
+
+    def test_an_empty_aliases_resolves_every_id_to_itself(self):
+        """The off path builds a DonorAliases and never calls add_study, so
+        nothing downstream needs a branch. That only holds if an untouched
+        instance is the identity."""
+        aliases = DonorAliases()
+        for pid in ("donor_a", "donor_b", "P0001"):
+            assert aliases.canonical(pid) == pid
+        assert aliases.resolve_all(["x", "y"]) == ["x", "y"]
+        assert aliases.aliased() == {}
+
+    def test_off_keeps_two_ids_for_one_person_apart(self):
+        """The defect, on purpose: with aliasing off the two ids that share a
+        sample stay separate donors, which is what the old wall did."""
+        on = DonorAliases()
+        on.add_study(["id_a", "id_b"], ["sample_1", "sample_1"])
+        assert on.canonical("id_a") == on.canonical("id_b")
+
+        off = DonorAliases()   # add_study never called, as load_corpus does
+        assert off.canonical("id_a") != off.canonical("id_b")
+
+    def test_the_config_default_is_on(self):
+        from endo_model.configs.data_config import SplitConfig
+        assert SplitConfig().donor_aliasing is True
+        assert SplitConfig.from_dict({}).donor_aliasing is True
+        assert SplitConfig.from_dict({"donor_aliasing": False}).donor_aliasing is False

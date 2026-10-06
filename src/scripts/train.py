@@ -120,6 +120,7 @@ def main() -> None:
         val_fraction=data_cfg.splits.val_fraction,
         test_fraction=data_cfg.splits.test_fraction,
         seed=data_cfg.splits.seed,
+        donor_aliasing=data_cfg.splits.donor_aliasing,
         max_cells_per_study=data_cfg.max_cells_per_study,
         include_disease_statuses=data_cfg.include_disease_statuses,
         tissue_hierarchy_path=(

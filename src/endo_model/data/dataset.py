@@ -519,8 +519,13 @@ def load_corpus(
     tissue_hierarchy: Optional[TissueHierarchy],
     tissue_names: dict[int, str],
     platform: Optional[StudyPlatform],
+    donor_aliasing: bool = True,
 ) -> LoadedCorpus:
-    """Read every study and decide the donor split. No split is applied here."""
+    """Read every study and decide the donor split. No split is applied here.
+
+    `donor_aliasing` False leaves every donor id its own person, which is the
+    wall every arm up to m4 trained against. See configs/data_config.py.
+    """
     try:
         import anndata
     except ImportError as exc:
@@ -565,13 +570,23 @@ def load_corpus(
     # out under another; cells that a conflict would have orphaned simply
     # follow their donor. See data/donor_identity.py.
     aliases = DonorAliases()
-    for s in studies:
-        samples = (s.adata.obs[_SAMPLE_COLUMN].astype(str).tolist()
-                   if _SAMPLE_COLUMN in s.adata.obs.columns else None)
-        aliases.add_study(s.patients, samples)
-    logger.info(aliases.describe())
-    for name, ids in aliases.aliased().items():
-        logger.info("  one donor %r is also known as %s", name, ids[1:])
+    if donor_aliasing:
+        for s in studies:
+            samples = (s.adata.obs[_SAMPLE_COLUMN].astype(str).tolist()
+                       if _SAMPLE_COLUMN in s.adata.obs.columns else None)
+            aliases.add_study(s.patients, samples)
+        logger.info(aliases.describe())
+        for name, ids in aliases.aliased().items():
+            logger.info("  one donor %r is also known as %s", name, ids[1:])
+    else:
+        # An empty DonorAliases resolves every id to itself, so nothing
+        # downstream needs a branch. Loud because it is the wrong default and
+        # is only correct when scoring a checkpoint trained on the old wall.
+        logger.warning(
+            "Donor aliasing is OFF: every donor id is treated as its own "
+            "person, which reproduces the pre-October-2026 split. Correct ONLY "
+            "for scoring an arm that trained on it. A run that TRAINS with "
+            "this off will put the same person in train and in test.")
 
     # Build patient -> split assignment, stratified by study AND by tissue.
     # Column 2 of the level matrix is tissue_type: the level where
@@ -648,6 +663,7 @@ class EndometriosisDataset:
         study_platform_path: Optional[str] = None,
         sample_platform_path: Optional[str] = None,
         extra_obs_columns: Optional[list[str]] = None,
+        donor_aliasing: bool = True,
         loaded: Optional[LoadedCorpus] = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
@@ -687,6 +703,7 @@ class EndometriosisDataset:
             loaded = load_corpus(
                 study_configs, val_fraction, test_fraction, seed,
                 self._tissue_hierarchy, self._tissue_names, self._platform,
+                donor_aliasing=donor_aliasing,
             )
         self._cells = self._build_split(loaded, split, keep_codes,
                                         max_cells_per_study, seed)
@@ -717,6 +734,7 @@ class EndometriosisDataset:
             study_configs,
             kwargs.get("val_fraction", 0.15), kwargs.get("test_fraction", 0.15),
             kwargs.get("seed", 24), tissue_hierarchy, tissue_names, platform,
+            donor_aliasing=kwargs.get("donor_aliasing", True),
         )
         return {
             split: cls(study_configs, vocab, split=split, loaded=loaded, **kwargs)

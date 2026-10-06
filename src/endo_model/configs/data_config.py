@@ -34,6 +34,19 @@ class SplitConfig:
     val_fraction: float = 0.15
     test_fraction: float = 0.15
     seed: int = 24
+    # Two donor ids that share a `source_sample_id` are one person, resolved
+    # before the split so nobody is assigned twice. See data/donor_identity.py.
+    #
+    # SET THIS FALSE TO SCORE AN ARM TRAINED BEFORE OCTOBER 2026. Aliasing
+    # resolved 30 ids to 15 people and moved the wall, so the split the
+    # current code builds is NOT the one m1 to m4 trained against: seven of
+    # those fifteen were previously assigned to opposite sides, which means up
+    # to 5,026 cells that were in an old arm's TRAIN set now land in val or
+    # test. `benchmark_baselines.py` has no SplitGuard, so it would score
+    # those cells without complaint and inflate every number in the row.
+    # False reproduces the old wall exactly, which is the honest way to score
+    # a checkpoint that was trained on it.
+    donor_aliasing: bool = True
 
     @classmethod
     def from_dict(cls, d: dict) -> "SplitConfig":
@@ -42,6 +55,7 @@ class SplitConfig:
             val_fraction=float(d.get("val_fraction", 0.15)),
             test_fraction=float(d.get("test_fraction", 0.15)),
             seed=int(d.get("seed", 24)),
+            donor_aliasing=bool(d.get("donor_aliasing", True)),
         )
 
 

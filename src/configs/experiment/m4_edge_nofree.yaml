@@ -232,3 +232,13 @@ overrides:
   model.dab.n_layers: 2
   model.dab.normalise: false
   model.dab.dropout: 0.1
+
+  # ── PINNED, OCTOBER 2026: THE DONOR WALL THIS ARM ACTUALLY TRAINED ON ────
+  # Donor aliasing resolved 30 ids to 15 people and moved the split. This arm
+  # trained before that, against a 269-id wall, and seven of those fifteen
+  # people were assigned to opposite sides of it. Scoring the checkpoint
+  # against the current 254-donor wall would put up to 5,026 cells it TRAINED
+  # on into val or test, and benchmark_baselines.py has no SplitGuard to
+  # refuse them. False reproduces the wall this arm was trained and must be
+  # scored against. New arms leave it True.
+  data.splits.donor_aliasing: false

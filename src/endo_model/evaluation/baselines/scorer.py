@@ -118,6 +118,29 @@ class ScorerSettings:
     permutations: int = 200
     seed: int = SEED
     scib_neighbours: int = 15
+    # Every method is projected to this many components before the study
+    # neighbour search. kNN purity falls as the ambient dimension rises even
+    # when the structure is unchanged -- 39.7% excess in 8 dimensions against
+    # 28.2% in 60 on synthetic data with one fixed amount of separation -- so
+    # an ELAJ latent of 24 would score as better mixed than a 16-dimensional
+    # baseline for free. 16 is every baseline's width, and `project` is a
+    # no-op for anything already at or below it. None disables the projection
+    # and makes the column incomparable across widths.
+    #
+    # IT REDUCES THE BIAS, IT DOES NOT ERASE IT. Projecting a 32-dimensional
+    # latent whose extra 29 dimensions are pure noise down to 3 moves the
+    # measured separation from 0.536 to 0.794 against the 3-dimensional
+    # original's 0.887: the gap shrinks 0.35 to 0.09, not to 0. PCA cannot
+    # recover the informative subspace when the noise carries equal variance.
+    # A trained latent is the easier case, since its dimensions are ordered
+    # by variance that means something, but the residual is real and a
+    # difference of a few hundredths between methods of different width
+    # should not be read as a result.
+    study_mixing_components: int | None = 16
+    # Every other battery is disabled by emptying its label tuple. This one
+    # reads `corpus.study_id`, which always exists, so it needs its own
+    # switch to be controllable the same way.
+    study_mixing: bool = True
     knn_labels: tuple[str, ...] = KNN_LABELS
     cross_donor_labels: tuple[str, ...] = CROSS_DONOR_LABELS
     scib_labels: tuple[str, ...] = SCIB_LABELS
@@ -173,6 +196,7 @@ class EmbeddingScorer:
         rows += self._knn(embedding.latent, corpus, stamp)
         rows += self._cross_donor(embedding.latent, corpus, stamp)
         rows += self._scib(embedding.latent, corpus, stamp)
+        rows += self._study_mixing(embedding.latent, corpus, stamp)
         return rows
 
     # ── the three batteries ───────────────────────────────────────────────
@@ -186,6 +210,70 @@ class EmbeddingScorer:
         if name == "patient_id":
             return corpus.patient_id
         return corpus.meta.get(name)
+
+    def _study_mixing(self, latent, corpus, stamp) -> list[ScoreRow]:
+        """How separated the studies are in this embedding, overall and each.
+
+        WHY THIS BATTERY EXISTS. Batch correction is the claim and until
+        October 2026 no baseline had a study-level number at all. The scored
+        table carried `scib-ari`, `scib-nmi` and `scib-silhouette_bio`, which
+        are the biological-conservation half of scIB, plus three batch
+        metrics that are degenerate on this corpus: `ilisi_knn` reads exactly
+        0.0000 and `pcr_batch` exactly 1.0000 for PCA, scVI, scANVI and ELAJ
+        alike, and `kbet` sits at 0.000 to 0.025 for all of them. Eleven
+        studies of this size and composition saturate them.
+
+        kNN study purity does not saturate: on the same corpus it spreads
+        0.629 to 0.977 per study against a 0.091 floor, and 0.714 to 0.834
+        between ELAJ arms. It was computed in the training loop and nowhere
+        else, so it could never be read against a baseline.
+
+        `study-mixing` is the comparable number: purity rescaled so 0 is
+        perfectly mixed and 1 is fully separated, which removes the corpus's
+        own share term. LOW IS GOOD. `study-purity` rows carry the raw
+        fractions, one per study plus the corpus, because a single figure
+        hides whether eleven studies are half mixed or ten are mixed and one
+        sits in an island.
+        """
+        from endo_model.evaluation import study_mixing
+
+        if not self.settings.study_mixing:
+            return []
+        n_components = self.settings.study_mixing_components
+        got = study_mixing.measure(
+            latent, corpus.study_id, k=self.settings.k,
+            seed=self.settings.seed, n_components=n_components,
+        )
+        if not got:
+            logger.info("   study    too few cells to measure")
+            return []
+
+        projected = min(latent.shape[1], n_components or latent.shape[1])
+        shared = (f"k={got['k']}; {projected}d; "
+                  f"mixed={got['floor']:.3f}; {len(got['per_study'])} studies")
+        rows = [
+            ScoreRow(test="study-mixing", label="all studies",
+                     n_cells=got["n_cells"], value=got["excess"],
+                     note=f"high is BAD: 0=perfectly mixed, 1=fully "
+                          f"separated; purity={got['purity']:.3f}; {shared}",
+                     **stamp),
+            ScoreRow(test="study-purity", label="all studies",
+                     n_cells=got["n_cells"], value=got["purity"],
+                     note=f"high is BAD: own-study share of {got['k']} "
+                          f"neighbours; {shared}", **stamp),
+        ]
+        for row in got["per_study"]:
+            name = corpus.study_names.get(row["study_id"], str(row["study_id"]))
+            rows.append(ScoreRow(
+                test="study-purity", label=name, n_cells=row["n_cells"],
+                value=row["purity"],
+                note=f"high is BAD: mixed={row['floor']:.3f}; "
+                     f"excess={row['excess']:.1%}; {shared}", **stamp))
+        logger.info("   study    %-20s n=%7d separated=%5.1f%% (purity %.3f "
+                    "of floor %.3f, %dd)", "all studies", got["n_cells"],
+                    100.0 * got["excess"], got["purity"], got["floor"],
+                    projected)
+        return rows
 
     def _knn(self, latent, corpus, stamp) -> list[ScoreRow]:
         from endo_model.evaluation.latent_validation import label_knn_agreement

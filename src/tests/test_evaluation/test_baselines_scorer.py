@@ -105,8 +105,108 @@ class TestScore:
 
     def test_a_label_no_cell_carries_is_skipped_silently(self):
         c = make_corpus(30)
+        # study_mixing off: it reads corpus.study_id rather than a label, so
+        # it is the one battery that still produces rows when every label
+        # tuple is empty. That is correct, and this test is about labels.
         s = EmbeddingScorer(ScorerSettings(k=5, k_cross_donor=10, permutations=0,
                                            knn_labels=("does not exist",),
                                            cross_donor_labels=(),
-                                           scib_labels=()))
+                                           scib_labels=(),
+                                           study_mixing=False))
         assert s.score(_family_embedding(c), c) == []
+
+
+# ── study mixing ─────────────────────────────────────────────────────────────
+
+def _study_embedding(corpus, scale=10.0, noise=0.05, seed=0, name="study"):
+    """A latent that encodes STUDY and nothing else.
+
+    `scale` against `noise` sets how separated the studies are. The default
+    is far apart; the projection test needs a middling value, because a
+    saturated purity of 1.000 cannot fall and so hides the very effect that
+    test exists to show.
+    """
+    rng = np.random.default_rng(seed)
+    centre = np.where(corpus.study_id == 0, 1.0, -1.0)[:, None]
+    return Embedding(name, centre * np.ones((1, 3)) * scale
+                     + rng.normal(0, noise, (corpus.n_cells, 3)), 0.0)
+
+
+class TestStudyMixing:
+    """Batch correction is the claim and no baseline carried a study-level
+    number until October 2026. The scored table had the biological half of
+    scIB plus three batch metrics that are degenerate on this corpus:
+    `ilisi_knn` reads exactly 0.0000 and `pcr_batch` exactly 1.0000 for PCA,
+    scVI, scANVI and ELAJ alike."""
+
+    def _rows(self, embedding, corpus, **kw):
+        scorer = EmbeddingScorer(ScorerSettings(**kw) if kw else None)
+        return [r for r in scorer.score(embedding, corpus)
+                if r.test in ("study-mixing", "study-purity")]
+
+    def test_a_study_embedding_reads_as_fully_separated(self):
+        corpus = make_corpus()
+        rows = self._rows(_study_embedding(corpus), corpus)
+        sep = [r for r in rows if r.test == "study-mixing"]
+        assert len(sep) == 1
+        assert sep[0].value > 0.95, sep[0].note
+
+    def test_a_family_embedding_reads_as_mixed(self):
+        """Cell family is planted in both studies, so an embedding built from
+        it alone must not separate them. This is the direction check: if the
+        two cases came out the same way round the metric would be inverted
+        and nothing else here would notice."""
+        corpus = make_corpus()
+        rows = self._rows(_family_embedding(corpus), corpus)
+        sep = [r for r in rows if r.test == "study-mixing"][0]
+        assert sep.value < 0.5, sep.note
+
+    def test_one_row_per_study_plus_the_corpus(self):
+        corpus = make_corpus()
+        rows = self._rows(_study_embedding(corpus), corpus)
+        purity = [r for r in rows if r.test == "study-purity"]
+        labels = {r.label for r in purity}
+        assert "all studies" in labels
+        assert labels - {"all studies"} == set(corpus.study_names.values())
+
+    def test_notes_say_which_direction_is_good(self):
+        """Every row in this battery is a high-is-bad number and the report
+        reads the note, so a missing warning is a misread column."""
+        corpus = make_corpus()
+        for r in self._rows(_study_embedding(corpus), corpus):
+            assert "high is BAD" in r.note, r
+
+    def test_the_projection_shrinks_the_width_bias(self):
+        """THE REASON THE PROJECTION EXISTS, and the honest size of its effect.
+
+        kNN purity falls as the ambient dimension rises even when the
+        structure is identical, so a 24-dimensional ELAJ latent would score
+        as better mixed than a 16-dimensional baseline for free. Padding a
+        3-dimensional study split with 29 noise dimensions moves the measured
+        separation 0.887 to 0.536. Projecting both to 3 components brings
+        that gap from 0.35 down to 0.09 -- a factor of nearly four, and NOT
+        to zero, because PCA cannot recover the informative subspace when the
+        noise carries equal variance. The assertion is the shrinkage, not
+        equality, because equality is not what it delivers.
+        """
+        corpus = make_corpus()
+        narrow = _study_embedding(corpus, scale=1.0, noise=1.0, seed=1)
+        rng = np.random.default_rng(1)
+        padded = Embedding(
+            "study-wide",
+            np.hstack([narrow.latent, rng.normal(0, 1.0, (corpus.n_cells, 29))]),
+            0.0)
+
+        def sep(emb, components):
+            rows = self._rows(emb, corpus, study_mixing_components=components)
+            return [r for r in rows if r.test == "study-mixing"][0].value
+
+        raw = abs(sep(padded, None) - sep(narrow, None))
+        projected = abs(sep(padded, 3) - sep(narrow, 3))
+        assert raw > 0.2, raw
+        assert projected < raw / 3.0, (raw, projected)
+
+    def test_the_wide_table_carries_it(self):
+        from endo_model.evaluation.baselines.report import HEADLINE, HEADLINE_NAMES
+        assert ("study-mixing", "all studies") in HEADLINE
+        assert "low=good" in HEADLINE_NAMES[("study-mixing", "all studies")]

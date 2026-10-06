@@ -39,6 +39,7 @@ HEADLINE = (
     ("cross-donor-p", "menstrual phase"),
     ("knn-agreement", "cell family"),
     ("knn-agreement", "patient_id"),
+    ("study-mixing", "all studies"),
 )
 HEADLINE_NAMES = {
     ("cross-donor", "cell family"): "xdonor family",
@@ -47,6 +48,7 @@ HEADLINE_NAMES = {
     ("cross-donor-p", "menstrual phase"): "p",
     ("knn-agreement", "cell family"): "knn family",
     ("knn-agreement", "patient_id"): "knn patient (low=good)",
+    ("study-mixing", "all studies"): "study sep (low=good)",
 }
 
 

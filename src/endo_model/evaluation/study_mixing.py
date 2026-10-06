@@ -211,35 +211,38 @@ def describe(latent: np.ndarray, study_id: np.ndarray, k: int = 30) -> str:
     )
 
 
-def summarise(
+def measure(
     latent: np.ndarray,
     study_id: np.ndarray,
     k: int = 30,
     seed: int = 24,
     n_components: int | None = None,
-    names: dict[int, str] | None = None,
-) -> tuple[str, list[dict]]:
-    """Both readouts from ONE neighbour search.
+) -> dict:
+    """Every purity number from ONE neighbour search, as numbers not text.
 
-    `describe` and `per_study_purity` each run their own search, which is the
-    expensive part. Called every time latent figures are drawn, that doubling
-    is worth avoiding.
+    Separated from `summarise` because the benchmark needs the figures and the
+    training log needs the sentence, and the neighbour search is the expensive
+    part of either. Returns::
 
-    Returns (one-line corpus summary, per-study rows).
+        {"k", "n_cells", "purity", "floor", "excess", "per_study": [rows]}
+
+    `purity` is the share of a cell's k neighbours from its own study, averaged
+    over cells. `floor` is what perfect mixing would give, sum(p^2) over study
+    shares. `excess` rescales purity onto [0, 1] between those: 0 is perfectly
+    mixed and 1 is fully separated, which is the only one of the three that can
+    be compared across corpora. Empty dict when there are too few cells.
+
+    `n_components` matters for any comparison ACROSS methods, because kNN
+    purity falls as the ambient dimension rises even when the structure is
+    unchanged -- see `project`. A 24-dimensional latent scores as better mixed
+    than a 16-dimensional one for free.
     """
     share = own_study_share(latent, study_id, k, seed, n_components)
     if share is None:
-        return f"kNN study purity (k={k}): too few cells to measure", []
+        return {}
 
-    got, floor = float(share.mean()), expected_purity(study_id)
+    purity, floor = float(share.mean()), expected_purity(study_id)
     headroom = 1.0 - floor
-    excess = (got - floor) / headroom if headroom > 0 else float("nan")
-    line = (
-        f"kNN study purity (k={k}): {got:.3f}  "
-        f"[perfectly mixed = {floor:.3f}, fully separated = 1.000]  "
-        f"\u2192 {excess:.1%} of the way to fully separated"
-    )
-
     n_total = len(study_id)
     rows = []
     for s in np.unique(study_id):
@@ -251,4 +254,39 @@ def summarise(
             "floor": float(f),
             "excess": float((pur - f) / (1.0 - f)) if f < 1.0 else float("nan"),
         })
-    return line, rows
+    return {
+        "k": int(min(k, n_total - 1)),
+        "n_cells": int(n_total),
+        "purity": purity,
+        "floor": float(floor),
+        "excess": float((purity - floor) / headroom) if headroom > 0
+        else float("nan"),
+        "per_study": rows,
+    }
+
+
+def summarise(
+    latent: np.ndarray,
+    study_id: np.ndarray,
+    k: int = 30,
+    seed: int = 24,
+    n_components: int | None = None,
+    names: dict[int, str] | None = None,
+) -> tuple[str, list[dict]]:
+    """Both readouts from ONE neighbour search: the sentence and the rows.
+
+    `describe` and `per_study_purity` each run their own search, which is the
+    expensive part. Called every time latent figures are drawn, that doubling
+    is worth avoiding.
+
+    Returns (one-line corpus summary, per-study rows).
+    """
+    got = measure(latent, study_id, k, seed, n_components)
+    if not got:
+        return f"kNN study purity (k={k}): too few cells to measure", []
+    line = (
+        f"kNN study purity (k={got['k']}): {got['purity']:.3f}  "
+        f"[perfectly mixed = {got['floor']:.3f}, fully separated = 1.000]  "
+        f"\u2192 {got['excess']:.1%} of the way to fully separated"
+    )
+    return line, got["per_study"]

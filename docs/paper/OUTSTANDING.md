@@ -117,28 +117,38 @@ and it comes before any scoring pass.
 - [ ] `m4_tight16` finishes (~7 Oct)
 - [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
       --skip-probe`, 3 h, **not** the 12 h default
-Two shots at the answer, not a comparison. Both are twelve epochs with
-warm-up 2, about thirteen hours, because `m4_tight16`'s best `val_nb` was
-epoch 1 and warm-up 6 hid it from early stopping for another seventeen.
+Two shots at the answer, not a comparison. Both keep `max_epochs` 26 so the
+beta ramp, the `lambda_dab` ramp and the cosine LR are identical to
+`m4_tight16`; early stopping with warm-up 2 and patience 5 ends the run,
+which on `m4_tight16`'s trajectory is about epoch 7 and seven hours.
+Shortening `max_epochs` would have compressed all three schedules by 2.2x
+and made the arms incomparable with the run they are answering.
 
-- [ ] **`m5_priced` starts now.** `w_kl_gauss` 20, which puts the Gaussian KL
-      near 1x reconstruction's gradient pull where 1.0 measured 0.05x. The
-      latent has carried 44 nats against a 3-nat floor all campaign and
-      `w_kl_gauss` has never left 1.0 in any config. **Target: latent under
-      6 nats, patient kNN ≤ 0.45, `study_knn` clearing the 0.5 guard for the
-      first time, family ≥ 0.97.** Kill if `mu_gauss_norm` collapses with
-      `val_nb` above the mean-profile baseline by epoch 3.
-- [ ] **`m5_masked` queues behind `m4_tight16`.** `gene_mask_target` 6000,
-      hiding sixty percent of each cell against the seventeen percent every
-      arm has used, including both arms named "masked". Attacks the same
-      memorisation from the input instead of the objective, and corrupts the
-      DNS study fingerprint much further. **Target: train-val gap under 0.01
-      at epoch 12, patient kNN ≤ 0.45, `val_nb` beating 0.40441.** Kill if
-      `val_nb` is above 0.43 at epoch 4.
+- [ ] **`m5_priced` starts now.** `w_kl_gauss` 20, putting the Gaussian KL
+      near 1x reconstruction's gradient pull where 1.0 measured 0.05x.
+      Effective beta 10. The latent has carried 44 nats against a 3-nat
+      floor all campaign and `w_kl_gauss` has never left 1.0 in any config.
+      **Target: latent under 6 nats, patient kNN ≤ 0.45, `study_knn`
+      clearing the 0.5 guard for the first time, family ≥ 0.97.** Kill if
+      `mu_gauss_norm` collapses with `val_nb` above the mean-profile
+      baseline by epoch 3.
+- [ ] **`m5_upfront` queues behind `m4_tight16`.** `warmup_fraction` 0.20 to
+      0.02 and `w_kl_gauss` 60, effective beta 30. The latent held 43.9 nats
+      at epoch 0 while beta was still near zero: it fills during the ramp,
+      when storage is free, and a 0.05x KL cannot evict it afterwards. This
+      arm never lets it fill. **Target: latent never above 10 nats, patient
+      kNN ≤ 0.45, `val_nb` within 0.01 of 0.40441.** Likelier of the pair to
+      trip its kill rule: past the 1-20 collapse band with no ramp, so kill
+      on `mu_gauss_norm` or kappa by epoch 3 and give the card back.
+- [ ] `gene_mask_target` stays 12500 in both. The masker equalises the
+      measured gene COUNT so the number of DNS tokens stops being a study
+      fingerprint, and 12500 against a smallest panel of 13,144 already
+      does that completely. It is not scGPT's masked-value objective, and
+      lowering it would discard biology without weakening the fingerprint.
 - [ ] `m5_adversary`, `m5_adversary_cross` are built and tested and wait.
-      `m4_tight16`'s gradient report has `dab` climbing 0.15x to 0.70x nb
-      while `patient_knn` climbs with it, which is the +0.890 correlation
-      inside a single run. Both m5 arms cut `lambda_dab` to a quarter.
+      `m4_tight16`'s `dab` pull climbed 0.15x to 0.70x nb while
+      `patient_knn` climbed with it. Both live arms cut `lambda_dab` to a
+      quarter.
 - [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
       removed, C-3 Gaussian-only, no-phase-head reference
 - [ ] Fire the queue 8 Oct, both cards, unattended through the writing days

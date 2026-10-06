@@ -1,0 +1,145 @@
+name: m5_upfront
+description: >
+  THE OTHER BET: BY THE TIME ANYTHING CHARGES RENT, THE TENANT IS ALREADY IN.
+
+  Look at m4_tight16's epoch 0. The latent already holds 43.9 nats while
+  beta_kl is still near zero, because beta ramps from 0 over the first twenty
+  percent of training, which is epoch 5.2 of 26. The latent fills during the
+  ramp, when storage is free, and once it is full a KL at five percent of
+  reconstruction's gradient cannot evict anything: epoch 18 reads 44.3 nats.
+  Nineteen epochs and the content never moved.
+
+  That is a failure of TIMING, not of magnitude, and it is a different
+  problem from the one m5_priced attacks. A latent that is never allowed to
+  fill does not have to be emptied.
+
+  TWO FIELDS, BOTH PUSHING THE SAME WAY. warmup_fraction 0.20 to 0.02, so
+  beta reaches its full value inside the first half epoch rather than after
+  five: roughly 2,400 steps of 121,000 instead of 24,000. And w_kl_gauss 60
+  rather than 20, so the price is three times m5_priced's. Charge a lot, and
+  charge from the first step.
+
+  WHY THIS IS THE AGGRESSIVE ARM AND IS LABELLED AS SUCH. Effective beta is
+  beta_max x w_kl_gauss = 0.5 x 60 = 30, which is past the 1-20 band the
+  literature flags for posterior collapse, and the ramp that exists to
+  establish reconstruction before the KL bites is gone. Both of those are
+  deliberate and both are why the kill rule below is short. The run that
+  actually collapsed, 50132670, sat at an effective 469 from the
+  mean-versus-sum defect, so there is an order of magnitude between here and
+  the only collapse this project has measured.
+
+  WHY NOT TOUCH THE MASKING INSTEAD. The first draft of this arm hid sixty
+  percent of each cell and justified it by scGPT's masked autoencoder. That
+  was a false comparison. Their masking is a training OBJECTIVE, the model
+  predicts the masked values and that is the learning signal. Ours exists to
+  equalise the measured gene COUNT so the number of DNS tokens stops being a
+  study fingerprint, and at 12,500 against a smallest panel of 13,144 that
+  job is already done completely. Lowering it would not weaken the count
+  fingerprint further; it would only throw away biology.
+
+  WHAT WOULD MAKE THIS THE PAPER'S MODEL. The latent never exceeding ten nats
+  at any epoch, patient kNN at 0.45 or below, and val_nb within 0.01 of
+  m4_tight16's 0.40441. A latent that was never allowed to memorise is a
+  cleaner mechanism to write up than one that had to be taxed into forgetting.
+
+  WHAT WOULD KILL IT, AND THIS ARM IS THE LIKELIER OF THE PAIR TO TRIP IT.
+  mu_gauss_norm collapsing toward zero, or median kappa below 1e-2 on more
+  than one circular dimension, with val_nb above the mean-profile baseline,
+  by epoch 3. Give the card back rather than watch it; m5_priced is the
+  conservative version of the same idea and is worth the time instead.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m5_upfront/
+seed: 24
+
+overrides:
+  # 26 EPOCHS FOR THE SCHEDULES, EARLY STOPPING FOR THE WALL CLOCK.
+  # Three schedules are keyed to max_epochs and nothing else:
+  #   beta_kl       ramps over warmup_fraction x total_steps
+  #   lambda_dab    ramps over the first 50% of total_steps
+  #   CosineAnnealingLR  T_max = max_epochs, stepped per epoch
+  # Cutting max_epochs to 12 would compress all three by 2.2x, so the run
+  # would not be the first twelve epochs of m4_tight16, it would be a
+  # different optimisation with a faster LR decay. 26 keeps every schedule
+  # identical to m4_tight16; warm-up 2 and patience 5 end the run when it
+  # stops improving, which on m4_tight16's trajectory is about epoch 7 and
+  # seven hours. If it keeps improving it has earned the card.
+  training.max_epochs: 26
+  training.early_stop_patience: 5
+  # 2, not 6. m4_tight16's best val_nb was EPOCH 1 at 0.40441 and early
+  # stopping ignores warm-up epochs entirely, so the best epoch of the run
+  # was invisible to it; the counter started at epoch 6 and the run went to
+  # 18, ending at 0.41103. The beta ramp completes at epoch 5.2, so a run
+  # that stops at 7 has seen the whole of it.
+  training.early_stop_warmup_epochs: 2
+
+  training.batch_size: 256
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.5
+  training.block_probe_every: 2
+  training.keep_every_epochs: 3
+
+  # UNCHANGED AT 12500, AND ON PURPOSE. This masker exists to equalise the
+  # measured gene COUNT so the number of DNS tokens stops being a study
+  # fingerprint, and 12500 sits just under the smallest panel (13,144 against
+  # 15,031 for the largest), which is as far as equalisation can go. It is
+  # not scGPT's masked-value objective and lowering it would not improve the
+  # count fingerprint, which is already fully removed; it would only discard
+  # biology.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  training.kl_annealing.warmup_fraction: 0.02
+
+  # ── THE PRICE OF A NAT, WHICH HAS NEVER LEFT 1.0 IN ANY CONFIG ───────────
+  model.loss.w_kl_gauss: 60.0
+  model.loss.w_kl_circ: 6.0
+  # Unchanged at 0.25, and for the first time it may actually bind. A floor
+  # only matters when the model is near it; at 44 nats it was decoration.
+  model.loss.free_bits: 0.25
+
+  # CUT TO A QUARTER OF m4_tight16's 336. Its gradient report had dab at
+  # 0.15x nb rising to 0.70x while patient_knn rose 0.377 to 0.529 in step,
+  # which is the +0.890 correlation showing up inside a single run. Note that
+  # lambda_dab ramps over the first 13 epochs, so a run stopping at 7 sees
+  # about half of even this reduced value. That is acceptable here and it is
+  # stated rather than hidden.
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 84.0
+  model.dab.hidden_dim: 64
+  model.dab.n_layers: 2
+  model.dab.normalise: false
+  model.dab.dropout: 0.1
+
+  model.cce.enabled: false
+  model.ecs.enabled: false
+
+  model.classifier.enabled: true
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
+  # climbed 0.727 to 0.905 across the run while every other axis decayed.
+  model.loss.w_cls: 40.0
+
+  model.d_gauss: 8
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

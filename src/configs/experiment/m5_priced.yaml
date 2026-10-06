@@ -2,58 +2,57 @@ name: m5_priced
 description: >
   THE LATENT HAS BEEN FREE FOR THE WHOLE PROJECT. This arm charges for it.
 
-  WHAT m4_tight16 ACTUALLY SHOWED, from its own metrics.csv and log.
+  WHAT m4_tight16 SHOWED, from its own metrics.csv and log.
 
       val_nb            best at EPOCH 1 (0.40441), 0.41103 by epoch 18
       train_nb          0.4117 -> 0.3726, so the gap grew 0.0015 -> 0.0385
-      val_patient_knn   0.377 -> 0.529, RISING
-      val_study_knn     0.650 -> 0.821, RISING, guard <= 0.5 breached at
-                        epoch 0 and never cleared once
+      val_patient_knn   0.377 -> 0.529, RISING every epoch
+      val_study_knn     0.650 -> 0.821, guard <= 0.5 breached at epoch 0 and
+                        never cleared once in nineteen epochs
       KL on the latent  43.9 nats at epoch 0, 44.3 at epoch 18
       free_bits floor   12 KL dims x 0.25 = 3.00 nats
       gradient pull     nb 1.000x, kl_gauss 0.006x -> 0.05x, dab 0.15x ->
                         0.70x, cls 0.22x -> 0.71x
 
   Training made the model MORE donor-identifiable every epoch. Epoch 0, after
-  a single pass, was the most donor-blind point of the entire twenty-hour run.
+  a single pass, was the most donor-blind point of a twenty-hour run.
 
-  AND THE REASON IS IN THE LAST TWO ROWS. The latent carries forty-four nats
-  while the rent-free allowance is three, so the floor is not binding and
+  THE REASON IS IN THE LAST TWO ROWS. The latent carries forty-four nats
+  where the rent-free allowance is three, so the floor is not binding and
   never was: naming one of 254 donors costs ln(254) = 5.537 nats and this
-  latent has eight times that, paid for willingly, because the KL's pull on
+  latent holds eight times that, paid for willingly, because the KL's pull on
   the latent is five percent of reconstruction's. Reconstruction wants donor
-  identity, and nothing in the objective charges enough to refuse it.
+  identity and nothing charges enough to refuse it.
 
-  SO free_bits WAS NEVER A LEVER, and the two arms that preceded this one in
-  the repository tried to move a floor the model sits forty nats above. The
-  cross-arm correlation between width and patient kNN is real but the causal
-  story through the allowance is not: a wider latent carries more nats
-  because it has more dimensions each paying a negligible price, not because
-  an allowance crossed a threshold.
+  SO free_bits WAS NEVER A LEVER. An earlier pair of arms in this repository
+  tried to move a floor the model sits forty nats above; they were deleted
+  unrun. The cross-arm correlation between width and patient kNN is real but
+  does not run through the allowance: a wider latent carries more nats
+  because it has more dimensions each paying a negligible price. Width and
+  PRICE were confounded, not width and allowance.
 
-  WHAT HAS NEVER BEEN TOUCHED IS THE PRICE. `w_kl_gauss` does not appear in a
-  single config in this project; it has been 1.0 for every arm from r1 to m4,
-  and at 1.0 the gradient report measures the Gaussian KL at 0.006x to 0.05x
-  of reconstruction. The term is linear in the weight, so 20 puts it at
-  roughly 1x nb: a genuine beta-VAE regime, where storing a nat costs about
-  what reconstructing a gene is worth. `w_kl_circ` goes to 2.0, holding the
-  same one-tenth ratio to the Gaussian branch that every arm has used.
+  w_kl_gauss DOES NOT APPEAR IN A SINGLE CONFIG IN THIS PROJECT. It has been
+  1.0 for every arm from r1 to m4, and at 1.0 the gradient report measures
+  the Gaussian KL at 0.006x to 0.05x of reconstruction. The term is linear in
+  the weight, so 20 puts it near 1x nb: storing a nat costs about what
+  reconstructing a gene is worth. w_kl_circ goes to 2.0, holding the
+  one-tenth ratio to the Gaussian branch that every arm has used.
 
-  WHERE THE CEILING IS. Run 50132670 collapsed its latent at an effective
-  beta around 469, which came from the mean-versus-sum defect rather than
-  from a choice. Between 1 and 469 nothing has been tried. 20 is well inside
-  that, and the collapse signal is visible in mu_gauss_norm and the
-  per-dimension KL within three epochs.
+  WHERE THE CEILING IS. Effective beta here is beta_max x w_kl_gauss = 0.5 x
+  20 = 10, because both terms are already per gene. Run 50132670 collapsed at
+  an effective 469, which came from the mean-versus-sum defect rather than
+  from a choice. 10 is inside the 1-20 band the literature flags as a
+  collapse risk, which is the point: this is the first arm to enter it
+  deliberately.
 
   WHAT WOULD MAKE THIS THE PAPER'S MODEL. Latent content falling from 44 nats
   to under 6, patient kNN at 0.45 or below, study_knn clearing the 0.5 guard
-  for the first time in the campaign, and cross-donor family holding at 0.97.
-  Phase is the term that already works: phase_knn_xdonor climbed 0.727 to
-  0.905 on m4_tight16 while every other axis decayed.
+  for the first time in the campaign, cross-donor family holding at 0.97, and
+  phase holding its gain.
 
   WHAT WOULD KILL IT. mu_gauss_norm collapsing toward zero with val_nb above
   the mean-profile baseline, by epoch 3. That is the latent giving up on the
-  cell rather than on the donor, and it is readable at the first block probe.
+  cell rather than on the donor, and the first block probe reads it.
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
@@ -62,15 +61,24 @@ output_dir: outputs/m_series/m5_priced/
 seed: 24
 
 overrides:
-  # TWELVE EPOCHS, NOT TWENTY-SIX. m4_tight16's best val_nb was EPOCH 1, at
-  # 0.40441, and nothing in the following seventeen epochs beat it; epoch 18
-  # read 0.41103. It ran twenty hours to go backwards. Warm-up 6 is why it
-  # kept going: early stopping ignores warm-up epochs entirely, so the best
-  # epoch of the run was invisible to it and the counter only started at
-  # epoch 6. Warm-up 2 here, and the card comes back in about thirteen hours
-  # instead of twenty-eight.
-  training.max_epochs: 12
+  # 26 EPOCHS FOR THE SCHEDULES, EARLY STOPPING FOR THE WALL CLOCK.
+  # Three schedules are keyed to max_epochs and nothing else:
+  #   beta_kl       ramps over warmup_fraction x total_steps
+  #   lambda_dab    ramps over the first 50% of total_steps
+  #   CosineAnnealingLR  T_max = max_epochs, stepped per epoch
+  # Cutting max_epochs to 12 would compress all three by 2.2x, so the run
+  # would not be the first twelve epochs of m4_tight16, it would be a
+  # different optimisation with a faster LR decay. 26 keeps every schedule
+  # identical to m4_tight16; warm-up 2 and patience 5 end the run when it
+  # stops improving, which on m4_tight16's trajectory is about epoch 7 and
+  # seven hours. If it keeps improving it has earned the card.
+  training.max_epochs: 26
   training.early_stop_patience: 5
+  # 2, not 6. m4_tight16's best val_nb was EPOCH 1 at 0.40441 and early
+  # stopping ignores warm-up epochs entirely, so the best epoch of the run
+  # was invisible to it; the counter started at epoch 6 and the run went to
+  # 18, ending at 0.41103. The beta ramp completes at epoch 5.2, so a run
+  # that stops at 7 has seen the whole of it.
   training.early_stop_warmup_epochs: 2
 
   training.batch_size: 256
@@ -82,23 +90,32 @@ overrides:
   training.block_probe_every: 2
   training.keep_every_epochs: 3
 
+  # UNCHANGED AT 12500, AND ON PURPOSE. This masker exists to equalise the
+  # measured gene COUNT so the number of DNS tokens stops being a study
+  # fingerprint, and 12500 sits just under the smallest panel (13,144 against
+  # 15,031 for the largest), which is as far as equalisation can go. It is
+  # not scGPT's masked-value objective and lowering it would not improve the
+  # count fingerprint, which is already fully removed; it would only discard
+  # biology.
   training.gene_mask_target: 12500
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
+  training.kl_annealing.warmup_fraction: 0.20
 
-  # ── THE PRICE OF A NAT ───────────────────────────────────────────────────
+  # ── THE PRICE OF A NAT, WHICH HAS NEVER LEFT 1.0 IN ANY CONFIG ───────────
   model.loss.w_kl_gauss: 20.0
   model.loss.w_kl_circ: 2.0
   # Unchanged at 0.25, and for the first time it may actually bind. A floor
-  # is only a floor when the model is near it; at 44 nats it was decoration.
+  # only matters when the model is near it; at 44 nats it was decoration.
   model.loss.free_bits: 0.25
 
-  # CUT TO A QUARTER OF m4_tight16's 336. The gradient report had dab at
-  # 0.15x nb rising to 0.70x while patient_knn rose 0.377 to 0.529 in step
-  # with it, which is the +0.890 correlation showing up inside a single run.
-  # The adversary stays in because the paper describes it, not because it is
-  # expected to carry this arm.
+  # CUT TO A QUARTER OF m4_tight16's 336. Its gradient report had dab at
+  # 0.15x nb rising to 0.70x while patient_knn rose 0.377 to 0.529 in step,
+  # which is the +0.890 correlation showing up inside a single run. Note that
+  # lambda_dab ramps over the first 13 epochs, so a run stopping at 7 sees
+  # about half of even this reduced value. That is acceptable here and it is
+  # stated rather than hidden.
   model.loss.w_dab: 0.5
   model.dab.lambda_dab: 84.0
   model.dab.hidden_dim: 64
@@ -114,7 +131,7 @@ overrides:
   model.classifier.dropout: 0.0
   model.classifier.label_smoothing: 0.05
   # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
-  # climbed 0.727 to 0.905 across the run while everything else decayed.
+  # climbed 0.727 to 0.905 across the run while every other axis decayed.
   model.loss.w_cls: 40.0
 
   model.d_gauss: 8

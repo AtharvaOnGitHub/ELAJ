@@ -7,7 +7,7 @@ seed. This module's whole job is to hold those settings in one place and apply
 them to an embedding without knowing where it came from, so that when two rows
 of the final table differ the difference is the method and nothing else.
 
-THREE KINDS OF SCORE, READ DIFFERENTLY.
+FOUR KINDS OF SCORE, READ DIFFERENTLY.
 
   kNN agreement      does the latent group the label. High is good for
                      biology, BAD for study and patient identity.
@@ -19,6 +19,12 @@ THREE KINDS OF SCORE, READ DIFFERENTLY.
   scIB               the field's standard battery. Batch correction and bio
                      conservation as the scIB benchmark reports them, so the
                      table can be read next to any published comparison.
+  disease            control against eutopic endometrium, the one disease
+                     contrast in this corpus that is not circular. It is the
+                     stopping list's criterion 5, a label the model has
+                     never received in any form. See
+                     endo_model.evaluation.disease_contrast for the three
+                     routes to circularity and what closes each.
 
 The harmonised labels (``cell family``, ``menstrual phase``, ``cell cycle
 phase``) are added to the corpus metadata here, once, before any method runs,
@@ -53,6 +59,10 @@ CROSS_DONOR_LABELS = (HARMONISED_LINEAGE, HARMONISED_PHASE,
 # Labels the scIB battery is run against, with study as the batch.
 SCIB_LABELS = (HARMONISED_LINEAGE, "AnnotationRefined")
 MIN_SCIB_CELLS = 100
+# Appended to a disease row measured over too few donors to be read as a
+# number. cross_group_agreement at six donors spans -0.67 to +0.48 on a
+# latent whose true answer is zero, so the p-value is all there is.
+FEW_GROUPS = " FEW GROUPS, excess is unreadable, read p"
 
 
 def required_obs_columns() -> list[str]:
@@ -67,12 +77,17 @@ def required_obs_columns() -> list[str]:
         CELL_CYCLE_SOURCE_COLUMNS, LINEAGE_SOURCE_COLUMNS, PHASE_SOURCE_COLUMNS,
     )
 
+    from endo_model.evaluation.disease_contrast import (
+        DISEASE_COLUMN, TISSUE_COLUMN,
+    )
+
     direct = [c for c in KNN_LABELS + CROSS_DONOR_LABELS + SCIB_LABELS
               if c not in (HARMONISED_LINEAGE, HARMONISED_PHASE,
                            HARMONISED_CELL_CYCLE, "patient_id")]
     seen: dict[str, None] = {}
     for c in (*LINEAGE_SOURCE_COLUMNS, *PHASE_SOURCE_COLUMNS,
-              *CELL_CYCLE_SOURCE_COLUMNS, *direct):
+              *CELL_CYCLE_SOURCE_COLUMNS, *direct,
+              DISEASE_COLUMN, TISSUE_COLUMN):
         seen.setdefault(c, None)
     return list(seen)
 
@@ -152,6 +167,15 @@ class ScorerSettings:
     knn_labels: tuple[str, ...] = KNN_LABELS
     cross_donor_labels: tuple[str, ...] = CROSS_DONOR_LABELS
     scib_labels: tuple[str, ...] = SCIB_LABELS
+    # Control against eutopic endometrium, the one disease contrast that is
+    # not circular here. Its own switch rather than a label tuple, because
+    # the battery derives its column instead of reading one. See
+    # endo_model.evaluation.disease_contrast.
+    disease_contrast: bool = True
+    # Minimum donors in a study before its row is logged without a warning.
+    # cross_group_agreement at six donors spans -0.67 to +0.48 on a latent
+    # whose true answer is zero.
+    disease_min_donors: int = 20
 
 
 def add_harmonised_labels(corpus: CorpusMatrix) -> None:
@@ -205,9 +229,10 @@ class EmbeddingScorer:
         rows += self._cross_donor(embedding.latent, corpus, stamp)
         rows += self._scib(embedding.latent, corpus, stamp)
         rows += self._study_mixing(embedding.latent, corpus, stamp)
+        rows += self._disease(embedding.latent, corpus, stamp)
         return rows
 
-    # ── the three batteries ───────────────────────────────────────────────
+    # ── the four batteries ────────────────────────────────────────────────
 
     @staticmethod
     def _column(corpus: CorpusMatrix, name: str):
@@ -339,6 +364,122 @@ class EmbeddingScorer:
                         col, res["n_cells"], res["excess"], p,
                         res.get("n_groups", 0))
         return rows
+
+    def _disease(self, latent, corpus, stamp) -> list[ScoreRow]:
+        """Control against eutopic endometrium: the non-circular disease test.
+
+        WHY IT IS NOT CIRCULAR. `disease_status` reaches neither encoder nor
+        decoder in any arm (`d_disease` 0 throughout), so this is a label the
+        model has never seen. The three routes by which it could still leak
+        are closed by restriction rather than by hope, and
+        `disease_contrast`'s docstring records which closes which.
+
+        THREE ROWS, IN DESCENDING STRICTNESS AND ASCENDING NOISE.
+
+          per study      same-donor neighbours discarded, inside ONE study.
+                         Platform is fixed and DSBN's study parameters are
+                         fixed, so neither can carry the label. This is the
+                         primary result. Read the donor count: a study with
+                         six donors cannot support a claim.
+          pooled, donor  all qualifying studies at once, so 168 donors
+                         instead of 6 to 60. Better powered, but the two
+                         sides sit at different rates in each study, so a
+                         latent that merely recognised the study would score
+                         a little above chance here.
+          pooled, study  neighbours from the SAME STUDY discarded as well.
+                         The strictest question in the battery: is a control
+                         cell placed near control cells FROM OTHER STUDIES?
+                         Its p is DEGENERATE and pinned near 1.000: the
+                         permutation null shuffles labels between groups, and
+                         both labels occur inside every study, so there is
+                         only one distinct assignment to draw. Read the
+                         excess on this row and read p on the others. The
+                         excess is still well behaved here for the same
+                         reason the p is not -- the label varies within each
+                         group, which is the case the few-groups noise table
+                         in `cross_group_agreement` does NOT describe.
+        """
+        from endo_model.evaluation import disease_contrast as dc
+
+        if not self.settings.disease_contrast:
+            return []
+        label = dc.build(self._column(corpus, dc.DISEASE_COLUMN),
+                         self._column(corpus, dc.TISSUE_COLUMN),
+                         corpus.study_id)
+        studies = dc.qualifying_studies(label, corpus.study_id)
+        if not studies:
+            return []
+
+        rows: list[ScoreRow] = []
+        for sid in studies:
+            inside = corpus.study_id == sid
+            name = corpus.study_names.get(sid, str(sid))
+            rows += self._one_disease_test(
+                latent[inside], label[inside], corpus.patient_id[inside],
+                test="disease-xdonor", label_name=name, stamp=stamp,
+                note_prefix="within one study; ")
+
+        pooled = np.isin(corpus.study_id, studies)
+        rows += self._one_disease_test(
+            latent[pooled], label[pooled], corpus.patient_id[pooled],
+            test="disease-xdonor", label_name="all studies (pooled)",
+            stamp=stamp,
+            note_prefix="pooled, so study base rates differ; ")
+        rows += self._one_disease_test(
+            latent[pooled], label[pooled], corpus.study_id[pooled],
+            test="disease-xstudy", label_name="all studies (pooled)",
+            stamp=stamp,
+            note_prefix="other-STUDY neighbours only; READ THE EXCESS, p is "
+                        "degenerate because both labels occur in every "
+                        "study; ",
+            few_groups_note="")
+        return rows
+
+    def _one_disease_test(self, latent, label, groups, test: str,
+                          label_name: str, stamp: dict,
+                          note_prefix: str = "",
+                          few_groups_note: str = FEW_GROUPS) -> list[ScoreRow]:
+        """One cross-group run, as an excess row and a p-value row.
+
+        Separated from `_disease` because the same measurement is made three
+        times over different cell subsets and different grouping keys, and
+        the only thing that varies is what is held constant.
+
+        Args:
+            groups:          The key whose neighbours are discarded, donor or
+                             study.
+            few_groups_note: Appended when there are fewer groups than
+                             `disease_min_donors`. Empty for the xstudy row,
+                             where few groups is by construction and the p
+                             rather than the excess is the unreadable half.
+        """
+        from endo_model.evaluation.latent_validation import cross_group_agreement
+
+        res = cross_group_agreement(
+            latent, label, groups, k=self.settings.k_cross_donor,
+            seed=self.settings.seed,
+            n_permutations=self.settings.permutations,
+        )
+        if not np.isfinite(res.get("agreement", float("nan"))):
+            return []
+        p = res.get("p_value", float("nan"))
+        n_groups = int(res.get("n_groups", 0))
+        thin = (few_groups_note
+                if n_groups < self.settings.disease_min_donors else "")
+        note = (f"{note_prefix}p={p:.3f}; "
+                f"floor={res.get('p_floor', float('nan')):.3f}; "
+                f"{res['neighbours_kept']:.0f} kept; {n_groups} groups{thin}")
+        logger.info("   disease  %-24s n=%7d excess=%6.3f p=%.3f (%d groups)%s",
+                    f"{test.split('-')[1]} {label_name}", res["n_cells"],
+                    res["excess"], p, n_groups, thin)
+        return [
+            ScoreRow(test=test, label=label_name, n_cells=res["n_cells"],
+                     value=res["excess"], note=note, **stamp),
+            ScoreRow(test=f"{test}-p", label=label_name,
+                     n_cells=res["n_cells"], value=p,
+                     note=f"{note_prefix}floor="
+                          f"{res.get('p_floor', float('nan')):.3f}", **stamp),
+        ]
 
     def _scib(self, latent, corpus, stamp) -> list[ScoreRow]:
         from endo_model.evaluation.latent_validation import _is_labelled

@@ -71,6 +71,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split", default="val", choices=["train", "val", "test"])
     p.add_argument("--batches", type=int, default=16,
                    help="Validation batches to average over.")
+    p.add_argument("--seed", type=int, default=0,
+                   help="Seeds the latent derangement, so the reported "
+                        "number is reproducible from the checkpoint.")
     p.add_argument("--out", default=None, help="Write reliance.json here too.")
     return p.parse_args()
 
@@ -124,7 +127,8 @@ def main() -> None:
     loader = build_loader(root, exp_cfg, train_cfg, data_cfg, vocab,
                           study_configs, split=args.split)
 
-    scores = DecoderReliance(max_batches=args.batches).measure(
+    scores = DecoderReliance(max_batches=args.batches,
+                             seed=args.seed).measure(
         model, loader, NegativeBinomialLoss().to(device), device=device)
     if not scores:
         logger.error("no batch could be measured; nothing to report")
@@ -138,55 +142,82 @@ def main() -> None:
         logger.info("Written to %s", out)
 
 
-def verdict(study: float, technical: float, latent: float) -> str:
-    """The four-row reading, chosen by where the two counterfactuals land.
+#: Channel name -> whether it is nuisance or biology. The distinction is the
+#: whole point of splitting the technical total: a decoder leaning on
+#: `platform` is a batch-information problem, and a decoder leaning on
+#: `tissue` is a biological variable handed over for free.
+KIND = {"tissue": "BIOLOGY", "platform": "nuisance",
+        "disease": "BIOLOGY", "study": "nuisance"}
 
-    `technical` is the one that matters: it substitutes platform, tissue and
-    disease alongside the study id, so it is the real "the decoder does not
-    know where this cell came from". `study` alone leaves platform agreeing
-    with the data, and every study here has one or two platform combinations.
+
+def channels(scores: dict) -> str:
+    """One line per channel, largest first, each as a share of the total."""
+    total = scores.get("reliance_technical", float("nan"))
+    rows = sorted(((name, scores.get(f"reliance_{name}", float("nan")))
+                   for name in KIND),
+                  key=lambda row: (row[1] != row[1], -row[1]))
+    return "\n".join(
+        f"    {name:<9} {cost:+.4f}  {100.0 * cost / total:5.1f}% of "
+        f"technical   {KIND[name]}"
+        for name, cost in rows)
+
+
+def verdict(scores: dict) -> str:
+    """The reading, chosen by the ratio rather than by absolute thresholds.
+
+    What matters is not whether each penalty clears some bar, but which of
+    the two the decoder leans on: the cell's own latent, or being told where
+    the cell came from.
     """
-    if technical != technical:
-        return ("No batch had a substitute from another study, so the "
-                "technical counterfactual could not be formed. Raise "
+    tech = scores.get("reliance_technical", float("nan"))
+    latent = scores.get("reliance_latent", float("nan"))
+    study = scores.get("reliance_study", float("nan"))
+    tissue = scores.get("reliance_tissue", float("nan"))
+    if tech != tech or latent != latent:
+        return ("Not measured. No batch had a substitute from another study, "
+                "so the technical counterfactual could not be formed. Raise "
                 "--batches, or the loader is single-study.")
-    if technical >= 0.05 and latent >= 0.05:
-        reading = ("Both the covariates and the latent carry real "
-                   "information. This is the wanted case.")
-    elif technical >= 0.05 and latent < 0.25 * technical:
-        reading = ("THE DECODER IS COASTING ON THE COVARIATES. The latent "
-                   "contributes little to reconstruction, so val_nb is "
-                   "measuring the decoder rather than the model, and the "
-                   "latent is being starved rather than priced.")
-    elif technical < 0.05 and latent >= 0.05:
-        reading = ("Conditioning bought nothing at all. The latent is doing "
-                   "the whole job, so the reason it stores study identity "
-                   "lies outside the decoder.")
+    ratio = latent / tech if tech else float("inf")
+    if ratio >= 1.5:
+        lines = ["The LATENT is what the decoder reconstructs from. "
+                 "Conditioning has not hollowed it out."]
+    elif ratio >= 0.9:
+        lines = ["The latent and the provenance channels matter about "
+                 "equally, which is more reliance on provenance than a "
+                 "16-dimension latent against 48 covariate dimensions "
+                 "should need."]
     else:
-        reading = ("Neither input costs much, so reconstruction is coming "
-                   "from library size and gene identity alone.")
-    if technical >= 0.05 and study < 0.1 * technical:
-        reading += ("\n  The study embedding is REDUNDANT with platform and "
-                    "tissue, not unused. Changing d_study will not move "
-                    "this; the covariates are where the signal sits.")
-    return reading
+        lines = ["THE DECODER LEANS ON PROVENANCE MORE THAN ON THE CELL. "
+                 "The latent is being out-competed as an information "
+                 "source, not over-priced: anything predictable from "
+                 "provenance is learned on channels that cost no KL and "
+                 "draw no adversarial gradient."]
+    if tech and study < 0.2 * tech:
+        lines.append("The study embedding is REDUNDANT with the other "
+                     "channels, not unused. Changing d_study will not move "
+                     "this.")
+    if tech and tissue > 0.4 * tech:
+        lines.append("TISSUE is the channel the decoder reads, and tissue is "
+                     "biology. This is not batch information leaking into "
+                     "the decoder; it is a biological variable handed over "
+                     "for free, so the latent has no reason to encode it.")
+    return "\n  ".join(lines)
 
 
 def describe(run: str, scores: dict) -> str:
     """The table, with the reading spelled out rather than left to the reader."""
     nan = float("nan")
-    study = scores.get("reliance_study", nan)
-    technical = scores.get("reliance_technical", nan)
+    tech = scores.get("reliance_technical", nan)
     latent = scores.get("reliance_latent", nan)
     share = scores.get("reliance_study_share", nan)
     ratio = scores.get("reliance_ratio", nan)
     return (f"Decoder reliance: {run}\n"
-            f"  wrong study     costs {study:+.4f} nats/gene\n"
-            f"  wrong technical costs {technical:+.4f} nats/gene"
+            f"  wrong technical costs {tech:+.4f} nats/gene"
             f"   (study is {100.0 * share:.0f}% of it)\n"
+            f"{channels(scores)}\n"
             f"  wrong latent    costs {latent:+.4f} nats/gene\n"
             f"  ratio (latent / technical) {ratio:.2f}\n"
-            f"  {verdict(study, technical, latent)}")
+            f"  {verdict(scores)}")
 
 
 if __name__ == "__main__":

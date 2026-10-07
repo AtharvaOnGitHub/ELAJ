@@ -12,28 +12,58 @@ identity for free and it can lean on that embedding, reconstructing from a
 per-study profile while the latent carries less and less. val_nb would
 improve while the thing we actually score quietly emptied.
 
-THE MEASUREMENT. Two counterfactuals on the same cells, same weights, no
-training:
+JARGON, BEFORE IT IS USED.
 
-    wrong study      tell the decoder a study the cell did not come from
-    wrong technical  take tissue, platform, disease AND study from another
-                     cell, so no channel still names the real study
-    wrong latent     decode each cell from another cell's latent
+    counterfactual   one input to the decoder is replaced by a value that
+                     does not belong to this cell, with the weights frozen
+                     and nothing retrained. The reconstruction gets worse by
+                     some amount, and that amount is what the decoder was
+                     getting from the input. Big penalty, heavy reliance.
+    channel          one of the four per-cell things the decoder is told
+                     besides the latent: tissue, platform, disease, study.
+    nats per gene    the unit of all the numbers here, the same unit as
+                     val_nb, so a penalty can be read as a fraction of it.
 
-WHY THE SECOND ONE HAD TO BE ADDED. Substituting the study id alone measures
-almost nothing, and the m3 and m4 readings of ~0.004 nats per gene are the
-artefact rather than the finding. Every study in this corpus has ONE or TWO
-distinct platform combinations (assay, chemistry, sequencer, material), so
-`d_platform` is a study code in all but name, and `d_tissue` is close to one
-too. Change the study embedding and leave platform alone and the decoder
-simply trusts the channel that still agrees with the data.
+THE MEASUREMENT. Six counterfactuals on the same cells, same weights, no
+training, no backward pass:
 
-`reliance_technical` substitutes all of them at once, which is the
-counterfactual "the decoder does not know where this cell came from". The
-gap between it and `reliance_study` is how much of the technical signal is
-being carried by platform and tissue rather than by the study embedding.
+    tissue      \
+    platform     |  one channel at a time, borrowed from a batch of a
+    disease      |  DIFFERENT study, with the other three left truthful
+    study       /
+    technical      all four channels borrowed at once, which is the honest
+                   "the decoder does not know where this cell came from"
+    latent         decode each cell from a DIFFERENT cell's latent, drawn by
+                   a random derangement of the batch
 
-HOW TO READ IT. Both numbers are reconstruction penalties, so bigger means
+WHY ONE CHANNEL AT A TIME. Substituting the study id alone measures almost
+nothing, and the m3 and m4 readings of ~0.004 nats per gene are an artefact
+rather than a finding. Every study in this corpus has ONE or TWO distinct
+platform combinations (assay, chemistry, sequencer, material), so
+`d_platform` is a study code in all but name. Change the study embedding and
+leave platform alone and the decoder simply trusts the channel that still
+agrees with the data. The per-channel split says which channel the decoder
+is actually reading, and it matters which: platform and study are nuisance,
+but TISSUE IS BIOLOGY. A large `reliance_tissue` does not mean batch
+information is leaking into the decoder; it means a biological variable has
+been handed over for free, and the latent has no reason to encode it.
+
+WHY A DERANGEMENT AND NOT A SHIFT BY ONE. Until October 2026 the latent
+counterfactual was `torch.roll(z_proj, 1)`, which gives each cell its
+immediate ROW-ORDER neighbour's latent. The validation loader is built
+`shuffle=False`, so a batch is a block of consecutive rows from one study's
+panel, and consecutive rows in a merged h5ad are usually the same donor,
+usually the same tissue, and often the same author-assigned cluster. The
+substitute was therefore the most similar latent available and the penalty
+was a lower bound, in all likelihood a severe one: m5_combined read 0.0761
+while its latent separates cell families at 0.971, and a substitution that
+genuinely destroyed cell identity could not be that cheap. A derangement is
+a permutation with no fixed point, so every cell gets a latent that is not
+its own, drawn uniformly from the batch rather than from its neighbourhood.
+Still within one batch, hence within one study, so the penalty measures what
+the latent adds BEYOND what the study already explains.
+
+HOW TO READ IT. Every number is a reconstruction penalty, so bigger means
 the decoder depends on that input more.
 
     technical high, latent high   both carry real information. Wanted.
@@ -49,7 +79,19 @@ the decoder depends on that input more.
 `reliance_ratio` is latent over TECHNICAL, so above 1 means the latent
 matters more than everything the decoder is told about provenance.
 
-COST. Two extra decoder passes on a subsample, no encoder re-run and no
+A CHANNEL WHOSE EMBEDDING IS OFF reads 0.0 rather than being omitted, which
+makes it a null control: m5_combined sets `d_disease` 0, so a
+`reliance_disease` of anything but 0.0 would mean the substitution is not
+doing what this docstring claims.
+
+NOT COMPARABLE WITH PRE-OCTOBER NUMBERS. `reliance_study` used to rotate the
+study id by one (`(study_id + 1) % n_studies`) while every other channel was
+borrowed. The four channels are now borrowed the same way, so the per-channel
+penalties decompose the technical total consistently instead of mixing two
+mechanisms. Both give the decoder a study the cell is not from and the two
+should agree closely, but the series changes at this commit.
+
+COST. Six extra decoder passes on a subsample, no encoder re-run and no
 backward. The encoder is the expensive part and runs once.
 """
 
@@ -63,22 +105,40 @@ logger = logging.getLogger(__name__)
 
 
 class DecoderReliance:
-    """Reconstruction penalty for giving the decoder the wrong study or latent.
+    """Reconstruction penalty for giving the decoder the wrong input.
 
     Args:
         max_batches: Validation batches to measure. The quantity is an
                      average over cells and settles quickly, so a handful is
                      enough and keeps this off the epoch's critical path.
+        scan_limit:  How far to walk the loader looking for a second study.
+                     See `measure`.
+        seed:        Seed for the latent derangement, so a reported number is
+                     reproducible from the checkpoint alone.
     """
 
-    def __init__(self, max_batches: int = 8, scan_limit: int = 512) -> None:
+    #: The per-cell channels the decoder is told besides the latent. Order is
+    #: the order they are reported in.
+    COVARIATE_KEYS = ("tissue_levels", "platform_codes", "disease_status",
+                      "study_id")
+
+    #: Channel key -> the name the result is reported under.
+    CHANNEL_NAMES = {
+        "tissue_levels": "tissue",
+        "platform_codes": "platform",
+        "disease_status": "disease",
+        "study_id": "study",
+    }
+
+    def __init__(self, max_batches: int = 8, scan_limit: int = 512,
+                 seed: int = 0) -> None:
         self.max_batches = int(max_batches)
-        # How far to walk the loader looking for a second study. See `measure`.
         self.scan_limit = int(scan_limit)
+        self.seed = int(seed)
 
     @torch.no_grad()
     def measure(self, model, batches, nb_loss, device=None) -> dict[str, float]:
-        """`{reliance_study, reliance_latent, reliance_ratio}`.
+        """Mean penalty per counterfactual, as `reliance_*` keys.
 
         Args:
             model:   The EndoFoundationModel, already in eval mode.
@@ -94,28 +154,35 @@ class DecoderReliance:
             device:  Where the model lives. None assumes the batches are
                      already there.
         """
-        from endo_model.training.batch_device import to_device
-        real, no_study, no_tech, no_latent, seen = 0.0, 0.0, 0.0, 0.0, 0
-        tech_seen = 0
+        totals, seen = self._walk(model, batches, nb_loss, device)
+        if not seen:
+            return {}
+        return self._summarise({k: v / seen for k, v in totals.items()})
 
-        # SUBSTITUTE COVARIATES MUST COME FROM A DIFFERENT STUDY, AND UNTIL
-        # OCTOBER 2026 THEY DID NOT. The old code borrowed from whichever
-        # batch came immediately before, on the stated premise that "the
-        # sampler puts one study in each batch, so another batch is another
-        # study". That is true of the TRAINING loader, which shuffles across
-        # studies. `measure` is called with the VALIDATION loader, which is
-        # built `shuffle=False` and is therefore ordered BY study, so the
-        # first batches are all the same study, the substitution changed
-        # nothing, `scores[2] == scores[0]` every time, and `tech_seen`
-        # stayed 0. Every m5_combined epoch reported reliance_technical as
-        # nan, and reliance_ratio and reliance_study_share with it.
-        #
-        # Keeping one covariate set per study and substituting across studies
-        # fixes it whatever order the loader is in. `scan_limit` bounds the
-        # walk, because a study-ordered validation split can run to hundreds
-        # of batches before the second study appears and this sits on the
-        # epoch's critical path.
-        by_study: dict[int, dict] = {}
+    def _walk(self, model, batches, nb_loss, device) -> tuple[dict, int]:
+        """Sum each counterfactual's loss over the batches that could be used.
+
+        SUBSTITUTE COVARIATES MUST COME FROM A DIFFERENT STUDY, AND UNTIL
+        OCTOBER 2026 THEY DID NOT. The old code borrowed from whichever batch
+        came immediately before, on the stated premise that "the sampler puts
+        one study in each batch, so another batch is another study". True of
+        the TRAINING loader, which shuffles across studies. `measure` is
+        called with the VALIDATION loader, built `shuffle=False` and
+        therefore ordered BY study, so the first batches were all one study,
+        the substitution changed nothing, and `reliance_technical` was nan in
+        every epoch of every run that ever reported it.
+
+        Keeping one covariate set per study and substituting across studies
+        fixes it whatever order the loader is in. `scan_limit` bounds the
+        walk, because a study-ordered validation split can run to hundreds of
+        batches before the second study appears and this sits on the epoch's
+        critical path.
+        """
+        from endo_model.training.batch_device import to_device
+        totals: dict[str, float] = {}
+        seen = 0
+        banked: dict[int, dict] = {}
+
         for i, batch in enumerate(batches):
             if seen >= self.max_batches or i >= self.scan_limit:
                 break
@@ -123,9 +190,8 @@ class DecoderReliance:
                 if device is not None:
                     batch = to_device(batch, device)
                 study = int(batch["study_id"][0])
-                other = next((c for s, c in by_study.items() if s != study),
-                             None)
-                by_study.setdefault(
+                other = next((c for s, c in banked.items() if s != study), None)
+                banked.setdefault(
                     study, {k: batch[k] for k in self.COVARIATE_KEYS})
                 if other is None:
                     # No other study banked yet; bank this one and move on
@@ -136,88 +202,110 @@ class DecoderReliance:
                 logger.warning("decoder reliance failed on batch %d (%s: %s); "
                                "skipping", i, type(exc).__name__, exc)
                 continue
-            real += scores[0]
-            no_study += scores[1]
-            no_latent += scores[3]
-            no_tech += scores[2] - scores[0]
+            for name, value in scores.items():
+                totals[name] = totals.get(name, 0.0) + value
             seen += 1
-            tech_seen += 1
+        return totals, seen
 
-        if not seen:
-            return {}
-        real = real / seen
-        study_cost = no_study / seen - real
-        tech_cost = no_tech / tech_seen if tech_seen else float("nan")
-        latent_cost = no_latent / seen - real
-        out = {
-            "reliance_study": study_cost,
-            "reliance_technical": tech_cost,
-            "reliance_latent": latent_cost,
-            "reliance_ratio": (latent_cost / tech_cost if tech_cost
-                               else float("nan")),
-            # How much of the technical signal the study embedding carries on
-            # its own. Near zero with a large reliance_technical means
-            # platform and tissue are doing that job instead.
-            "reliance_study_share": (study_cost / tech_cost if tech_cost
-                                     else float("nan")),
-        }
+    def _summarise(self, mean: dict[str, float]) -> dict[str, float]:
+        """Turn mean losses into penalties against the truthful reconstruction."""
+        real = mean["real"]
+        out = {f"reliance_{name}": value - real
+               for name, value in mean.items() if name != "real"}
+        tech = out.get("reliance_technical", float("nan"))
+        latent = out.get("reliance_latent", float("nan"))
+        out["reliance_ratio"] = latent / tech if tech else float("nan")
+        # How much of the technical signal the study embedding carries on its
+        # own. Near zero with a large reliance_technical means platform and
+        # tissue are doing that job instead.
+        out["reliance_study_share"] = (
+            out.get("reliance_study", float("nan")) / tech if tech
+            else float("nan"))
         logger.info(
-            "   decoder reliance: wrong study %+.4f, wrong technical %+.4f "
-            "(study is %.0f%% of it), wrong latent %+.4f, latent/technical "
-            "%.2f", study_cost, tech_cost,
-            100.0 * out["reliance_study_share"], latent_cost,
+            "   decoder reliance: technical %+.4f (tissue %+.4f, platform "
+            "%+.4f, disease %+.4f, study %+.4f), latent %+.4f, "
+            "latent/technical %.2f",
+            tech, out.get("reliance_tissue", float("nan")),
+            out.get("reliance_platform", float("nan")),
+            out.get("reliance_disease", float("nan")),
+            out.get("reliance_study", float("nan")), latent,
             out["reliance_ratio"])
         return out
 
-    COVARIATE_KEYS = ("tissue_levels", "platform_codes", "disease_status",
-                      "study_id")
+    def one_batch(self, model, batch, nb_loss, other) -> dict[str, float]:
+        """Reconstruction loss under each counterfactual, for one batch.
 
-    def one_batch(self, model, batch, nb_loss,
-                  other=None) -> tuple[float, float, float, float]:
-        """Reconstruction: real, wrong study, wrong technical, wrong latent."""
+        The encoder runs once and every counterfactual reuses its output, so
+        the extra cost is decoder passes only.
+
+        Args:
+            model:   The EndoFoundationModel, in eval mode.
+            batch:   The batch to reconstruct.
+            nb_loss: Callable (x_meas, mu_hat, theta) -> scalar tensor.
+            other:   Covariates from a batch of a DIFFERENT study, the source
+                     of every channel substitution. Chosen by `_walk` from
+                     its per-study bank, because batches hold one study and
+                     borrowing within one changes neither platform nor study.
+
+        Returns:
+            `real`, `technical`, `latent`, and one entry per channel.
+        """
         latent = model.encode(batch)
         gene_queries, measured = model._build_gene_queries(batch)
         theta = model.dispersion(measured)
-
         x_meas = batch["counts"][:, measured].float()
 
-        real = model.decode_once(batch, latent, gene_queries)
-        wrong_study = model.decode_once(
-            batch, latent, gene_queries,
-            study_ids=self.other_study(model, batch["study_id"]))
-        # Covariates from a batch of a DIFFERENT study, chosen by `measure`
-        # from its per-study cache. Rolling within one batch would change
-        # neither platform nor study and would measure nothing, because the
-        # sampler puts one study in each batch.
-        wrong_tech = (model.decode_once(batch, latent, gene_queries,
-                                        covariates_from=other)
-                      if other is not None else real)
-        wrong_latent = model.decode_once(
-            batch, latent, gene_queries,
-            z_proj=self.rolled(latent["z_proj"]))
+        def cost(**kwargs) -> float:
+            return float(nb_loss(
+                x_meas, model.decode_once(batch, latent, gene_queries,
+                                          **kwargs), theta))
 
-        return (float(nb_loss(x_meas, real, theta)),
-                float(nb_loss(x_meas, wrong_study, theta)),
-                float(nb_loss(x_meas, wrong_tech, theta)),
-                float(nb_loss(x_meas, wrong_latent, theta)))
+        scores = {
+            "real": cost(),
+            "technical": cost(covariates_from=other),
+            "latent": cost(z_proj=latent["z_proj"][
+                self.derangement(latent["z_proj"].shape[0],
+                                 latent["z_proj"].device)]),
+        }
+        for key, name in self.CHANNEL_NAMES.items():
+            scores[name] = cost(covariates_from=self.one_channel(
+                key, batch, other))
+        return scores
 
-    @staticmethod
-    def other_study(model, study_id: torch.Tensor) -> torch.Tensor:
-        """A study id that is definitely not this cell's.
+    def one_channel(self, key: str, batch: dict, other: dict) -> dict:
+        """Covariates with one channel borrowed and the other three truthful.
 
-        Rotating by one rather than shuffling, because `PerStudyBatchSampler`
-        puts a single study in every batch: shuffling within a batch would
-        hand every cell its own study back and measure nothing.
+        `decode_once` reads every channel from `covariates_from` when it is
+        given, so the untouched channels have to be passed back explicitly
+        rather than left out.
         """
-        n = int(model.decoder_study.n_studies)
-        return (study_id + 1) % n
+        swapped = {k: batch[k] for k in self.COVARIATE_KEYS}
+        swapped[key] = other[key]
+        return swapped
 
-    @staticmethod
-    def rolled(z_proj: torch.Tensor) -> torch.Tensor:
-        """Each cell paired with the next cell's latent.
+    def derangement(self, n: int, device) -> torch.Tensor:
+        """A permutation of `range(n)` with no element left in place.
 
-        Within a batch, so the substitute latent comes from the same study
-        and the penalty measures what the LATENT adds beyond what the study
-        already explains, rather than re-measuring the study effect.
+        Every cell therefore receives a latent that is not its own, drawn
+        uniformly from the batch. A plain `randperm` leaves about one element
+        fixed on average, and a fixed element is a cell silently scored on
+        its own latent, which biases the penalty down.
+
+        Seeded on the CPU and moved, so the number a run reports is
+        reproducible from the checkpoint and does not consume the global RNG
+        stream that training is using.
         """
-        return torch.roll(z_proj, shifts=1, dims=0)
+        if n < 2:
+            return torch.arange(n, device=device)
+        generator = torch.Generator().manual_seed(self.seed)
+        perm = torch.randperm(n, generator=generator)
+        fixed = (perm == torch.arange(n)).nonzero(as_tuple=True)[0]
+        if fixed.numel() == 1:
+            # Nothing to rotate among, so swap the one offender with its
+            # neighbour, which cannot itself be fixed or it would be here too.
+            i = int(fixed[0])
+            j = (i + 1) % n
+            perm[i], perm[j] = perm[j].clone(), perm[i].clone()
+        elif fixed.numel() > 1:
+            perm[fixed] = perm[fixed.roll(1)]
+        return perm.to(device)

@@ -294,7 +294,26 @@ def main() -> None:
         free_bits=model_cfg.loss.free_bits,
         beta_max=train_cfg.kl_annealing.beta_max,
         warmup_fraction=train_cfg.kl_annealing.warmup_fraction,
+        drain_targets=(tuple(model_cfg.drain.targets)
+                       if model_cfg.drain.enabled and model_cfg.drain.d_drain
+                       else ()),
+        w_drain=model_cfg.loss.w_drain if model_cfg.drain.enabled else 0.0,
+        w_drain_study=model_cfg.drain.w_study,
+        w_drain_depth=model_cfg.drain.w_depth,
+        w_drain_genes=model_cfg.drain.w_genes,
     ).to(device)
+    if model_cfg.drain.enabled:
+        logger.info(
+            "Drain: d_drain=%d targets=%s w_drain=%.3g (study %.3g, depth "
+            "%.3g, genes %.3g), blank_p=%.3g. The drain block is read ONLY "
+            "by DrainHead; mu_gauss and mu_angle are the biology block and "
+            "are what the adversary, the phase head and every exported "
+            "embedding see.",
+            model_cfg.drain.d_drain, ",".join(model_cfg.drain.targets),
+            model_cfg.loss.w_drain, model_cfg.drain.w_study,
+            model_cfg.drain.w_depth, model_cfg.drain.w_genes,
+            model_cfg.drain.blank_p,
+        )
     logger.info(
         "Loss: w_nb=%.3g w_kl_gauss=%.3g w_kl_circ=%.3g w_dab=%.3g w_cce=%.3g "
         "free_bits=%.3g beta_max=%.3g warmup=%.3g lambda_dab=%.3g",

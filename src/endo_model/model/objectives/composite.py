@@ -21,6 +21,7 @@ from torch import Tensor
 from .adversarial import DABClassifier
 from .cce_embedding import cce_embedding
 from .elastic_similarity import ElasticCellSimilarity
+from .drain import DrainLoss, within_study_share
 from .label_classification import MaskedCrossEntropy, masked_correct
 from .latent_buffer import LatentBuffer
 from .contrastive import InfoNCELoss
@@ -72,6 +73,11 @@ class CompositeLoss(nn.Module):
         beta_max: float = 1.0,
         warmup_fraction: float = 0.20,
         free_bits: float = 0.0,
+        drain_targets: tuple = (),
+        w_drain: float = 0.0,
+        w_drain_study: float = 1.0,
+        w_drain_depth: float = 1.0,
+        w_drain_genes: float = 1.0,
     ) -> None:
         super().__init__()
         # beta_max and warmup_fraction used to be hardcoded here as 1.0 and 0.20
@@ -88,6 +94,14 @@ class CompositeLoss(nn.Module):
         self.w_cce = w_cce
         self.w_cls = w_cls
         self.w_ecs = w_ecs
+        self.w_drain = w_drain
+        # None when the model has no drain block. Built from the targets so
+        # the study-only guard fires at construction rather than at step one.
+        self.drain = (
+            DrainLoss(tuple(drain_targets), w_study=w_drain_study,
+                      w_depth=w_drain_depth, w_genes=w_drain_genes)
+            if drain_targets else None
+        )
         # Built whatever the weight, so a run with w_cls 0 still
         # REPORTS phase accuracy without optimising for it. That is
         # the honest control for an arm that does optimise for it.
@@ -296,6 +310,17 @@ class CompositeLoss(nn.Module):
         kl_circ = (
             self.circ_kl(model_output["kappa"], self.free_bits) / n_measured
         )
+        # The drain is a Gaussian branch and is charged like one, at the same
+        # weight. Leaving it unpriced would make it a free high-capacity
+        # channel beside a priced one, and anything the model could put
+        # EITHER side would go to the free side, which is the whole failure
+        # this block was built to fix rather than to reproduce.
+        kl_drain = (
+            self.gauss_kl(model_output["mu_drain"],
+                          model_output["logvar_drain"], self.free_bits)
+            / n_measured
+            if "mu_drain" in model_output else None
+        )
 
         # DAB with linearly ramped lambda (0 → max over first 50 % of steps)
         ramp = min(1.0, 2.0 * current_step / max(total_steps, 1))
@@ -388,6 +413,8 @@ class CompositeLoss(nn.Module):
             self.w_nb * nb
             + beta_kl * self.w_kl_gauss * kl_gauss
             + beta_kl * self.w_kl_circ * kl_circ
+            + (beta_kl * self.w_kl_gauss * kl_drain
+               if kl_drain is not None else 0.0)
             + self.w_cce * cce_per_gene
             # In `elbo` and not beside `dab`, because this is a constraint on
             # the latent rather than an adversary's own loss: it is priced
@@ -399,9 +426,33 @@ class CompositeLoss(nn.Module):
         # What backward() actually descends. The classifier has to be trained
         # for `dab` to mean anything — an untrained one reports chance whatever
         # the latent holds — so its loss stays in the graph.
+        # The drain's reward. NOT in `elbo`: it is a supervised head's own
+        # loss in the way `cls` and `dab` are, so `elbo` stays the quantity
+        # that is comparable with every arm that had no drain.
+        drain_parts: dict[str, Tensor] = {}
+        if self.drain is not None and "drain_predictions" in model_output:
+            drain_parts = self.drain(model_output["drain_predictions"], batch)
+
         total = elbo + self.w_dab * dab_per_gene + self.w_cls * cls_per_gene
+        if drain_parts:
+            total = total + self.w_drain * drain_parts["drain"]
+
+        out_drain: dict[str, Tensor] = dict(drain_parts)
+        if "mu_drain" in model_output:
+            # The diagnostic that says whether the drain did its job rather
+            # than becoming a study lookup table. Near zero is the failure.
+            # One study per batch makes this 1.0 per batch by construction,
+            # so it is only meaningful over an epoch; it is here because this
+            # is where the tensor is in scope.
+            out_drain["drain_within_study"] = torch.tensor(
+                within_study_share(model_output["mu_drain"],
+                                   batch["study_id"]))
+            out_drain["kl_drain"] = kl_drain
 
         return {
+            **out_drain,
+            "provenance_blanked": model_output.get(
+                "provenance_blanked", torch.tensor(0.0)),
             "elbo": elbo,
             "nb": nb,
             "kl_gauss": kl_gauss,

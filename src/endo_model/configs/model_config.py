@@ -180,6 +180,12 @@ class LossConfig:
     # Weight on Elastic Cell Similarity. 0 disables it, which is what every
     # run before October 2026 did: the term did not exist.
     w_ecs: float = 0.0
+    # Weight on the drain head's reward. See DrainConfig: the drain block is
+    # the one the adversary does not see, and this is what pays for filling
+    # it. Read the parts against `nb` at epoch 1 before trusting the total;
+    # every weight guessed in this project has been wrong by an order of
+    # magnitude at least once.
+    w_drain: float = 0.0
     free_bits: float = 0.0
 
     @classmethod
@@ -191,6 +197,7 @@ class LossConfig:
             w_dab=float(d.get("w_dab", 1.0)),
             w_cls=float(d.get("w_cls", 0.0)),
             w_ecs=float(d.get("w_ecs", 0.0)),
+            w_drain=float(d.get("w_drain", 0.0)),
             free_bits=float(d.get("free_bits", 0.0)),
         )
 
@@ -306,6 +313,69 @@ class ClassifierConfig:
 
 
 @dataclass
+class DrainConfig:
+    """The drain block and the head that is rewarded for filling it.
+
+    WHAT IT IS FOR. Study-predictable variation in a cell's counts had
+    nowhere to go: the encoder produced one latent and the adversary punished
+    that latent for revealing the study, so the information had to be
+    DESTROYED rather than relocated. It was not: across m5_combined's nine
+    epochs study purity rose 0.554 to 0.720 with `lambda_dab` at 168 the
+    whole way. The drain is a second latent block, read only by `DrainHead`,
+    which is rewarded for predicting exactly what the biology block is
+    punished for carrying.
+
+    `targets` MUST include a within-cell one. Every batch holds a single
+    study, so a reward for predicting the study alone is satisfiable by a
+    vector that is constant across the batch: the drain would become an
+    eleven-valued code and absorb nothing per-cell. `DrainLoss.__init__`
+    raises in that case rather than letting it run for nine epochs.
+    `log_depth` and `log_genes` are standardised within the batch, which
+    removes the study-level component of the target and leaves the cell's
+    deviation from its own study's mean.
+
+    `blank_p` is the fraction of training steps on which the decoder is told
+    nothing about provenance: the drain's contribution is dropped AND all
+    `d_tissue + d_platform + d_disease + d_study` covariate dimensions are
+    zeroed, together, because they are mutually redundant. On those steps the
+    biology block plus the library size is the whole input, which is what
+    makes the biology block carry the reconstruction and what stops the drain
+    swallowing biology. 0.25 is a starting guess and has no measurement
+    behind it; read `nb` on blanked against unblanked steps at epoch 1.
+
+    `d_drain` is deliberately narrow. The job is to hold depth, detected-gene
+    count and a study code, which is a handful of numbers, and a wide drain
+    could hold biology too.
+    """
+
+    enabled: bool = False
+    d_drain: int = 8
+    targets: tuple = ("study", "log_depth", "log_genes")
+    hidden: Optional[int] = None
+    w_study: float = 1.0
+    w_depth: float = 1.0
+    w_genes: float = 1.0
+    blank_p: float = 0.25
+    blank_seed: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DrainConfig":
+        hidden = d.get("hidden")
+        targets = d.get("targets", ("study", "log_depth", "log_genes"))
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            d_drain=int(d.get("d_drain", 8)),
+            targets=tuple(str(x) for x in targets),
+            hidden=int(hidden) if hidden else None,
+            w_study=float(d.get("w_study", 1.0)),
+            w_depth=float(d.get("w_depth", 1.0)),
+            w_genes=float(d.get("w_genes", 1.0)),
+            blank_p=float(d.get("blank_p", 0.25)),
+            blank_seed=int(d.get("blank_seed", 0)),
+        )
+
+
+@dataclass
 class ModelConfig:
     name: str = "ELAJ_small"
     d_token: int = 32          # gene identity embedding dimension (per group)
@@ -368,6 +438,7 @@ class ModelConfig:
     dab: DABConfig = field(default_factory=DABConfig)
     ecs: ECSConfig = field(default_factory=ECSConfig)
     classifier: ClassifierConfig = field(default_factory=ClassifierConfig)
+    drain: DrainConfig = field(default_factory=DrainConfig)
 
     @property
     def d_z(self) -> int:
@@ -428,4 +499,5 @@ class ModelConfig:
             dab=DABConfig.from_dict(d.get("dab", {})),
             ecs=ECSConfig.from_dict(d.get("ecs", {})),
             classifier=ClassifierConfig.from_dict(d.get("classifier", {})),
+            drain=DrainConfig.from_dict(d.get("drain", {})),
         )

@@ -43,6 +43,8 @@ from endo_model.model.encoders.token_constructor import TokenConstructor
 from endo_model.model.encoder_stages import EncoderStages
 from endo_model.model.gene_layout import MeasuredGeneLayoutCache
 from endo_model.model.latent.latent_space import BifurcatedLatentSpace
+from endo_model.model.blanking import ProvenanceBlanking
+from endo_model.model.heads.drain_head import DrainHead
 
 
 class EndoFoundationModel(nn.Module):
@@ -114,6 +116,31 @@ class EndoFoundationModel(nn.Module):
             config.d_agg, config.d_gauss, config.n_circular,
             kappa_floor=config.kappa_floor,
             circular_parameterisation=config.circular_parameterisation,
+            d_drain=config.drain.d_drain if config.drain.enabled else 0,
+        )
+
+        # ── Drain head ───────────────────────────────────────────────────────
+        # REWARDED for predicting the study, the depth and the detected-gene
+        # count from the drain block, which is the block the adversary does
+        # NOT see. It gives study-predictable variation somewhere to go, so
+        # the encoder can route it instead of having to destroy it. See
+        # heads/drain_head.py; the separation is structural because the drain
+        # lives under its own latent keys and nothing else reads them.
+        self.drain_head = None
+        if config.drain.enabled and config.drain.d_drain > 0:
+            self.drain_head = DrainHead(
+                d_drain=config.drain.d_drain,
+                n_studies=config.n_studies,
+                targets=tuple(config.drain.targets),
+                hidden=config.drain.hidden,
+            )
+        # One draw per training step: on a blanked step the decoder loses the
+        # drain AND all 48 covariate dimensions at once, because they are
+        # mutually redundant and removing one leaves the others as a complete
+        # substitute. See model/blanking.py.
+        self.provenance_blanking = ProvenanceBlanking(
+            p=config.drain.blank_p if config.drain.enabled else 0.0,
+            seed=config.drain.blank_seed,
         )
 
         # ── Phase head ───────────────────────────────────────────────────────
@@ -239,7 +266,12 @@ class EndoFoundationModel(nn.Module):
         # gene_queries: (G_meas, d_dec) — no batch dimension, by construction
 
         # ── Decode ────────────────────────────────────────────────────────────
-        mu_hat = self.decode_once(batch, latent, gene_queries)  # (B, G_meas)
+        # One draw for the whole step. When it fires the decoder reads
+        # `z_proj_nodrain` and zeroed covariates, so the biology block plus
+        # the library size is all it has. Training only.
+        blanked = self.provenance_blanking.draw(self.training)
+        mu_hat = self.decode_once(batch, latent, gene_queries,
+                                  blank_provenance=blanked)  # (B, G_meas)
         theta = self.dispersion(measured_global_idxs)          # (G_meas,)
 
         out = {
@@ -250,12 +282,22 @@ class EndoFoundationModel(nn.Module):
         }
         if self.phase_classifier is not None:
             out["phase_logits"] = self.phase_classifier(latent)
+        if self.drain_head is not None and "mu_drain" in latent:
+            # Keyed separately rather than merged into `out`, so a target
+            # named like a latent key could never shadow one.
+            out["drain_predictions"] = self.drain_head(latent["mu_drain"])
+        # A column, because a blanked step's `nb` is not comparable with an
+        # unblanked one's and the epoch mean mixes them in a ratio only this
+        # flag records.
+        out["provenance_blanked"] = torch.tensor(
+            float(blanked), device=mu_hat.device)
         return out
 
     def decode_once(self, batch: dict, latent: dict, gene_queries: Tensor,
                     study_ids: Tensor | None = None,
                     z_proj: Tensor | None = None,
-                    covariates_from: dict | None = None) -> Tensor:
+                    covariates_from: dict | None = None,
+                    blank_provenance: bool = False) -> Tensor:
         """Predicted counts from one latent and one set of covariates.
 
         Split out of `forward` so that a probe can run it again with ONE
@@ -317,9 +359,21 @@ class EndoFoundationModel(nn.Module):
                                else take("study_id"))           # (B, d_study)
             if self.decoder_study is not None else None
         )
+        # A blanked step zeroes every covariate channel AND takes the
+        # projection that leaves the drain's contribution out, so the decoder
+        # has the biology block and the library size and nothing else.
+        # Blanking only one of the two would leave the other as a complete
+        # substitute: `reliance_technical` 0.1017 against parts summing to
+        # 0.0891 is that redundancy, measured. See model/blanking.py.
+        default_proj = "z_proj"
+        if blank_provenance:
+            blank = ProvenanceBlanking.blank
+            tissue, platform = blank(tissue), blank(platform)
+            disease, study = blank(disease), blank(study)
+            default_proj = "z_proj_nodrain"
         log_mu = self.decoder(
             gene_queries,
-            latent["z_proj"] if z_proj is None else z_proj,
+            latent[default_proj] if z_proj is None else z_proj,
             tissue, platform, disease, study,
         )                                                       # (B, G_meas)
         return F.softmax(log_mu, dim=-1) * batch["library_size"].unsqueeze(-1)

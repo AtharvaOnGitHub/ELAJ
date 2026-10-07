@@ -39,14 +39,18 @@ that would look like success: the drain satisfies its reward by encoding
 having nowhere to put anything. Two things prevent it, and neither is a
 matter of discipline.
 
-  1. EVERY REGRESSION TARGET IS STANDARDISED WITHIN THE BATCH, and
-     `PerStudyBatchSampler` puts one study in each batch. Subtracting the
-     batch mean therefore removes the study-level component of the target
-     before the loss sees it. What is left to predict is the cell's
-     deviation from its own study's mean, which a study code cannot supply.
-  2. AT LEAST ONE SUCH TARGET IS REQUIRED. `DrainLoss` refuses to be built
-     with `study` as its only target, because that reward IS satisfiable by
-     a constant. See `objectives/drain.py`.
+  1. DEPTH AND DETECTED-GENE COUNT DIFFER BETWEEN CELLS OF ONE STUDY. A
+     drain that reads only the study-identifying features of a cell returns
+     nearly the same vector for every cell of that study, so it cannot
+     predict either of them. At least one such target is REQUIRED:
+     `DrainLoss` refuses to be built with `study` alone, because that reward
+     is fully satisfied by exactly the reading we are trying to rule out.
+  2. THE TARGETS ARE CENTRED ON THE BATCH, which is one study, so a study's
+     mean depth is subtracted before the loss sees it. Without that, a
+     study code could emit each study's own level and follow it from batch
+     to batch, collecting a real share of the reward across an epoch while
+     learning nothing about any cell. See `objectives/drain.py` for why the
+     SCALING, unlike the centring, guards nothing.
 
 The diagnostic that says whether it worked is `drain_within_study`, the
 share of the drain block's variance that is within-study rather than

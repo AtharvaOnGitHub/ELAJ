@@ -26,14 +26,15 @@ description: >
   site nobody updated.
 
   WHY IT CANNOT BECOME A STUDY LOOKUP TABLE. That is the failure that would
-  look like success: the drain holds "this is study 7", absorbs nothing
-  per-cell, and the encoder still has nowhere to put anything.
-  PerStudyBatchSampler puts one study in each batch, so the batch mean of a
-  target IS that study's mean; standardising log_depth and log_genes within
-  the batch removes it and leaves the cell's deviation from its own study's
-  average, which a study code cannot supply. A constant prediction then
-  scores an MSE of exactly 1.0, which is what predicting nothing scores.
-  DrainLoss refuses to be constructed with study as its only target.
+  look like success: the drain reads only the study-identifying features of
+  a cell, absorbs nothing cell-specific, and the encoder still has nowhere
+  to put anything. Depth and detected-gene count DIFFER BETWEEN CELLS OF
+  ONE STUDY, so a reading like that cannot predict either, and DrainLoss
+  refuses to be constructed with study as its only target because study
+  alone is the one reward that reading does satisfy. Centring each target on
+  the batch, which is one study, additionally stops a study code emitting
+  each study's own mean level and following it from batch to batch. At unit
+  mean square an MSE of 1.0 is then exactly "learned nothing".
   drain_within_study reports the share of the drain's variance that is
   within-study; it is 1.0 per batch by construction and only means anything
   over an epoch.

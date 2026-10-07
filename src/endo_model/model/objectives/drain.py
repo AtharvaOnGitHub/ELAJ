@@ -10,7 +10,9 @@ THE TARGETS, AND WHY EACH IS HERE.
     study       which of the eleven studies the cell came from. The anchor:
                 it is the quantity `DABClassifier` is removing from the
                 biology block, so it is the quantity the drain must be able
-                to hold. Cross entropy.
+                to hold. Cross entropy. On its own it is the one target a
+                study-only reading of the cell satisfies completely, which is
+                why it may not be the only one.
     log_depth   log1p of the cell's library size, the total non-DNS count.
                 Sequencing depth is the largest single technical difference
                 between cells and it varies WITHIN a study, which is what
@@ -24,10 +26,14 @@ THE TARGETS, AND WHY EACH IS HERE.
 WHAT ACTUALLY STOPS THE DRAIN BECOMING A STUDY LOOKUP TABLE. Two different
 things, and only one of them is the standardisation.
 
-The real guard is that depth and detected-gene count VARY BETWEEN CELLS IN
-ONE STUDY. A vector that is constant across a batch cannot track that, so
-the reward is not collectable without per-cell content. That would be true
-of the raw targets too.
+The real guard is about WHICH FEATURES OF A CELL the drain is able to read.
+`mu_drain` is a function of one cell's counts. A function that reads only
+the features identifying the study — the broad shape of the profile, which
+genes are present at all — returns nearly the same vector for every cell of
+that study, and depth and detected-gene count DIFFER BETWEEN CELLS OF ONE
+STUDY, so such a function cannot predict them. The reward is therefore not
+collectable without reading something cell-specific. That is a property of
+the targets and would hold of the raw ones too.
 
 The CENTRING adds one thing on top, and it matters across batches rather
 than within one. An uncentred target carries its study's mean level, and a
@@ -45,13 +51,13 @@ the line to read `drain_log_depth` against. It also puts `w_depth` and
 `w_genes` on one scale rather than weighting them by corpus variance, since
 raw log depth sits near 8 and log gene count near 7.5.
 
-WHY `study` ALONE IS REFUSED. Within one batch every cell carries the same
-study id, so a cross entropy over study is satisfiable by a vector that is
-constant across the batch. If that were the only target, the drain would be
-an eleven-valued code, would absorb no per-cell variation, and the encoder
-would still have nowhere to put what the adversary is removing. `__init__`
-raises rather than letting that run for nine epochs and be discovered from
-the metrics afterwards.
+WHY `study` ALONE IS REFUSED. It is fully satisfied by a drain that reads
+only the study-identifying features of a cell, because every cell of a study
+shares the right answer. The drain would be an eleven-valued code holding
+nothing about any individual cell, it would absorb no per-cell variation,
+and the encoder would still have nowhere to put what the adversary is
+removing. `__init__` raises rather than letting that run for nine epochs and
+be discovered from the metrics afterwards.
 
 PRICING. `w_study`, `w_depth` and `w_genes` are the relative weights, and
 `DrainLoss` returns the weighted sum plus each part separately so the
@@ -99,11 +105,12 @@ class DrainLoss(nn.Module):
             raise ValueError(
                 "DrainLoss needs at least one within-cell target "
                 f"({list(REGRESSION_TARGETS)}). Configured targets were "
-                f"{list(self.targets)}. Every batch holds ONE study, so a "
-                "study-only reward is satisfiable by a vector that is "
-                "constant across the batch: the drain would become an "
-                "eleven-valued code, absorb no per-cell variation, and leave "
-                "the encoder with nowhere to put what the adversary removes."
+                f"{list(self.targets)}. A study-only reward is fully "
+                "satisfied by a drain that reads only the study-identifying "
+                "features of a cell, since every cell of a study shares the "
+                "right answer: it would become an eleven-valued code, absorb "
+                "no per-cell variation, and leave the encoder with nowhere to "
+                "put what the adversary removes."
             )
         self.weights = {"study": float(w_study), "log_depth": float(w_depth),
                         "log_genes": float(w_genes)}

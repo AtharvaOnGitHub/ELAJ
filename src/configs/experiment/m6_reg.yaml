@@ -1,0 +1,161 @@
+name: m6_reg
+description: >
+  CAPACITY REGULARISATION SLIDES ALONG THE FRONTIER. GENERALISATION
+  REGULARISATION MIGHT MOVE IT. This arm is the second kind, and it is the
+  only kind that can improve mixing and biology at the same time.
+
+  WHAT m5_combined SETTLED, over nine epochs.
+
+      epoch   val_nb   study_knn   phase_xd   family_xd   patient
+        0     0.4092     0.554       0.602      0.956      0.316
+        3    *0.4043*    0.568       0.564      0.956      0.335
+        4     0.4057     0.636       0.701      0.982      0.386
+        8     0.4088     0.720       0.721      0.981      0.450
+
+  The axis did NOT break. Correlation between study_knn and cross-donor phase
+  across the nine epochs is +0.901, the same relationship m4_tight16 showed at
+  +0.924 and the r8 corpus showed across six independent methods at +0.867.
+  The KL price moved the starting point down and slowed the climb; everything
+  still rises together.
+
+  AND THAT IS WHY MORE PRICE IS THE WRONG ANSWER. Raising w_kl_gauss, lowering
+  free_bits or narrowing the latent all do the same thing: they limit how much
+  the latent may store, which moves the model DOWN the axis to better mixing
+  and worse biology. We already have that end. m5 at epoch 3 is it.
+
+  What we do not have is a model that is better at BOTH. That requires a
+  change that improves generalisation at unchanged capacity, so the whole
+  trade-off curve moves rather than the position on it.
+
+  THE EVIDENCE THAT THERE IS GENERALISATION LEFT TO WIN. m5's training loss
+  fell to about 0.387 while validation sat at 0.4088: a gap of 0.022, and
+  growing from 0.0015 at epoch 0. val_nb reached its minimum at epoch 3 and
+  then drifted up while train_nb kept falling. That is ordinary overfitting,
+  and it is the thing dropout and weight decay are for.
+
+  THE TWO LEVERS HAVE NEVER BEEN TOUCHED IN THIS PROJECT.
+
+      group_encoder.dropout        0.1   -> 0.25
+      aggregation_encoder.dropout  0.1   -> 0.25
+      optimizer.weight_decay      1e-4   -> 0.01
+
+  0.1 is the dataclass default and no config has ever overridden it; scGPT
+  runs 0.2 on a comparable encoder. 1e-4 is likewise the default and is two
+  orders below what transformer training normally uses. Meanwhile the
+  learning rate was raised to 1e-3, more than triple the 3e-4 default, so this
+  model has been trained fast with almost no regularisation of either kind.
+
+  WHAT WOULD MAKE THIS WORK. The train-val gap at the selected epoch narrows
+  below 0.015 AND the selected checkpoint beats m5 epoch 3 on phase without
+  giving back study_knn. That is the frontier moving. Watch the pair together:
+  a gain in phase with study_knn also rising is just a later point on the same
+  axis, and means this did nothing.
+
+  WHAT WOULD KILL IT. val_nb above 0.4315, the mean-profile baseline, at epoch
+  3. Dropout 0.25 on an encoder that is already regularised by gene masking
+  could simply underfit, and that shows up in reconstruction first.
+
+  WHY NOT THE CIRCULAR LATENT, which was the other candidate. Three reasons,
+  recorded in docs/paper/CIRCULAR_LATENT.md. The price I had proposed for it
+  (w_kl_circ 0.3, effective 0.15) opens a channel holding about 12 nats for
+  roughly 0.03% of the objective, against ln(254) = 5.54 to name a donor, so
+  identity would move there and undo the mixing result; m1_phase_circ ran at
+  effective 0.05 and its concentration went to 182-335, which is that
+  prediction already confirmed. Raising the price to close the hole leaves the
+  circle sitting at kappa_floor carrying nothing. And m1_phase_circ is the
+  direct test: with the phase head reading ONLY the circle at w_cls 500, the
+  circle scored phase 0.8422 against the Gaussian block's 0.8409. No
+  advantage. That arm stays unrun pending the rest of the analysis.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m6_reg/
+seed: 24
+
+overrides:
+  training.max_epochs: 12
+  training.early_stop_patience: 6
+  training.early_stop_warmup_epochs: 2
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  training.block_probe_every: 2
+  # Every epoch. Epoch 0 was pruned from both m4 arms.
+  training.keep_every_epochs: 1
+
+  training.stop_metric: nb
+  # Study level, and reachable for the first time. 0.5 was below every value
+  # any arm has recorded; 0.65 means better than all of them.
+  training.guard_metric: study_knn
+  training.guard_max: 0.65
+
+  # 12,500 is just under the smallest panel of 13,144, which is as far as
+  # equalising the measured gene COUNT can go. Not scGPT's masked-value
+  # objective, and lowering it would discard biology without weakening the
+  # DNS count fingerprint any further.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  # ── THE ONLY CHANGES FROM m5_combined ───────────────────────────────────
+  # Generalisation regularisation, not capacity regularisation. See the
+  # description for why the distinction decides what this can achieve.
+  training.optimizer.weight_decay: 0.01
+  model.group_encoder.dropout: 0.25
+  model.aggregation_encoder.dropout: 0.25
+  training.kl_annealing.beta_max: 0.5
+  # 1. and 2.
+  training.kl_annealing.warmup_fraction: 0.05
+  model.loss.w_kl_gauss: 30.0
+  # Inert: no circular branch in this arm.
+  model.loss.w_kl_circ: 2.0
+  model.loss.free_bits: 0.25
+
+  # 3.
+  model.dab.hidden_dim: 256
+  model.dab.n_layers: 3
+  model.dab.normalise: true
+  model.dab.dropout: 0.0
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 168.0
+
+  # 4.
+  model.ecs.enabled: true
+  model.ecs.threshold: 0.8
+  model.ecs.buffer_batches: 0
+  # 50, not 1400. See the description: 1400 was 11.4% of nb by value against
+  # the phase head's 0.65%, and the two terms we have measured amplified
+  # value to gradient by x26 and x109.
+  model.loss.w_ecs: 50.0
+
+  # Measured at 0.0005x reconstruction's gradient and costing a second
+  # encoder pass every fourth step.
+  model.cce.enabled: false
+
+  model.classifier.enabled: true
+  # Gaussian, because with n_circular 0 there is no other block.
+  model.classifier.block: gaussian
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
+  # climbed 0.727 to 0.905 while every other axis decayed.
+  model.loss.w_cls: 40.0
+
+  # d_z = d_gauss alone now. 16 holds the width at m4_tight16's rather than
+  # dropping to the d_z 8 that m4_edge_starved plateaued at.
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

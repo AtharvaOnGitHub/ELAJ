@@ -46,8 +46,8 @@ the decoder depends on that input more.
                                   what m3 and m4 look like, and it is a
                                   different problem with a different fix.
 
-`reliance_ratio` is latent over study, so above 1 means the latent matters
-more than the study embedding.
+`reliance_ratio` is latent over TECHNICAL, so above 1 means the latent
+matters more than everything the decoder is told about provenance.
 
 COST. Two extra decoder passes on a subsample, no encoder re-run and no
 backward. The encoder is the expensive part and runs once.

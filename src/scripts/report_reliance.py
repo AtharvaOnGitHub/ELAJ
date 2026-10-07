@@ -15,18 +15,25 @@ absent.
 This runs the same probe over a saved checkpoint, so the question is
 answered from the runs we already paid for rather than from a relaunch.
 
-WHAT IT REPORTS. Two counterfactuals on the same cells, same weights, no
-training: tell the decoder a study the cell is not from, and decode each cell
-from its neighbour's latent. Each costs some reconstruction, and the cost is
-how much the decoder depends on that input.
+WHAT IT REPORTS. Three counterfactuals on the same cells, same weights, no
+training: tell the decoder a study the cell is not from; swap every
+provenance channel at once (study, platform, tissue, disease); and decode
+each cell from its neighbour's latent. Each costs some reconstruction, and
+the cost is how much the decoder depends on that input.
 
-    study high, latent high   both carry real information
-    study high, latent LOW    the decoder is coasting on the study embedding
-    study LOW,  latent high   conditioning bought nothing; the latent is
-                              still doing the whole job, which is the
-                              hypothesis this wave was built to test
-    both low                  reconstruction is coming from library size and
-                              gene identity alone
+    technical high, latent high   both carry real information. Wanted.
+    technical high, latent LOW    the decoder is coasting on the covariates
+                                  and the latent is being starved
+    technical LOW,  latent high   conditioning bought nothing; the latent is
+                                  doing the whole job
+    study low, technical high     the study embedding is redundant with
+                                  platform and tissue, not unused
+
+`reliance_technical` is the one to read. Substituting the study id alone
+leaves platform and tissue still agreeing with the data, and every study in
+this corpus has one or two platform combinations, so `d_platform` is a study
+code in all but name. That is why the study-only readings of ~0.004 are an
+artefact rather than a finding.
 
 COST. Minutes on one card. No training, no backward, one encoder pass per
 batch over a handful of batches.
@@ -131,29 +138,55 @@ def main() -> None:
         logger.info("Written to %s", out)
 
 
+def verdict(study: float, technical: float, latent: float) -> str:
+    """The four-row reading, chosen by where the two counterfactuals land.
+
+    `technical` is the one that matters: it substitutes platform, tissue and
+    disease alongside the study id, so it is the real "the decoder does not
+    know where this cell came from". `study` alone leaves platform agreeing
+    with the data, and every study here has one or two platform combinations.
+    """
+    if technical != technical:
+        return ("No batch had a substitute from another study, so the "
+                "technical counterfactual could not be formed. Raise "
+                "--batches, or the loader is single-study.")
+    if technical >= 0.05 and latent >= 0.05:
+        reading = ("Both the covariates and the latent carry real "
+                   "information. This is the wanted case.")
+    elif technical >= 0.05 and latent < 0.25 * technical:
+        reading = ("THE DECODER IS COASTING ON THE COVARIATES. The latent "
+                   "contributes little to reconstruction, so val_nb is "
+                   "measuring the decoder rather than the model, and the "
+                   "latent is being starved rather than priced.")
+    elif technical < 0.05 and latent >= 0.05:
+        reading = ("Conditioning bought nothing at all. The latent is doing "
+                   "the whole job, so the reason it stores study identity "
+                   "lies outside the decoder.")
+    else:
+        reading = ("Neither input costs much, so reconstruction is coming "
+                   "from library size and gene identity alone.")
+    if technical >= 0.05 and study < 0.1 * technical:
+        reading += ("\n  The study embedding is REDUNDANT with platform and "
+                    "tissue, not unused. Changing d_study will not move "
+                    "this; the covariates are where the signal sits.")
+    return reading
+
+
 def describe(run: str, scores: dict) -> str:
     """The table, with the reading spelled out rather than left to the reader."""
-    study = scores.get("reliance_study", float("nan"))
-    latent = scores.get("reliance_latent", float("nan"))
-    ratio = scores.get("reliance_ratio", float("nan"))
-    if latent > study:
-        verdict = ("The latent matters more than the study embedding. "
-                   "Conditioning has not hollowed it out.")
-    elif study > 0 and latent < 0.25 * study:
-        verdict = ("THE DECODER IS COASTING ON THE STUDY EMBEDDING. The "
-                   "latent contributes little to reconstruction, so val_nb "
-                   "is measuring the decoder rather than the model.")
-    elif study < 0.05:
-        verdict = ("The study embedding is barely used, so conditioning the "
-                   "decoder on study bought nothing and the reason the "
-                   "latent stores study identity lies elsewhere.")
-    else:
-        verdict = "Both inputs carry information, with the study ahead."
+    nan = float("nan")
+    study = scores.get("reliance_study", nan)
+    technical = scores.get("reliance_technical", nan)
+    latent = scores.get("reliance_latent", nan)
+    share = scores.get("reliance_study_share", nan)
+    ratio = scores.get("reliance_ratio", nan)
     return (f"Decoder reliance: {run}\n"
-            f"  wrong study  costs {study:+.4f} nats/gene\n"
-            f"  wrong latent costs {latent:+.4f} nats/gene\n"
-            f"  ratio (latent / study) {ratio:.2f}\n"
-            f"  {verdict}")
+            f"  wrong study     costs {study:+.4f} nats/gene\n"
+            f"  wrong technical costs {technical:+.4f} nats/gene"
+            f"   (study is {100.0 * share:.0f}% of it)\n"
+            f"  wrong latent    costs {latent:+.4f} nats/gene\n"
+            f"  ratio (latent / technical) {ratio:.2f}\n"
+            f"  {verdict(study, technical, latent)}")
 
 
 if __name__ == "__main__":

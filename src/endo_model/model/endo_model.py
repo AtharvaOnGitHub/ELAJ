@@ -139,7 +139,9 @@ class EndoFoundationModel(nn.Module):
         # mutually redundant and removing one leaves the others as a complete
         # substitute. See model/blanking.py.
         self.provenance_blanking = ProvenanceBlanking(
-            p=config.drain.blank_p if config.drain.enabled else 0.0,
+            covariates_p=(config.drain.blank_covariates_p
+                          if config.drain.enabled else 0.0),
+            drain_p=config.drain.blank_drain_p if config.drain.enabled else 0.0,
             seed=config.drain.blank_seed,
         )
 
@@ -266,12 +268,15 @@ class EndoFoundationModel(nn.Module):
         # gene_queries: (G_meas, d_dec) — no batch dimension, by construction
 
         # ── Decode ────────────────────────────────────────────────────────────
-        # One draw for the whole step. When it fires the decoder reads
-        # `z_proj_nodrain` and zeroed covariates, so the biology block plus
-        # the library size is all it has. Training only.
+        # Two independent draws for the whole step, at different rates.
+        # Zeroing the covariates pushes provenance out of the free channels
+        # and into the drain; dropping the drain as well would leave study
+        # structure nowhere to go but the biology block, so it is rare. See
+        # model/blanking.py.
         blanked = self.provenance_blanking.draw(self.training)
         mu_hat = self.decode_once(batch, latent, gene_queries,
-                                  blank_provenance=blanked)  # (B, G_meas)
+                                  blank_covariates=blanked.covariates,
+                                  blank_drain=blanked.drain)  # (B, G_meas)
         theta = self.dispersion(measured_global_idxs)          # (G_meas,)
 
         out = {
@@ -286,18 +291,22 @@ class EndoFoundationModel(nn.Module):
             # Keyed separately rather than merged into `out`, so a target
             # named like a latent key could never shadow one.
             out["drain_predictions"] = self.drain_head(latent["mu_drain"])
-        # A column, because a blanked step's `nb` is not comparable with an
-        # unblanked one's and the epoch mean mixes them in a ratio only this
-        # flag records.
-        out["provenance_blanked"] = torch.tensor(
-            float(blanked), device=mu_hat.device)
+        # Columns, because a blanked step's `nb` is not comparable with an
+        # unblanked one's and the epoch mean mixes them in a ratio only these
+        # flags record. Two, because the two blankings do different jobs and
+        # their rates differ.
+        out["blanked_covariates"] = torch.tensor(
+            float(blanked.covariates), device=mu_hat.device)
+        out["blanked_drain"] = torch.tensor(
+            float(blanked.drain), device=mu_hat.device)
         return out
 
     def decode_once(self, batch: dict, latent: dict, gene_queries: Tensor,
                     study_ids: Tensor | None = None,
                     z_proj: Tensor | None = None,
                     covariates_from: dict | None = None,
-                    blank_provenance: bool = False) -> Tensor:
+                    blank_covariates: bool = False,
+                    blank_drain: bool = False) -> Tensor:
         """Predicted counts from one latent and one set of covariates.
 
         Split out of `forward` so that a probe can run it again with ONE
@@ -359,18 +368,18 @@ class EndoFoundationModel(nn.Module):
                                else take("study_id"))           # (B, d_study)
             if self.decoder_study is not None else None
         )
-        # A blanked step zeroes every covariate channel AND takes the
-        # projection that leaves the drain's contribution out, so the decoder
-        # has the biology block and the library size and nothing else.
-        # Blanking only one of the two would leave the other as a complete
-        # substitute: `reliance_technical` 0.1017 against parts summing to
-        # 0.0891 is that redundancy, measured. See model/blanking.py.
-        default_proj = "z_proj"
-        if blank_provenance:
+        # `blank_covariates` zeroes all 48 covariate dimensions at once,
+        # because they substitute for each other: `reliance_technical` 0.1017
+        # against parts summing to 0.0891 is that redundancy, measured.
+        # Provenance then has to come from the latent, where the drain is
+        # rewarded for carrying it. `blank_drain` additionally removes the
+        # drain, which leaves study structure nowhere but the biology block
+        # and so is kept rare. See model/blanking.py.
+        if blank_covariates:
             blank = ProvenanceBlanking.blank
             tissue, platform = blank(tissue), blank(platform)
             disease, study = blank(disease), blank(study)
-            default_proj = "z_proj_nodrain"
+        default_proj = "z_proj_nodrain" if blank_drain else "z_proj"
         log_mu = self.decoder(
             gene_queries,
             latent[default_proj] if z_proj is None else z_proj,

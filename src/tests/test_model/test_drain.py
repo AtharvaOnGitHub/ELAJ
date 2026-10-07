@@ -100,28 +100,55 @@ class TestBlanking:
     def test_blanking_never_fires_in_eval_mode(self):
         """Validation and every export must run with provenance intact, or
         val_nb stops being comparable with every arm that came before."""
-        policy = ProvenanceBlanking(p=1.0, seed=0)
-        assert all(policy.draw(training=False) is False for _ in range(20))
+        policy = ProvenanceBlanking(covariates_p=1.0, drain_p=1.0, seed=0)
+        for _ in range(20):
+            got = policy.draw(training=False)
+            assert got.covariates is False and got.drain is False
+            assert got.any is False
 
-    def test_p_zero_never_fires_and_p_one_always_does(self):
-        assert not any(ProvenanceBlanking(p=0.0).draw(True) for _ in range(20))
-        assert all(ProvenanceBlanking(p=1.0).draw(True) for _ in range(20))
+    def test_zero_never_fires_and_one_always_does(self):
+        off = ProvenanceBlanking(covariates_p=0.0, drain_p=0.0)
+        on = ProvenanceBlanking(covariates_p=1.0, drain_p=1.0)
+        assert not any(off.draw(True).any for _ in range(20))
+        assert all(on.draw(True).covariates for _ in range(20))
+        assert all(on.draw(True).drain for _ in range(20))
 
-    def test_the_rate_is_about_right(self):
-        policy = ProvenanceBlanking(p=0.25, seed=7)
-        fired = sum(policy.draw(True) for _ in range(4000))
-        assert 850 < fired < 1150, fired
+    def test_the_two_rates_are_independent_and_about_right(self):
+        """THE POINT OF THE SPLIT. The covariate blanking is the useful
+        pressure; blanking the drain as well leaves study structure nowhere
+        to go but the biology block, so it must be able to be much rarer."""
+        policy = ProvenanceBlanking(covariates_p=0.25, drain_p=0.10, seed=7)
+        draws = [policy.draw(True) for _ in range(6000)]
+        cov = sum(d.covariates for d in draws)
+        drain = sum(d.drain for d in draws)
+        assert 1300 < cov < 1700, cov
+        assert 450 < drain < 750, drain
+        # Independent, so the joint rate is near the product, not the min.
+        both = sum(d.covariates and d.drain for d in draws)
+        assert 90 < both < 210, both
+
+    def test_the_drain_rate_does_not_perturb_the_covariate_sequence(self):
+        """Short-circuiting p <= 0 keeps the two streams separable, so an arm
+        with the drain blanking off sees the same covariate steps as one with
+        it on."""
+        a = [d.covariates for d in
+             (ProvenanceBlanking(covariates_p=0.5, drain_p=0.0, seed=4)
+              .draw(True) for _ in range(40))]
+        policy = ProvenanceBlanking(covariates_p=0.5, drain_p=0.0, seed=4)
+        b = [policy.draw(True).covariates for _ in range(40)]
+        assert a == b
 
     def test_it_is_reproducible_from_the_seed(self):
-        a = [ProvenanceBlanking(p=0.5, seed=3).draw(True) for _ in range(5)]
-        b = [ProvenanceBlanking(p=0.5, seed=3).draw(True) for _ in range(5)]
-        assert a == b
+        def run():
+            policy = ProvenanceBlanking(covariates_p=0.5, drain_p=0.3, seed=3)
+            return [tuple(policy.draw(True)) for _ in range(8)]
+        assert run() == run()
 
     def test_it_does_not_disturb_the_global_rng(self):
         torch.manual_seed(99)
         expected = torch.randn(3)
         torch.manual_seed(99)
-        policy = ProvenanceBlanking(p=0.5, seed=1)
+        policy = ProvenanceBlanking(covariates_p=0.5, drain_p=0.5, seed=1)
         [policy.draw(True) for _ in range(10)]
         assert torch.equal(torch.randn(3), expected)
 
@@ -132,8 +159,10 @@ class TestBlanking:
 
     def test_a_probability_outside_zero_one_is_refused(self):
         for bad in (-0.1, 1.1):
-            with pytest.raises(ValueError, match="must be in"):
-                ProvenanceBlanking(p=bad)
+            with pytest.raises(ValueError, match="covariates_p must be in"):
+                ProvenanceBlanking(covariates_p=bad)
+            with pytest.raises(ValueError, match="drain_p must be in"):
+                ProvenanceBlanking(drain_p=bad)
 
 
 class TestTheCopyPasteGuard:

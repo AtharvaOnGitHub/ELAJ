@@ -334,14 +334,16 @@ class DrainConfig:
     removes the study-level component of the target and leaves the cell's
     deviation from its own study's mean.
 
-    `blank_p` is the fraction of training steps on which the decoder is told
-    nothing about provenance: the drain's contribution is dropped AND all
-    `d_tissue + d_platform + d_disease + d_study` covariate dimensions are
-    zeroed, together, because they are mutually redundant. On those steps the
-    biology block plus the library size is the whole input, which is what
-    makes the biology block carry the reconstruction and what stops the drain
-    swallowing biology. 0.25 is a starting guess and has no measurement
-    behind it; read `nb` on blanked against unblanked steps at epoch 1.
+    TWO BLANKING RATES, AND THEY ARE NOT THE SAME IDEA.
+    `blank_covariates_p` is the useful pressure: zero all
+    `d_tissue + d_platform + d_disease + d_study` dimensions at once, so
+    provenance has to come from the latent, where the drain is rewarded for
+    taking it. `blank_drain_p` additionally drops the drain, which leaves
+    study structure nowhere to go but the BIOLOGY block and so works against
+    the adversary; it is kept low because its only job is to stop biology
+    hiding in the drain, where nothing would see it. Both are guesses with no
+    measurement behind them; read `nb` on blanked against unblanked steps at
+    epoch 1.
 
     `d_drain` is deliberately narrow. The job is to hold depth, detected-gene
     count and a study code, which is a handful of numbers, and a wide drain
@@ -355,7 +357,8 @@ class DrainConfig:
     w_study: float = 1.0
     w_depth: float = 1.0
     w_genes: float = 1.0
-    blank_p: float = 0.25
+    blank_covariates_p: float = 0.25
+    blank_drain_p: float = 0.10
     blank_seed: int = 0
 
     @classmethod
@@ -370,7 +373,8 @@ class DrainConfig:
             w_study=float(d.get("w_study", 1.0)),
             w_depth=float(d.get("w_depth", 1.0)),
             w_genes=float(d.get("w_genes", 1.0)),
-            blank_p=float(d.get("blank_p", 0.25)),
+            blank_covariates_p=float(d.get("blank_covariates_p", 0.25)),
+            blank_drain_p=float(d.get("blank_drain_p", 0.10)),
             blank_seed=int(d.get("blank_seed", 0)),
         )
 

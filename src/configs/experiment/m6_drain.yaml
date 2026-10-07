@@ -182,9 +182,23 @@ overrides:
   # and drain_log_genes against nb in the epoch-1 gradient report and move
   # it, the way w_cls went 500 -> 40 and w_ecs 1400 -> 50.
   model.loss.w_drain: 1.0
-  # A quarter of training steps run with the decoder told nothing about
-  # provenance: the drain contribution dropped AND all 48 covariate
-  # dimensions zeroed, together, because the parts are redundant. Also a
-  # guess. Compare nb on blanked against unblanked steps at epoch 1.
-  model.drain.blank_p: 0.25
+  # TWO RATES, BECAUSE THEY ARE NOT THE SAME IDEA.
+  #
+  # Zeroing the 48 covariate dimensions is the useful pressure: provenance
+  # then has to come from the latent, and the drain is what is rewarded for
+  # taking it. All 48 go together because they substitute for each other,
+  # measured: the parts sum to 0.0891 against a joint 0.1017.
+  #
+  # Dropping the drain as well works AGAINST the adversary. With both gone,
+  # study-level structure has nowhere to go but the biology block, and the
+  # encoder will put it there whenever that is cheaper than losing the
+  # reconstruction. At the 0.25 both-together rate this config first carried,
+  # that was a standing pressure pushing study identity into the one block
+  # every reported metric reads. Its only real job is to stop biology hiding
+  # in the drain, where nothing would see it, so 0.10 is insurance rather
+  # than pressure.
+  #
+  # Both are guesses. Read nb on blanked against unblanked steps at epoch 1.
+  model.drain.blank_covariates_p: 0.25
+  model.drain.blank_drain_p: 0.10
   model.drain.blank_seed: 24

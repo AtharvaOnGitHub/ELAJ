@@ -9,8 +9,8 @@
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=180G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=100G
 #SBATCH --job-name=elaj_train
 #SBATCH --output=logs/train_%j.log
 
@@ -31,6 +31,23 @@
 # CPU count feeds the DataLoader workers: StudyPanel keeps counts as CSR and
 # densifies one cell per __getitem__, so collation is CPU-bound and starving it
 # will idle the GPU.
+#
+# 16 CORES, NOT 8, MEASURED 6 OCTOBER 2026. The BlueBEAR GPU docs give an
+# a100_80 node as 4 GPUs over 72 Ice Lake cores and 512 GB, with the rule
+# "at most total_cores / total_GPUs per GPU" -- so one GPU's share is 18
+# cores and 128 GB, and 8 cores was using 44% of the entitlement. 16 cores
+# gives 15 DataLoader workers instead of 7 and measured 58 min/epoch against
+# 62.5 on m5_combined: a 7% saving, not the 20% hoped for, so collation was
+# less of the bottleneck than the comment above assumed. Kept because the
+# cores are free within the share.
+#
+# 100 G, NOT 180 G. Four full-length runs peaked at 51.8 to 53.9 GB
+# (m3_study_raw 17 epochs, m4_tight16 and m4_edge_starved 19 each, m5 at 2 h),
+# so growth over a run is about 2 GB and 180 G was 3.3x the need. More to the
+# point 180 G sits ABOVE the 128 GB per-GPU share, which stops the scheduler
+# co-locating this job with three other single-GPU jobs -- a backfill blocker
+# independent of priority. 100 G is 1.9x the measured peak and under the
+# share. See the bluebear-gpu-node-specs note.
 #
 # WALLTIME: two days, which is the queue maximum. It was 24 h for most of this
 # project's history, and that was a self-imposed limit rather than the cluster's

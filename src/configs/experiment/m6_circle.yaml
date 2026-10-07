@@ -1,0 +1,169 @@
+name: m6_circle
+description: >
+  THE BET: A SELECTIVE PRICE. Gaussian nats cost 30, circular nats cost 0.3,
+  a hundredfold ratio. Phase is a CYCLIC variable and the circle is the only
+  cheap place to put it; donor and study identity are not cyclic and stay in
+  the expensive block. One change from m5_combined and it is aimed squarely
+  at the one axis m5 loses on.
+
+  WHERE THE CAMPAIGN STANDS, scored, same cells, all four methods.
+
+      metric              m3      m4_tight16    pca    scvi   scanvi
+      study-mixing  v   0.7254    *0.6311*    0.849   0.733   0.7111
+      xdonor phase  ^  *0.7514*    0.676      0.6328  0.6958  0.6861
+      patient kNN   v   0.6173    *0.4431*    0.6614  0.7176  0.7134
+      xdonor family ^   0.9834     0.9763    *0.9868* 0.981   0.9824
+
+  ELAJ holds the best value on three of four, each by a different arm, and no
+  baseline is best at anything but family by 0.003. The two arms sit at
+  opposite ends of the +0.867 donor-blindness/biology axis and the baselines
+  cluster in the middle, reaching neither end.
+
+  m5_combined then broke the axis's slope. Over five epochs study_knn read
+  0.5539, 0.6041, 0.5777, 0.5678, 0.6363 -- oscillating, no trend, every one
+  under the 0.65 guard -- where m4_tight16 climbed 0.6505 to 0.8208
+  monotonically. Its latent held 5.3 to 6.6 nats against ln(254) = 5.537, the
+  train-val gap halved to 0.019, and the UMAP came out MIXED rather than one
+  island per study, and not a uniform blob either.
+
+  SO THE PRICE WORKS AND THE REMAINING DEFICIT IS PHASE. m5's cross-donor
+  phase ran 0.5643 to 0.7007 on the validation probe, noisy and below where
+  m3 ended. At 5.5 nats total, encoding a 3-to-5 class phase label costs
+  ln(3) to ln(5) = 1.1 to 1.6 nats, a quarter of everything the latent holds,
+  and it is competing with the adversary and reconstruction for that room.
+
+  WHY A CIRCLE IS THE RIGHT ANSWER UNDER SCARCITY, and why this has never
+  been tested. A cyclic variable on a circle is cheap: one angle at moderate
+  concentration carries a phase at about a nat. The same information in
+  Gaussian coordinates needs two dimensions and a wider posterior. Every arm
+  that had a circular branch ran it at w_kl_gauss 1, where the latent held 28
+  to 44 nats and NOTHING was scarce, so the circle's efficiency bought
+  nothing and m4_tight16's phase (0.676, with a circle) came out below
+  m3_study_raw's (0.7514, with none). Efficiency only pays when the resource
+  is short. It is now.
+
+  THE SHAPE. d_gauss 12 plus n_circular 4 is 16 KL dimensions, exactly
+  m5_combined's count, so the free_bits allowance is unchanged at 4.00 nats
+  and the per-dimension price is unchanged. Four of the sixteen dimensions
+  become circular. d_z is 20 because each angle is handed downstream as a
+  (cos, sin) pair, but the KL charges once per angle.
+
+  THE PRICES. beta_max 0.5 x w_kl_gauss 30 = effective 15 on the Gaussian
+  block. beta_max 0.5 x w_kl_circ 0.3 = effective 0.15 on the circular one.
+  0.15 is deliberately BELOW the 0.5 that pinned every circular dimension in
+  the arm which left w_kl_circ at 1.0, and free_bits 0.25 plus kappa_floor
+  1.0 hold the floor underneath it.
+
+  THE RISK, AND HOW TO READ IT AT EPOCH 2. A cheap channel can be abused. A
+  circular KL is only logarithmically bounded, so four near-free angles could
+  in principle carry donor identity on a 4-torus and bypass the price
+  entirely. Donor is 254 unordered categories and a poor fit for a circle, so
+  reconstruction is unlikely to find that route, but "unlikely" is not
+  "cannot". THE SIGNAL IS study_knn: if it jumps back toward 0.8 the circle
+  is being used as an identity channel and w_kl_circ must rise. block_probe
+  runs every second epoch and reports phase_knn_circ against
+  phase_knn_gauss, which says directly whether the circle is carrying phase
+  or something else.
+
+  WHAT IS DELIBERATELY NOT CHANGED. w_ecs stays 50 even though the gradient
+  report measured it at 0.02x to 0.08x nb across five epochs and 150 to 250
+  would make it matter. ECS SHARPENS pair geometry, the UMAP has only just
+  come good, and stacking a second untried change on the one card risks the
+  result we have for a term we know is merely junior rather than harmful.
+  lambda_dab stays 168, now at its full 0.72x nb after the ramp. The phase
+  head stays w_cls 40 and block `full`, so the head reads both blocks and the
+  routing is the model's choice rather than forced -- m1_phase_circ already
+  tried forcing it.
+
+  WHAT WOULD MAKE THIS THE PAPER'S MODEL. study_knn holding under 0.65 with
+  cross-donor phase at 0.75 or better and family at 0.97: that is m5's mixing
+  with m3's biology, which no arm and no baseline has achieved, and it
+  demonstrates the circular latent rather than merely proposing it.
+
+  WHAT WOULD KILL IT. study_knn above 0.75 by epoch 4, meaning the circle
+  became an identity bypass. Or median kappa below 1e-2 on more than one
+  dimension with val_nb above the 0.4315 baseline by epoch 3, meaning 0.15
+  was still too much price for the circle to survive.
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m6_circle/
+seed: 24
+
+overrides:
+  training.max_epochs: 12
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 2
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  # Every second epoch: phase_knn_circ against phase_knn_gauss is the
+  # measurement this whole arm exists to make.
+  training.block_probe_every: 2
+  training.keep_every_epochs: 1
+
+  training.stop_metric: nb
+  training.guard_metric: study_knn
+  training.guard_max: 0.65
+
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  training.kl_annealing.warmup_fraction: 0.05
+
+  # ── THE SELECTIVE PRICE ──────────────────────────────────────────────────
+  # Effective 15 on the Gaussian block, 0.15 on the circular one. The arm
+  # that ran w_kl_circ 1.0 at beta_max 0.5 pinned every circular dimension
+  # at effective 0.5, so 0.15 sits well below that, with free_bits and
+  # kappa_floor underneath.
+  model.loss.w_kl_gauss: 30.0
+  model.loss.w_kl_circ: 0.3
+  model.loss.free_bits: 0.25
+
+  # ── THE SHAPE: 16 KL DIMS, FOUR OF THEM CIRCULAR ─────────────────────────
+  # d_z = 12 + 2*4 = 20, but the KL charges once per angle, so this is the
+  # same 16 priced dimensions and the same 4.00-nat allowance as m5_combined.
+  model.d_gauss: 12
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+
+  model.dab.hidden_dim: 256
+  model.dab.n_layers: 3
+  model.dab.normalise: true
+  model.dab.dropout: 0.0
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 168.0
+
+  # Unchanged at 50 on purpose. See the description: measured at 0.02-0.08x
+  # nb, so junior rather than harmful, and raising it would sharpen the pair
+  # geometry of a UMAP that has only just come good.
+  model.ecs.enabled: true
+  model.ecs.threshold: 0.8
+  model.ecs.buffer_batches: 0
+  model.loss.w_ecs: 50.0
+
+  model.cce.enabled: false
+
+  model.classifier.enabled: true
+  # `full`, so the head reads both blocks and the model chooses where phase
+  # lives. m1_phase_circ already tested forcing it into the circle.
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 40.0
+
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8

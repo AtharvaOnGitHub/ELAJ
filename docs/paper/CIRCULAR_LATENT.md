@@ -268,6 +268,89 @@ other. That is worth flagging because the project's own labelling notes record
 that neighbouring phases are genuinely hard to separate, and
 `label_smoothing 0.05` exists for exactly that reason.
 
+### 1.11 What the nat counting does and does not assume
+
+`ln(n)` in 1.3 is doing real work in the argument, so it is worth being exact
+about what it rests on. It is **not** an independence assumption. Three
+different assumptions enter at three different places, and only one of them is
+about the data.
+
+**(a) `ln(n)` assumes the n options are equally likely, not independent.**
+
+If the options have probabilities `p_1 ... p_n`, the cost of naming one is the
+**entropy**
+
+    H  =  -sum_i  p_i * ln(p_i)
+
+and `H <= ln(n)`, with equality only when every `p_i` is `1/n`. So `ln(n)` is
+an upper bound: the cost when nothing is more common than anything else.
+
+Our corpus is nowhere near uniform. The eleven studies, by cell count:
+
+| study | cells | share |
+|---|---:|---:|
+| duempelmann_2026 | 466,371 | 29.5% |
+| fonseca_2023 | 387,150 | 24.5% |
+| marecko_2024 | 175,376 | 11.1% |
+| lin_2023 | 140,368 | 8.9% |
+| tan_2022 | 115,368 | 7.3% |
+| garcia_alonso_2021_a | 100,307 | 6.3% |
+| shih_2022 | 74,849 | 4.7% |
+| wang_2022 | 49,606 | 3.1% |
+| li_2025 | 45,803 | 2.9% |
+| ferrero_2024 | 16,167 | 1.0% |
+| garcia_alonso_2021_b | 10,729 | 0.7% |
+
+    uniform assumption    ln(11)            = 2.398 nats
+    actual entropy        -sum p * ln(p)    = 1.965 nats
+    overstatement                           = 0.433 nats, 18%
+
+So "a latent holding more than 2.40 nats can name a study" is **conservative**:
+1.97 nats is enough. Every threshold argument in these notes that uses `ln(n)`
+is therefore stated at a bar slightly higher than the truth, which is the safe
+direction for the claim being made but should not be read as exact. The same
+applies to `ln(254) = 5.54` for donors, where cell counts per donor are more
+skewed still, so the real figure is lower again.
+
+**(b) Adding the per-dimension KLs assumes the posterior factorises -- and it
+does, because we built it that way.**
+
+ELAJ charges a latent of many dimensions by computing a KL for each dimension
+and summing them (see `_reduce` in `kl_divergence.py`). Summing is only the
+total information if the dimensions carry separate information.
+
+Here that is exact rather than assumed. The encoder emits an independent
+centre and spread for each dimension and no covariance between them, so the
+posterior is a product, `q(z|x) = prod_i q_i(z_i|x)`, and the prior is a
+product too. For two products, the KL is exactly the sum of the per-dimension
+KLs. No approximation.
+
+But notice where the assumption went. It is not in the accounting, it is in
+the **architecture**: we have assumed the latent's structure factorises. If
+the real structure is correlated -- if, say, phase and cell type vary together
+-- a factorised posterior cannot express that compactly and needs **more**
+nats to carry the same information than a correlated code would. So the
+factorisation does not corrupt the arithmetic; it makes the model pay more
+than the theoretical minimum. Part 5 returns to this, because with four
+circular dimensions it also means there is nothing forcing one cycle onto one
+circle.
+
+**(c) "range divided by spread" in 1.2 treats distinguishability as a hard
+cutoff, and it is not.**
+
+Two spreads that overlap a little still carry some information; the count in
+1.2 throws that away. The exact version replaces the naive count with
+
+    information  =  ln( range / (spread * sqrt(2*pi*e)) )
+
+which is about 1.42 nats less than `ln(range/spread)`. Part 2 uses the exact
+form, and it matters: the naive count would put the cost of five separable
+phases at 2.99 nats where the true figure is 1.59.
+
+**What none of the three assume** is that cells are drawn independently of one
+another, or that gene expression is independent across genes. Those would be
+assumptions about the data. Nothing in the nat accounting needs them.
+
 ---
 
 ## Still to write

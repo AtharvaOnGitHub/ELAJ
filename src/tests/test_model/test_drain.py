@@ -148,12 +148,19 @@ class TestTheCopyPasteGuard:
 
     def test_regression_targets_are_batch_standardised(self):
         """One study per batch, so the mean subtracted IS that study's mean
-        and what is left to predict is the cell's own deviation."""
+        and what is left to predict is the cell's own deviation.
+
+        POPULATION standard deviation, deliberately: it is what makes the
+        mean square exactly 1, and so makes the MSE of 1.0 in the next test
+        exact. `Tensor.std()` defaults to the sample version and would read
+        sqrt(n/(n-1)) here.
+        """
         loss = DrainLoss(("study", "log_depth", "log_genes"))
         targets = loss.targets_from(batch(n=64))
         for name in ("log_depth", "log_genes"):
             assert abs(float(targets[name].mean())) < 1e-5, name
-            assert abs(float(targets[name].std()) - 1.0) < 1e-3, name
+            assert abs(float(targets[name].std(unbiased=False)) - 1.0) < 1e-5, name
+            assert abs(float((targets[name] ** 2).mean()) - 1.0) < 1e-5, name
 
     def test_a_constant_prediction_cannot_score_on_a_standardised_target(self):
         """The guard, stated as the thing it prevents. A drain holding only
@@ -164,7 +171,11 @@ class TestTheCopyPasteGuard:
         truth = loss.targets_from(batch(n=128))["log_depth"]
         for constant in (0.0, 2.5, -7.0):
             mse = float(((torch.full_like(truth, constant) - truth) ** 2).mean())
-            assert mse >= 1.0 - 1e-4, (constant, mse)
+            assert mse >= 1.0 - 1e-5, (constant, mse)
+        # And 0.0 is the BEST a constant can do, so 1.0 is the exact line
+        # between "learned nothing" and "learned something".
+        best = float(((torch.zeros_like(truth) - truth) ** 2).mean())
+        assert abs(best - 1.0) < 1e-5, best
 
     def test_the_study_level_component_is_gone_from_the_target(self):
         """Two batches from different studies with very different depths must

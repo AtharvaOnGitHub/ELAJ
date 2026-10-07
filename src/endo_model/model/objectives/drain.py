@@ -21,19 +21,29 @@ THE TARGETS, AND WHY EACH IS HERE.
                 chemistry and the cell's condition rather than its identity.
                 Mean squared error.
 
-WHY THE REGRESSION TARGETS ARE STANDARDISED WITHIN THE BATCH. This is the
-structural guard against the drain becoming a study lookup table.
-`PerStudyBatchSampler` puts exactly one study in every batch, so the batch
-mean of a target IS that study's mean. Subtracting it removes the
-study-level component before the loss is computed, leaving the cell's
-deviation from its own study's average. A latent that encodes only "this is
-study 7" scores exactly zero on that, so the reward cannot be collected by a
-constant.
+WHAT ACTUALLY STOPS THE DRAIN BECOMING A STUDY LOOKUP TABLE. Two different
+things, and only one of them is the standardisation.
 
-It also removes a scale problem for free. `log_depth` sits near 8 and
-`log_genes` near 7.5 on this corpus, so an unstandardised mean squared error
-would be dominated by the offset rather than by the per-cell variation, and
-the weights below would be uninterpretable.
+The real guard is that depth and detected-gene count VARY BETWEEN CELLS IN
+ONE STUDY. A vector that is constant across a batch cannot track that, so
+the reward is not collectable without per-cell content. That would be true
+of the raw targets too.
+
+The CENTRING adds one thing on top, and it matters across batches rather
+than within one. An uncentred target carries its study's mean level, and a
+drain holding only a study code could emit a different constant per study,
+follow that level from batch to batch, and collect a real share of the
+reward while learning nothing about any cell. `PerStudyBatchSampler` puts
+one study in every batch, so subtracting the batch mean is subtracting that
+study's mean, and that share disappears.
+
+The SCALING is not a guard at all. It is an affine change, and the head's
+output layer has a weight and a bias, so nothing it can learn changes. What
+it buys is a number that means something fixed: at unit mean square an MSE
+of 1.0 is exactly "predicted the batch mean and learned nothing", which is
+the line to read `drain_log_depth` against. It also puts `w_depth` and
+`w_genes` on one scale rather than weighting them by corpus variance, since
+raw log depth sits near 8 and log gene count near 7.5.
 
 WHY `study` ALONE IS REFUSED. Within one batch every cell carries the same
 study id, so a cross entropy over study is satisfiable by a vector that is
@@ -100,13 +110,35 @@ class DrainLoss(nn.Module):
 
     @staticmethod
     def _standardise(values: Tensor) -> Tensor:
-        """Batch-centred and scaled, so the study-level component is gone.
+        """Batch-centred, then scaled to unit mean square.
 
-        One study per batch, so the mean subtracted here is that study's
-        mean. See the module docstring: this is the guard, not a nicety.
+        THE CENTRING IS THE GUARD. One study per batch, so the mean
+        subtracted here is that study's mean, and what is left is the cell's
+        deviation from it. Without the centring a target keeps its
+        between-study component: a drain holding only a study code could emit
+        a different constant per study, track that component across batches,
+        and collect a real share of the reward while learning nothing about
+        any cell. Centring deletes that share.
+
+        THE SCALING IS NOT THE GUARD, it is readability. It is an affine
+        change and the head's output layer has a weight and a bias, so
+        nothing it could learn changes. What changes is that the number means
+        something fixed: with unit mean square, an MSE of 1.0 is exactly
+        "predicted the batch mean and nothing more" and 0.0 is exact. It also
+        puts `w_depth` and `w_genes` on one scale, where raw log depth near 8
+        and log gene count near 7.5 would have weighted themselves by corpus
+        variance, and it removes a large first-step gradient from an offset
+        the bias learns in a few steps anyway.
+
+        POPULATION, NOT SAMPLE. `unbiased=False` divides by n rather than
+        n - 1, which is what makes mean square exactly 1 and the MSE of 1.0
+        above exact rather than (n-1)/n. `Tensor.std()` defaults the other
+        way while `np.std` defaults to this one, so a numpy mirror of this
+        function silently checks a different formula.
         """
         centred = values - values.mean()
-        return centred / centred.std().clamp_min(_MIN_SD)
+        scale = centred.std(unbiased=False).clamp_min(_MIN_SD)
+        return centred / scale
 
     @staticmethod
     def log_genes_detected(batch: dict) -> Tensor:

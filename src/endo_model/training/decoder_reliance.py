@@ -71,8 +71,10 @@ class DecoderReliance:
                      enough and keeps this off the epoch's critical path.
     """
 
-    def __init__(self, max_batches: int = 8) -> None:
+    def __init__(self, max_batches: int = 8, scan_limit: int = 512) -> None:
         self.max_batches = int(max_batches)
+        # How far to walk the loader looking for a second study. See `measure`.
+        self.scan_limit = int(scan_limit)
 
     @torch.no_grad()
     def measure(self, model, batches, nb_loss, device=None) -> dict[str, float]:
@@ -94,18 +96,42 @@ class DecoderReliance:
         """
         from endo_model.training.batch_device import to_device
         real, no_study, no_tech, no_latent, seen = 0.0, 0.0, 0.0, 0.0, 0
-        # The first batch has no predecessor to borrow covariates from, so
-        # its technical counterfactual is skipped rather than faked.
-        previous = None
         tech_seen = 0
+
+        # SUBSTITUTE COVARIATES MUST COME FROM A DIFFERENT STUDY, AND UNTIL
+        # OCTOBER 2026 THEY DID NOT. The old code borrowed from whichever
+        # batch came immediately before, on the stated premise that "the
+        # sampler puts one study in each batch, so another batch is another
+        # study". That is true of the TRAINING loader, which shuffles across
+        # studies. `measure` is called with the VALIDATION loader, which is
+        # built `shuffle=False` and is therefore ordered BY study, so the
+        # first batches are all the same study, the substitution changed
+        # nothing, `scores[2] == scores[0]` every time, and `tech_seen`
+        # stayed 0. Every m5_combined epoch reported reliance_technical as
+        # nan, and reliance_ratio and reliance_study_share with it.
+        #
+        # Keeping one covariate set per study and substituting across studies
+        # fixes it whatever order the loader is in. `scan_limit` bounds the
+        # walk, because a study-ordered validation split can run to hundreds
+        # of batches before the second study appears and this sits on the
+        # epoch's critical path.
+        by_study: dict[int, dict] = {}
         for i, batch in enumerate(batches):
-            if i >= self.max_batches:
+            if seen >= self.max_batches or i >= self.scan_limit:
                 break
             try:
                 if device is not None:
                     batch = to_device(batch, device)
-                scores = self.one_batch(model, batch, nb_loss, previous)
-                previous = {k: batch[k] for k in self.COVARIATE_KEYS}
+                study = int(batch["study_id"][0])
+                other = next((c for s, c in by_study.items() if s != study),
+                             None)
+                by_study.setdefault(
+                    study, {k: batch[k] for k in self.COVARIATE_KEYS})
+                if other is None:
+                    # No other study banked yet; bank this one and move on
+                    # rather than spend a forward pass on a no-op.
+                    continue
+                scores = self.one_batch(model, batch, nb_loss, other)
             except Exception as exc:                            # noqa: BLE001
                 logger.warning("decoder reliance failed on batch %d (%s: %s); "
                                "skipping", i, type(exc).__name__, exc)
@@ -113,13 +139,9 @@ class DecoderReliance:
             real += scores[0]
             no_study += scores[1]
             no_latent += scores[3]
+            no_tech += scores[2] - scores[0]
             seen += 1
-            # scores[2] equals scores[0] when there was no donor batch, which
-            # would drag the technical cost toward zero. Averaged over its
-            # own count instead.
-            if scores[2] != scores[0]:
-                no_tech += scores[2] - scores[0]
-                tech_seen += 1
+            tech_seen += 1
 
         if not seen:
             return {}
@@ -163,9 +185,10 @@ class DecoderReliance:
         wrong_study = model.decode_once(
             batch, latent, gene_queries,
             study_ids=self.other_study(model, batch["study_id"]))
-        # Covariates from ANOTHER batch, which is another study: the sampler
-        # puts one study in each batch, so rolling within one would change
-        # neither platform nor study and would measure nothing.
+        # Covariates from a batch of a DIFFERENT study, chosen by `measure`
+        # from its per-study cache. Rolling within one batch would change
+        # neither platform nor study and would measure nothing, because the
+        # sampler puts one study in each batch.
         wrong_tech = (model.decode_once(batch, latent, gene_queries,
                                         covariates_from=other)
                       if other is not None else real)

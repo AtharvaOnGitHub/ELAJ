@@ -451,8 +451,16 @@ class CompositeLoss(nn.Module):
 
         return {
             **out_drain,
-            "provenance_blanked": model_output.get(
-                "provenance_blanked", torch.tensor(0.0)),
+            # Two flags, because the two blankings do different jobs at
+            # different rates and a blanked step's `nb` is not comparable
+            # with an unblanked one's. These were one `provenance_blanked`
+            # key until the rates were split; the model stopped emitting
+            # that name and the `.get` default meant the column silently
+            # logged 0.0 for every step instead of failing.
+            "blanked_covariates": model_output.get(
+                "blanked_covariates", torch.tensor(0.0)),
+            "blanked_drain": model_output.get(
+                "blanked_drain", torch.tensor(0.0)),
             "elbo": elbo,
             "nb": nb,
             "kl_gauss": kl_gauss,

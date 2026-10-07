@@ -95,7 +95,8 @@ description: >
   study_knn falls too, which would be m5's trade one notch further along
   rather than an escape from it.
 
-  TWO WEIGHTS ARE GUESSES. w_drain 1.0 and blank_p 0.25 have no measurement
+  THREE NUMBERS ARE GUESSES. w_drain 1.0, blank_covariates_p 0.25 and
+  blank_drain_p 0.10 have no measurement
   behind them. Read the drain parts against nb in the epoch-1 gradient
   report and read nb on blanked against unblanked steps, then move them. The
   precedent is w_cls 500 -> 40 and w_ecs 1400 -> 50, both wrong by an order

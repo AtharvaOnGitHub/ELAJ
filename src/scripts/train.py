@@ -305,14 +305,16 @@ def main() -> None:
     if model_cfg.drain.enabled:
         logger.info(
             "Drain: d_drain=%d targets=%s w_drain=%.3g (study %.3g, depth "
-            "%.3g, genes %.3g), blank_p=%.3g. The drain block is read ONLY "
+            "%.3g, genes %.3g), blanking cov=%.3g drain=%.3g. The drain "
+            "block is read ONLY "
             "by DrainHead; mu_gauss and mu_angle are the biology block and "
             "are what the adversary, the phase head and every exported "
             "embedding see.",
             model_cfg.drain.d_drain, ",".join(model_cfg.drain.targets),
             model_cfg.loss.w_drain, model_cfg.drain.w_study,
             model_cfg.drain.w_depth, model_cfg.drain.w_genes,
-            model_cfg.drain.blank_p,
+            model_cfg.drain.blank_covariates_p,
+            model_cfg.drain.blank_drain_p,
         )
     logger.info(
         "Loss: w_nb=%.3g w_kl_gauss=%.3g w_kl_circ=%.3g w_dab=%.3g w_cce=%.3g "

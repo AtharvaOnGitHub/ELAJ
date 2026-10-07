@@ -1,5 +1,28 @@
 name: m6_drain_hard
 description: >
+  AND THE CIRCLE, WHICH IS WHY THIS IS NOT AN ABLATION OF m6_drain. The two
+  arms differ in adversarial pressure AND in latent topology, and each is a
+  whole bet rather than a variable. m6_drain is the conservative one: restore
+  the information budget, drain the nuisance, press gently. This one is
+  everything we currently believe, pushed: press hard, drain the nuisance,
+  and give the one biological variable we are measurably behind on a
+  representation shaped like itself.
+
+  WHY THE CIRCLE BELONGS ON THE HARD ARM RATHER THAN THE MILD ONE. Its value
+  is not that it is cheap in absolute terms; at w_kl_gauss 1 nothing is
+  expensive. Its value is the SHAPE. Menstrual phase wraps, and a wrapped
+  variable on a line has to be stored as two or more separated clusters,
+  which is exactly the kind of structure donor identity also produces and
+  the adversary also attacks. On a circle it is one connected coordinate
+  that donor and study identity cannot imitate, because neither is cyclic.
+  Under lambda_dab 120 the Gaussian block is squeezed hardest, so that is
+  where having a shape the pressure cannot easily crush is worth the four
+  dimensions it costs.
+
+  ONE HONEST CAVEAT. DABClassifier reads cat(mu_gauss, cos/sin of mu_angle),
+  so the circle is NOT hidden from the adversary. It is cheaper under the KL
+  and better shaped for a cycle; it is not a refuge from the pressure.
+
   WHAT THIS ARM IS, AGAINST m6_drain. One number: lambda_dab 40 -> 120.
   Every other setting is identical, and it is NOT an ablation pair. m3 had a
   healthy information budget with token pressure, lambda_dab 7. m5 had real
@@ -121,7 +144,13 @@ overrides:
   training.kl_annealing.warmup_fraction: 0.05
   model.loss.w_kl_gauss: 1.0
   # Inert: no circular branch in this arm.
-  model.loss.w_kl_circ: 2.0
+  # 0.3 against w_kl_gauss 1.0, so a circular nat costs a third of a
+  # Gaussian one. The point is the RATIO, not the level: phase is cyclic and
+  # has a cheap home, while donor and study identity are not cyclic and
+  # cannot use it, so they stay in the block the adversary reads hardest.
+  # Effective price is beta_max 0.5 x 0.3 = 0.15, and kappa_floor 1.0 keeps
+  # the branch off the absorbing state at zero concentration.
+  model.loss.w_kl_circ: 0.3
   model.loss.free_bits: 0.25
 
   # 3.
@@ -159,7 +188,10 @@ overrides:
 
   model.classifier.enabled: true
   # Gaussian, because with n_circular 0 there is no other block.
-  model.classifier.block: gaussian
+  # full, not gaussian: the head sees the Gaussian block AND the circle and
+  # may use whichever carries phase. Forcing it onto the circle would be
+  # asking the question instead of answering it.
+  model.classifier.block: full
   model.classifier.dropout: 0.0
   model.classifier.label_smoothing: 0.05
   # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
@@ -168,8 +200,13 @@ overrides:
 
   # d_z = d_gauss alone now. 16 holds the width at m4_tight16's rather than
   # dropping to the d_z 8 that m4_edge_starved plateaued at.
-  model.d_gauss: 16
-  model.n_circular: 0
+  # 12 Gaussian + 2 circular (4 coordinates) + 8 drain = 24 latent dims, the
+  # same total as m6_drain. The circle costs the Gaussian block four of its
+  # sixteen; a cycle needs ln(4) = 1.39 nats and CIRCULAR_LATENT.md puts one
+  # circular dimension at about half a nat per e-fold of concentration, so two
+  # is ample for one cyclic variable with slack.
+  model.d_gauss: 12
+  model.n_circular: 2
   model.circular_parameterisation: direction
   model.kappa_floor: 1.0
   model.d_platform: 16

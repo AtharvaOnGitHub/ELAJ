@@ -1,0 +1,183 @@
+name: m6_drain
+description: >
+  ONE CHANGE AGAINST m5_combined: THE ADVERSARY IS GIVEN A DRAIN TO POUR INTO.
+
+  THE READING THIS ARM BETS ON. The adversary is not weak and more of it is
+  not the answer. It is asking for something costly and offering no
+  alternative. The encoder reads a cell, produces one latent, and
+  DABClassifier punishes that latent for revealing the study, so the
+  study-predictable part of the cell's expression has to be DESTROYED rather
+  than relocated. Destruction is expensive and it does not happen: over
+  m5_combined's nine epochs, at lambda_dab 168 the whole way, val_study_knn
+  rose 0.554 -> 0.604 -> 0.578 -> 0.568 -> 0.636 -> 0.681 -> 0.707 -> 0.711
+  -> 0.720. The pressure was on and the information arrived anyway.
+
+  WHAT THE DRAIN IS. A second Gaussian block, computed from the same cell,
+  which DrainHead is REWARDED for using to predict the study, the log
+  sequencing depth and the log detected-gene count. The encoder can then
+  route the nuisance instead of erasing it. Nothing but DrainHead reads it.
+
+  WHY THE SEPARATION CANNOT QUIETLY FAIL. It is a separate branch, not a
+  slice, so it carries its own keys. DABClassifier.forward takes (mu_gauss,
+  mu_angle). LabelClassifier's blocks are built from the same two.
+  validate_latent exports those two and the benchmark scores them.
+  GradientBalance differentiates at mu_gauss. None of them can reach
+  mu_drain. The drain's content cannot enter a reported number by a call
+  site nobody updated.
+
+  WHY IT CANNOT BECOME A STUDY LOOKUP TABLE. That is the failure that would
+  look like success: the drain holds "this is study 7", absorbs nothing
+  per-cell, and the encoder still has nowhere to put anything.
+  PerStudyBatchSampler puts one study in each batch, so the batch mean of a
+  target IS that study's mean; standardising log_depth and log_genes within
+  the batch removes it and leaves the cell's deviation from its own study's
+  average, which a study code cannot supply. A constant prediction then
+  scores an MSE of exactly 1.0, which is what predicting nothing scores.
+  DrainLoss refuses to be constructed with study as its only target.
+  drain_within_study reports the share of the drain's variance that is
+  within-study; it is 1.0 per batch by construction and only means anything
+  over an epoch.
+
+  BLANKING TAKES BOTH HALVES AT ONCE. On a quarter of training steps the
+  decoder gets z_proj_nodrain and every covariate channel zeroed, so the
+  biology block plus the library size is the whole input. Blanking only one
+  would leave the other as a complete substitute, and that redundancy is
+  measured rather than assumed: reliance_platform 0.0728 plus
+  reliance_study 0.0160 plus reliance_tissue 0.0003 sum to 0.0891 against a
+  joint reliance_technical of 0.1017, so the joint costs 14% more than the
+  parts. Never in eval, so val_nb stays comparable with every earlier arm.
+
+  WHY THIS IS WORTH A CARD WHEN THE RELIANCE SPLIT SAID RECONSTRUCTION IS A
+  WEAK TEACHER. It is: cell-level information is worth 0.0289 nats of 0.4043
+  against a study-mean baseline of 0.4332, about 7%, and 8.4% on HVGs. This
+  arm does not try to make reconstruction a stronger teacher. It removes the
+  reason the ENCODER resists the adversary, which is a different mechanism
+  and the only one on the table that is not a slide along the
+  batch-against-biology axis every arm from m3 to m5 has slid along.
+
+  WHAT WOULD MAKE IT A FAILURE, STATED BEFORE THE RUN. drain_within_study
+  near zero over an epoch: the drain became a lookup table and absorbed
+  nothing. val_study_knn climbing as it did in m5: the drain exists and the
+  encoder used it for nothing. Or cross-donor phase and family falling while
+  study_knn falls too, which would be m5's trade one notch further along
+  rather than an escape from it.
+
+  TWO WEIGHTS ARE GUESSES. w_drain 1.0 and blank_p 0.25 have no measurement
+  behind them. Read the drain parts against nb in the epoch-1 gradient
+  report and read nb on blanked against unblanked steps, then move them. The
+  precedent is w_cls 500 -> 40 and w_ecs 1400 -> 50, both wrong by an order
+  of magnitude on the first guess.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m6_drain/
+seed: 24
+
+overrides:
+  training.max_epochs: 12
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 2
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  training.block_probe_every: 2
+  # Every epoch. Epoch 0 was pruned from both m4 arms.
+  training.keep_every_epochs: 1
+
+  training.stop_metric: nb
+  # Study level, and reachable for the first time. 0.5 was below every value
+  # any arm has recorded; 0.65 means better than all of them.
+  training.guard_metric: study_knn
+  training.guard_max: 0.65
+
+  # 12,500 is just under the smallest panel of 13,144, which is as far as
+  # equalising the measured gene COUNT can go. Not scGPT's masked-value
+  # objective, and lowering it would discard biology without weakening the
+  # DNS count fingerprint any further.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  # 1. and 2.
+  training.kl_annealing.warmup_fraction: 0.05
+  model.loss.w_kl_gauss: 30.0
+  # Inert: no circular branch in this arm.
+  model.loss.w_kl_circ: 2.0
+  model.loss.free_bits: 0.25
+
+  # 3.
+  model.dab.hidden_dim: 256
+  model.dab.n_layers: 3
+  model.dab.normalise: true
+  model.dab.dropout: 0.0
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 168.0
+
+  # 4.
+  model.ecs.enabled: true
+  model.ecs.threshold: 0.8
+  model.ecs.buffer_batches: 0
+  # 50, not 1400. See the description: 1400 was 11.4% of nb by value against
+  # the phase head's 0.65%, and the two terms we have measured amplified
+  # value to gradient by x26 and x109.
+  model.loss.w_ecs: 50.0
+
+  # Measured at 0.0005x reconstruction's gradient and costing a second
+  # encoder pass every fourth step.
+  model.cce.enabled: false
+
+  model.classifier.enabled: true
+  # Gaussian, because with n_circular 0 there is no other block.
+  model.classifier.block: gaussian
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
+  # climbed 0.727 to 0.905 while every other axis decayed.
+  model.loss.w_cls: 40.0
+
+  # d_z = d_gauss alone now. 16 holds the width at m4_tight16's rather than
+  # dropping to the d_z 8 that m4_edge_starved plateaued at.
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8
+
+  # ── THE DRAIN ────────────────────────────────────────────────────────────
+  # The one change against m5_combined. Everything above is m5's value.
+  model.drain.enabled: true
+  # Narrow on purpose. The job is a study code, a depth and a detected-gene
+  # count, which is a handful of numbers; a wide drain could hold biology.
+  model.drain.d_drain: 8
+  # study ALONE IS REFUSED by DrainLoss, and must be: every batch holds one
+  # study, so that reward is collectable by a vector constant across the
+  # batch. log_depth and log_genes are standardised within the batch, which
+  # strips the study-level component and leaves the cell's own deviation.
+  model.drain.targets: [study, log_depth, log_genes]
+  model.drain.hidden: null
+  model.drain.w_study: 1.0
+  model.drain.w_depth: 1.0
+  model.drain.w_genes: 1.0
+  # A GUESS WITH NOTHING BEHIND IT. Read drain, drain_study, drain_log_depth
+  # and drain_log_genes against nb in the epoch-1 gradient report and move
+  # it, the way w_cls went 500 -> 40 and w_ecs 1400 -> 50.
+  model.loss.w_drain: 1.0
+  # A quarter of training steps run with the decoder told nothing about
+  # provenance: the drain contribution dropped AND all 48 covariate
+  # dimensions zeroed, together, because the parts are redundant. Also a
+  # guess. Compare nb on blanked against unblanked steps at epoch 1.
+  model.drain.blank_p: 0.25
+  model.drain.blank_seed: 24

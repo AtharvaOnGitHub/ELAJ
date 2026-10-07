@@ -9,7 +9,7 @@ description: >
   representation shaped like itself.
 
   WHY THE CIRCLE BELONGS ON THE HARD ARM RATHER THAN THE MILD ONE. Its value
-  is not that it is cheap in absolute terms; at w_kl_gauss 1 nothing is
+  is not that it is cheap in absolute terms; at w_kl_gauss 2 little is
   expensive. Its value is the SHAPE. Menstrual phase wraps, and a wrapped
   variable on a line has to be stored as two or more separated clusters,
   which is exactly the kind of structure donor identity also produces and
@@ -142,15 +142,35 @@ overrides:
   training.kl_annealing.beta_max: 0.5
   # 1. and 2.
   training.kl_annealing.warmup_fraction: 0.05
-  model.loss.w_kl_gauss: 1.0
+  # 2.0, twice m6_drain's. INSURANCE AGAINST THE BLANKING LEAK, sized rather
+  # than guessed. Zeroing the covariates forces provenance into the latent,
+  # and if the drain does not take all of it the surplus lands in the biology
+  # block. A higher price suppresses that.
+  #
+  # IT CANNOT AIM, WHICH IS WHY IT IS 2 AND NOT 10. The KL charges per nat
+  # whatever the nat is about, and study identity is only 1-4% of the latent's
+  # content by the ln(11) - dab decomposition, so the price is a blunt tool
+  # for a narrow problem. Fitting the two price points this project has (m3
+  # and m4 at effective 0.5 holding 41-55 nats, m5 at effective 15 holding
+  # 10) gives nats proportional to price^-0.45, so:
+  #
+  #     w_kl_gauss    2        3        5        10
+  #     nats         31-39    26-32    21-25    16-17
+  #
+  # and the measured (nats, cross-donor phase) pairs are (10, 0.573),
+  # (41, 0.676), (55, 0.751). 10 would land near 16 nats and a projected
+  # phase of 0.59, below m4_tight16. 2 lands at m4's information level, which
+  # is the lowest budget this project has direct evidence biology survives.
+  # m6_drain stays at 1.0, so one arm keeps a budget we know supports it.
+  model.loss.w_kl_gauss: 2.0
   # Inert: no circular branch in this arm.
-  # 0.3 against w_kl_gauss 1.0, so a circular nat costs a third of a
-  # Gaussian one. The point is the RATIO, not the level: phase is cyclic and
+  # 0.6 against w_kl_gauss 2.0, so a circular nat costs a third of a
+  # Gaussian one. The RATIO is what is held, not the level: phase is cyclic and
   # has a cheap home, while donor and study identity are not cyclic and
   # cannot use it, so they stay in the block the adversary reads hardest.
   # Effective price is beta_max 0.5 x 0.3 = 0.15, and kappa_floor 1.0 keeps
   # the branch off the absorbing state at zero concentration.
-  model.loss.w_kl_circ: 0.3
+  model.loss.w_kl_circ: 0.6
   model.loss.free_bits: 0.25
 
   # 3.

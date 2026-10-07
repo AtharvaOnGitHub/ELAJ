@@ -77,7 +77,7 @@ output_dir: outputs/m_series/m6_drain/
 seed: 24
 
 overrides:
-  training.max_epochs: 12
+  training.max_epochs: 14
   training.early_stop_patience: 5
   training.early_stop_warmup_epochs: 2
   training.batch_size: 256
@@ -92,7 +92,13 @@ overrides:
   # Study level, and reachable for the first time. 0.5 was below every value
   # any arm has recorded; 0.65 means better than all of them.
   training.guard_metric: study_knn
-  training.guard_max: 0.65
+  # 0.65 -> 0.80. This is a checkpoint SELECTION guard, not a kill switch:
+  # checkpoint_ranking.py saves a breaching epoch anyway and only refuses to
+  # report it as best. With w_kl_gauss back to 1 the latent will hold tens of
+  # nats and study_knn will sit where m3's did, near 0.83, so at 0.65 no epoch
+  # would qualify and the selection would be vacuous. 0.80 still excludes the
+  # worst without making the rule meaningless.
+  training.guard_max: 0.80
 
   # 12,500 is just under the smallest panel of 13,144, which is as far as
   # equalising the measured gene COUNT can go. Not scGPT's masked-value
@@ -104,7 +110,7 @@ overrides:
   training.kl_annealing.beta_max: 0.5
   # 1. and 2.
   training.kl_annealing.warmup_fraction: 0.05
-  model.loss.w_kl_gauss: 30.0
+  model.loss.w_kl_gauss: 1.0
   # Inert: no circular branch in this arm.
   model.loss.w_kl_circ: 2.0
   model.loss.free_bits: 0.25
@@ -115,7 +121,7 @@ overrides:
   model.dab.normalise: true
   model.dab.dropout: 0.0
   model.loss.w_dab: 0.5
-  model.dab.lambda_dab: 168.0
+  model.dab.lambda_dab: 40.0
 
   # 4.
   model.ecs.enabled: true
@@ -137,7 +143,7 @@ overrides:
   model.classifier.label_smoothing: 0.05
   # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
   # climbed 0.727 to 0.905 while every other axis decayed.
-  model.loss.w_cls: 40.0
+  model.loss.w_cls: 50.0
 
   # d_z = d_gauss alone now. 16 holds the width at m4_tight16's rather than
   # dropping to the d_z 8 that m4_edge_starved plateaued at.

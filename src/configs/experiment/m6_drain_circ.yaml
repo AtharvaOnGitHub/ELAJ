@@ -1,0 +1,257 @@
+name: m6_drain_circ
+description: >
+  m6_drain WITH A CIRCLE, PAID FOR BY THE DRAIN. 12 Gaussian + 4 circular
+  (8 coordinates) + 4 drain = 24 latent coordinates, the same total.
+
+  WHY THIS ARM. m6_drain is the best arm this project has on study mixing at
+  a healthy information budget: study_knn 0.7684 at lambda_dab 40, against
+  m4_tight16's 0.8145 at 336 and m3_study_raw's 0.8277 at 7. It reached that
+  with better reconstruction and better cross-donor family than m4, and it
+  was still improving on every axis when the horizon cut it off. Its one
+  clear deficit is phase, 0.7431 against m4's 0.8902.
+
+  Phase is a CYCLE, and a cycle stored on a line has to become two or more
+  separated clusters -- the same kind of structure donor identity produces
+  and the adversary attacks. On a circle it is one connected coordinate.
+  That is the bet.
+
+  WHAT THE CIRCLE COSTS AND WHO PAYS. Not the Gaussian block. Every
+  narrowing tried has cost biology: d_gauss 24 gave m3, 16 was worse, and
+  m4_edge_starved plateaued at d_z 8. The drain pays instead, and it can
+  afford to: m6_drain's drain settled at 26.5 nats across eight dimensions
+  while its three targets are worth about five. Narrowing it to four forces
+  it onto its targets. If four is too few the drain fails and the mechanism
+  is moot, and the new attribution figure is where that shows.
+
+  WHAT THE CIRCLE IS GOOD FOR, AND WHAT IT IS NOT. The decoder reads an
+  angle as (cos, sin) through a linear map, so the only function of the
+  angle it can express is a single sinusoid, the first Fourier harmonic. It
+  cannot be casually co-opted to carry arbitrary structure, which makes it a
+  clean channel -- and equally means it contributes little to reconstruction,
+  so the eight coordinates it takes are not eight coordinates of decoder
+  input. The circle is also NOT hidden from the adversary: DABClassifier
+  reads cat(mu_gauss, cos/sin of mu_angle). It is cheaper under the KL and
+  better shaped for a cycle; it is not a refuge.
+
+  THE FREE BITS ARE THE REAL LEVER AND THEY ARE NEW. Until this arm one
+  scalar went to both KL terms. A Gaussian dimension's KL grows with the
+  square of its mean; a circular dimension's is 0.5*ln(kappa) + 0.072,
+  logarithmic in precision. So the 0.25 that is a modest Gaussian allowance
+  buys kappa = 1.43 on the circle, an angular spread near 68 degrees, which
+  cannot separate four cycle phases 90 degrees apart. free_bits_circ 1.0
+  gives kappa = 6.4 and about 32 degrees free, four nats over four
+  dimensions that the circle is never charged for.
+
+  TWO SMALLER CORRECTIONS CARRIED IN. The drain's study head gets label
+  smoothing 0.05, matching the phase head: m6_drain drove its train
+  cross-entropy to exactly 0.0000, where the gradient vanishes and the
+  reward switches itself off, while validation sat at 3.2400. And
+  max_epochs is 20 for the shape of the LR schedule, not its length --
+  T_max = max_epochs, so a 14-epoch run spends its last three epochs at
+  between a fifth and a hundredth of the base rate, and both m6 arms were
+  still improving there.
+
+  WHAT WOULD MAKE IT A FAILURE, WRITTEN BEFORE THE RUN. The circular
+  concentrations sitting on kappa_floor 1.0, which is a dead branch whatever
+  the angle histograms look like. Or the drain's attribution showing phase,
+  tissue or disease high in the drain and low in the biology block, which is
+  biology in the one place no reported metric reads. Or phase failing to
+  beat m6_drain's 0.7431 at the same epoch, which would say the shape was
+  never the obstacle.
+
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/m_series/m6_drain_circ/
+seed: 24
+
+overrides:
+  # 20, and chosen for the SHAPE of the schedule rather than the length.
+  # build_scheduler sets T_max = max_epochs on CosineAnnealingLR with the
+  # default eta_min 0, stepped once per epoch, so a 14-epoch run spends its
+  # last three at 1.9e-4, 1.1e-4 and 1.25e-5 against a base of 1e-3. Both m6
+  # arms were still improving there. A fresh run gets a schedule shaped for
+  # the horizon it actually has.
+  training.max_epochs: 20
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 2
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  training.block_probe_every: 2
+  # Every epoch. Epoch 0 was pruned from both m4 arms.
+  training.keep_every_epochs: 1
+
+  training.stop_metric: nb
+  # Study level, and reachable for the first time. 0.5 was below every value
+  # any arm has recorded; 0.65 means better than all of them.
+  training.guard_metric: study_knn
+  # 0.65 -> 0.80. This is a checkpoint SELECTION guard, not a kill switch:
+  # checkpoint_ranking.py saves a breaching epoch anyway and only refuses to
+  # report it as best. With w_kl_gauss back to 1 the latent will hold tens of
+  # nats and study_knn will sit where m3's did, near 0.83, so at 0.65 no epoch
+  # would qualify and the selection would be vacuous. 0.80 still excludes the
+  # worst without making the rule meaningless.
+  training.guard_max: 0.80
+
+  # 12,500 is just under the smallest panel of 13,144, which is as far as
+  # equalising the measured gene COUNT can go. Not scGPT's masked-value
+  # objective, and lowering it would discard biology without weakening the
+  # DNS count fingerprint any further.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  # 1. and 2.
+  training.kl_annealing.warmup_fraction: 0.05
+  # 1.0 -> 0.7, a little less pressure overall. On the two price points this
+  # project has, nats go roughly as price^-0.45, so 0.7 buys about 51 nats at
+  # m6_drain's width; at 12 Gaussian dims instead of 16 expect rather less.
+  # m6_drain held 43.8 and m3_study_raw, the best arm to date, held 54.8.
+  model.loss.w_kl_gauss: 0.7
+  # 0.2, and live this time. Light, because free_bits_circ below does the
+  # real work and this only governs what is charged ABOVE the floor.
+  # Effective price is beta_max 0.5 x 0.2 = 0.1.
+  model.loss.w_kl_circ: 0.2
+  # Unchanged, and inert at this price: 0.25 over 12 dimensions is a 3-nat
+  # floor against a latent that will hold tens. Left alone rather than
+  # removed, since removing it is a change nobody asked for.
+  model.loss.free_bits: 0.25
+  # FREE BITS FOR THE CIRCLE, WHICH IS THE POINT. Until this arm one scalar
+  # went to both branches, and the two measure information on different
+  # scales. A Gaussian dimension's KL grows with the square of its mean. A
+  # circular dimension's is 0.5*ln(kappa) + 0.072, logarithmic in precision,
+  # so 0.25 nats buys kappa = 1.43 and an angular spread near 68 degrees --
+  # useless for separating four cycle phases sitting 90 degrees apart. At 1.0
+  # the free concentration is kappa = 6.4 and the spread about 32 degrees,
+  # which can. Four dimensions at 1.0 is 4 nats the circle is never charged
+  # for.
+  model.loss.free_bits_circ: 1.0
+
+  # 3.
+  model.dab.hidden_dim: 256
+  model.dab.n_layers: 3
+  model.dab.normalise: true
+  model.dab.dropout: 0.0
+  model.loss.w_dab: 0.5
+  model.dab.lambda_dab: 40.0
+
+  # 4.
+  model.ecs.enabled: true
+  model.ecs.threshold: 0.8
+  model.ecs.buffer_batches: 0
+  # 50, not 1400. See the description: 1400 was 11.4% of nb by value against
+  # the phase head's 0.65%, and the two terms we have measured amplified
+  # value to gradient by x26 and x109.
+  model.loss.w_ecs: 50.0
+
+  # Measured at 0.0005x reconstruction's gradient and costing a second
+  # encoder pass every fourth step.
+  model.cce.enabled: false
+
+  model.classifier.enabled: true
+  # full, so the head reads the Gaussian block AND the circle and may use
+  # whichever carries phase. Forcing it onto the circle would be asking the
+  # question rather than answering it.
+  model.classifier.block: full
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  # The one term that demonstrably worked on m4_tight16: phase_knn_xdonor
+  # climbed 0.727 to 0.905 while every other axis decayed.
+  model.loss.w_cls: 50.0
+
+  # d_z = d_gauss alone now. 16 holds the width at m4_tight16's rather than
+  # dropping to the d_z 8 that m4_edge_starved plateaued at.
+  # 12 Gaussian + 4 circular (8 coordinates) + 4 drain = 24 latent
+  # coordinates, the same total as m6_drain. THE CIRCLE IS PAID FOR BY THE
+  # DRAIN, not by the biology block.
+  #
+  # Why not out of the Gaussian half. Every narrowing this project has tried
+  # cost biology: d_gauss 24 gave the best arm it has, 16 was worse, and
+  # m4_edge_starved plateaued outright at d_z 8. The Gaussian block is where
+  # cell family at 0.97, tissue and disease have to live and it is what the
+  # benchmark scores.
+  #
+  # Why out of the drain. m6_drain's drain settled at 26.5 nats across eight
+  # dimensions while its three targets are worth about five: ln(11) = 2.40
+  # for the study plus one continuous quantity each for depth and detected
+  # genes. It was over-provisioned, and narrowing it to four forces it onto
+  # the targets rather than onto whatever it was holding instead. The risk is
+  # real and unmeasured: if four is too few the drain fails and the mechanism
+  # is moot. latent_attribution_epochNNN.png is where that shows.
+  model.d_gauss: 12
+  # Four angles, not two. Two of them have genuine cycles behind them --
+  # menstrual phase, and cell cycle phase, which the benchmark scores and m5
+  # reached only 0.4171 on -- and the other two are slack. A circle is also
+  # restrictive for reconstruction in a way that is useful here: the decoder
+  # reads an angle as (cos, sin) through a linear map, so the only function
+  # of the angle it can express is a single sinusoid, the first Fourier
+  # harmonic. It cannot be casually co-opted to carry arbitrary structure,
+  # which is what makes it a clean channel.
+  model.n_circular: 4
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8
+
+  # ── THE DRAIN ────────────────────────────────────────────────────────────
+  # The one change against m5_combined. Everything above is m5's value.
+  model.drain.enabled: true
+  # Narrow on purpose. The job is a study code, a depth and a detected-gene
+  # count, which is a handful of numbers; a wide drain could hold biology.
+  model.drain.d_drain: 4
+  # study ALONE IS REFUSED by DrainLoss, and must be: every batch holds one
+  # study, so that reward is collectable by a vector constant across the
+  # batch. log_depth and log_genes are standardised within the batch, which
+  # strips the study-level component and leaves the cell's own deviation.
+  model.drain.targets: [study, log_depth, log_genes]
+  model.drain.hidden: null
+  # 0.05, matching the phase head, which has had it since m2. m6_drain drove
+  # the train study cross-entropy to exactly 0.0000 by epoch 11, and
+  # cross-entropy's gradient is softmax - onehot, so at perfect confidence
+  # the drain's reward contributes NOTHING: the whole drain term was 0.0106
+  # against nb at 0.415 by the end. Its validation value was 3.2400 at the
+  # same time, which over eleven classes means the true study received
+  # probability 0.039 against a chance of 0.091 -- confidently wrong, which
+  # is what an unbounded logit scale produces. Smoothing caps the attainable
+  # confidence so the term keeps a gradient.
+  model.drain.label_smoothing: 0.05
+  model.drain.w_study: 1.0
+  model.drain.w_depth: 1.0
+  model.drain.w_genes: 1.0
+  # A GUESS WITH NOTHING BEHIND IT. Read drain, drain_study, drain_log_depth
+  # and drain_log_genes against nb in the epoch-1 gradient report and move
+  # it, the way w_cls went 500 -> 40 and w_ecs 1400 -> 50.
+  model.loss.w_drain: 1.0
+  # TWO RATES, BECAUSE THEY ARE NOT THE SAME IDEA.
+  #
+  # Zeroing the 48 covariate dimensions is the useful pressure: provenance
+  # then has to come from the latent, and the drain is what is rewarded for
+  # taking it. All 48 go together because they substitute for each other,
+  # measured: the parts sum to 0.0891 against a joint 0.1017.
+  #
+  # Dropping the drain as well works AGAINST the adversary. With both gone,
+  # study-level structure has nowhere to go but the biology block, and the
+  # encoder will put it there whenever that is cheaper than losing the
+  # reconstruction. At the 0.25 both-together rate this config first carried,
+  # that was a standing pressure pushing study identity into the one block
+  # every reported metric reads. Its only real job is to stop biology hiding
+  # in the drain, where nothing would see it, so 0.10 is insurance rather
+  # than pressure.
+  #
+  # Both are guesses. Read nb on blanked against unblanked steps at epoch 1.
+  model.drain.blank_covariates_p: 0.25
+  model.drain.blank_drain_p: 0.10
+  model.drain.blank_seed: 24

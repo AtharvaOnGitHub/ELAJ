@@ -86,7 +86,7 @@ def main() -> None:
 
     from endo_model.configs import load_experiment
     from endo_model.data.vocabulary import GeneVocabulary
-    from endo_model.evaluation.purity_report import best_checkpoint
+    from endo_model.evaluation.purity_report import resolve_checkpoint
     from endo_model.model.endo_model import EndoFoundationModel
     from endo_model.model.objectives.reconstruction import NegativeBinomialLoss
     from endo_model.training.checkpointing import CheckpointManager
@@ -118,8 +118,7 @@ def main() -> None:
         sys.exit(2)
 
     run_dir = resolve_run_dir(root, exp_cfg.output_dir, args.runs_dir)
-    ckpt = (best_checkpoint(run_dir) if args.checkpoint == "auto"
-            else Path(args.checkpoint))
+    ckpt = resolve_checkpoint(run_dir, args.checkpoint)
     logger.info("Checkpoint: %s", ckpt)
     CheckpointManager.load_weights(str(ckpt), model, map_location=str(device))
     model.eval()

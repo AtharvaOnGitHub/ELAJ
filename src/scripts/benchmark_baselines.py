@@ -99,6 +99,12 @@ def parse_args() -> argparse.Namespace:
                    help="Default 50. Pass 16 for a width-matched row.")
     p.add_argument("--scanorama-dimred", type=int, default=None,
                    help="Default 100. Pass 16 for a width-matched row.")
+    p.add_argument("--checkpoint", default="auto",
+                   help="Checkpoint to score, or 'auto' for the run's best by "
+                        "val_nb. An explicit choice is RECORDED in the output "
+                        "settings, because an epoch picked after reading its "
+                        "label metrics cannot be described as selected by "
+                        "reconstruction loss alone.")
     p.add_argument("--include-elaj", action="store_true",
                    help="Embed the checkpoint on the same cells and score it "
                         "alongside. Needs --runs-dir to find it.")
@@ -155,24 +161,27 @@ def _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
 
 
 def _embed_elaj(root, exp_cfg, model_cfg, train_cfg, data_cfg, vocab,
-                study_configs, run_dir, splits, device, obs_columns):
+                study_configs, run_dir, splits, device, obs_columns,
+                checkpoint="auto"):
     """ELAJ's combined latent over the same sampler order the corpus uses.
 
-    Returns (latent, orders) where `orders[split]` is the dataset index list
-    the loader yielded, so the caller can build the corpus over exactly these
-    cells. Reuses validate_latent's collect and sampler_order rather than
-    re-implementing the embedding pass.
+    Returns (latent, orders, ckpt) where `orders[split]` is the dataset index
+    list the loader yielded, so the caller can build the corpus over exactly
+    these cells, and `ckpt` is the checkpoint actually scored so it can be
+    recorded in the output rather than living only in the log. Reuses
+    validate_latent's collect and sampler_order rather than re-implementing
+    the embedding pass.
     """
     import numpy as np
 
     from endo_model.evaluation.latent_validation import circular_coordinates
-    from endo_model.evaluation.purity_report import best_checkpoint
+    from endo_model.evaluation.purity_report import resolve_checkpoint
     from endo_model.model.endo_model import EndoFoundationModel
     from endo_model.training.checkpointing import CheckpointManager
     from scripts.report_purity import build_loader
     from scripts.validate_latent import collect, sampler_order
 
-    ckpt = best_checkpoint(run_dir)
+    ckpt = resolve_checkpoint(run_dir, checkpoint)
     model = EndoFoundationModel(vocab, model_cfg).to(device)
     CheckpointManager.load(str(ckpt), model, None, map_location=device)
     logger.info("ELAJ checkpoint: %s", ckpt)
@@ -190,7 +199,7 @@ def _embed_elaj(root, exp_cfg, model_cfg, train_cfg, data_cfg, vocab,
         parts.append(np.concatenate([mu_gauss, circular_coordinates(mu_angle)],
                                     axis=-1))
         orders[split] = order
-    return (np.concatenate(parts) if parts else None), orders
+    return (np.concatenate(parts) if parts else None), orders, ckpt
 
 
 def main() -> None:
@@ -226,7 +235,7 @@ def main() -> None:
     logger.info("Loading %d obs columns: %s", len(obs_columns), ", ".join(obs_columns))
 
     # ── ELAJ first, if asked, because it fixes which cells everyone gets ────
-    elaj_latent, orders = None, {}
+    elaj_latent, orders, elaj_ckpt = None, {}, None
     if args.include_elaj:
         import torch
 
@@ -235,9 +244,10 @@ def main() -> None:
             logger.error("no run directory at %s", run_dir)
             sys.exit(1)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        elaj_latent, orders = _embed_elaj(
+        elaj_latent, orders, elaj_ckpt = _embed_elaj(
             root, exp_cfg, model_cfg, train_cfg, data_cfg, vocab,
             study_configs, run_dir, args.splits, device, obs_columns,
+            checkpoint=args.checkpoint,
         )
 
     # ── the corpus: one CorpusMatrix over the same cells, in the same order ──
@@ -273,8 +283,15 @@ def main() -> None:
         logger.info("── elaj (checkpoint) ──")
         # ELAJ is always fitted on the training donors; say so in its key so
         # it lines up with the baselines' inductive rows.
+        # The CHECKPOINT, not the run directory. Recording the directory
+        # made two scoring passes of the same arm indistinguishable in the
+        # output, which was survivable while the epoch was always the ranked
+        # best and is not now that --checkpoint exists.
+        settings = {"checkpoint": str(elaj_ckpt),
+                    "selection": ("best val_nb" if args.checkpoint in
+                                  (None, "", "auto") else "EXPLICIT")}
         emb = Embedding(method="elaj", latent=elaj_latent, fit_seconds=0.0,
-                        settings={"checkpoint": str(run_dir)}, fit_on="train")
+                        settings=settings, fit_on="train")
         report.add(scorer.score(emb, corpus, gene_policy="native"))
         report.record_settings("elaj", "native", emb.settings, fit_on="train")
 

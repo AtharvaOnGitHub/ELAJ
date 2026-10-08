@@ -96,6 +96,48 @@ def run_stop_metric(run_dir: Path) -> str:
         return "nb"
 
 
+def resolve_checkpoint(run_dir: Path, requested: str | None = None) -> Path:
+    """The checkpoint to score: `best_checkpoint`, or an explicit one.
+
+    WHY AN OVERRIDE EXISTS AT ALL. `best_checkpoint` ranks by `val_nb` and
+    nothing else, and on m6_drain it separated epoch 16 from epoch 13 by
+    0.0013 while those two epochs differed by 0.0161 in study purity and
+    0.0119 in cross-donor phase. A tie-break that small should not decide
+    which model is reported.
+
+    WHAT USING IT COSTS, AND IT IS NOT NOTHING. `OUTSTANDING.md` plans this
+    Methods sentence: "the reported checkpoint was selected by reconstruction
+    loss on the validation donors; all reported metrics are label-based and
+    played no part in selection." Choosing an epoch AFTER reading its label
+    metrics makes that sentence false, and it is the one protocol objection a
+    reviewer can raise about scoring on val+test. So: use this for
+    diagnostics and for scoring a named epoch freely, and if the selection
+    RULE should change, change the rule in the config -- `stop_metric` and
+    `guard_metric` are there -- rather than the epoch after the fact.
+
+    Args:
+        run_dir:   The run's output directory.
+        requested: A checkpoint path, or "auto"/None for the ranked best.
+    """
+    if requested in (None, "", "auto"):
+        return best_checkpoint(run_dir)
+    path = Path(requested)
+    if not path.is_absolute() and not path.exists():
+        # Tolerate a path given relative to the run directory as well as to
+        # the working directory, since both read naturally on a command line.
+        inside = run_dir / requested
+        if inside.exists():
+            path = inside
+    if not path.exists():
+        raise FileNotFoundError(f"--checkpoint {requested}: no such file")
+    logger.warning(
+        "  checkpoint OVERRIDDEN to %s. The ranked best is %s. A checkpoint "
+        "chosen after reading its label metrics cannot be described as "
+        "selected by reconstruction loss alone.", path.name,
+        best_checkpoint(run_dir).name)
+    return path
+
+
 def best_checkpoint(run_dir: Path) -> Path:
     """The retained checkpoint at the run's best epoch, by the metric the
     run selected on.

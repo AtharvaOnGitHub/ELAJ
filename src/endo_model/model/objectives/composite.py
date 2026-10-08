@@ -73,7 +73,9 @@ class CompositeLoss(nn.Module):
         beta_max: float = 1.0,
         warmup_fraction: float = 0.20,
         free_bits: float = 0.0,
+        free_bits_circ: float | None = None,
         drain_targets: tuple = (),
+        drain_label_smoothing: float = 0.0,
         w_drain: float = 0.0,
         w_drain_study: float = 1.0,
         w_drain_depth: float = 1.0,
@@ -87,6 +89,20 @@ class CompositeLoss(nn.Module):
         self.warmup_fraction = warmup_fraction
         # Nats per latent dimension the model is not charged for.
         self.free_bits = free_bits
+        # The circular branch's own floor. None means "the same as the
+        # Gaussian one", which is what every arm up to m6_drain_hard ran.
+        #
+        # WHY IT IS WORTH SEPARATING. The two branches hold information on
+        # different scales. A Gaussian dimension's KL grows with the square of
+        # its mean, so 0.25 nats is a modest allowance. A circular
+        # dimension's is 0.5*ln(kappa) + 0.072, logarithmic in concentration,
+        # so the same 0.25 nats buys kappa = e^0.356 = 1.43 and an angular
+        # spread of about 68 degrees -- far too loose to separate four cycle
+        # phases 90 degrees apart. Floored at 1.0 instead, the free
+        # concentration is kappa = 6.4 and the spread about 32 degrees, which
+        # can.
+        self.free_bits_circ = (float(free_bits) if free_bits_circ is None
+                               else float(free_bits_circ))
         self.w_nb = w_nb
         self.w_kl_gauss = w_kl_gauss
         self.w_kl_circ = w_kl_circ
@@ -99,7 +115,8 @@ class CompositeLoss(nn.Module):
         # the study-only guard fires at construction rather than at step one.
         self.drain = (
             DrainLoss(tuple(drain_targets), w_study=w_drain_study,
-                      w_depth=w_drain_depth, w_genes=w_drain_genes)
+                      w_depth=w_drain_depth, w_genes=w_drain_genes,
+                      label_smoothing=drain_label_smoothing)
             if drain_targets else None
         )
         # Built whatever the weight, so a run with w_cls 0 still
@@ -308,7 +325,8 @@ class CompositeLoss(nn.Module):
             / n_measured
         )
         kl_circ = (
-            self.circ_kl(model_output["kappa"], self.free_bits) / n_measured
+            self.circ_kl(model_output["kappa"], self.free_bits_circ)
+            / n_measured
         )
         # The drain is a Gaussian branch and is charged like one, at the same
         # weight. Leaving it unpriced would make it a free high-capacity

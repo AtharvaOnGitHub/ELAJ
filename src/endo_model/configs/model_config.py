@@ -186,6 +186,12 @@ class LossConfig:
     # every weight guessed in this project has been wrong by an order of
     # magnitude at least once.
     w_drain: float = 0.0
+    # The circular branch's per-dimension KL floor. None means "same as
+    # free_bits", which is what every arm before m6_drain_circ ran. Worth
+    # setting separately because a circular KL is 0.5*ln(kappa) + 0.072 and
+    # therefore logarithmic in precision: 0.25 nats buys an angular spread of
+    # about 68 degrees, 1.0 nats buys about 32.
+    free_bits_circ: Optional[float] = None
     free_bits: float = 0.0
 
     @classmethod
@@ -198,6 +204,8 @@ class LossConfig:
             w_cls=float(d.get("w_cls", 0.0)),
             w_ecs=float(d.get("w_ecs", 0.0)),
             w_drain=float(d.get("w_drain", 0.0)),
+            free_bits_circ=(float(d["free_bits_circ"])
+                            if d.get("free_bits_circ") is not None else None),
             free_bits=float(d.get("free_bits", 0.0)),
         )
 
@@ -359,6 +367,11 @@ class DrainConfig:
     w_genes: float = 1.0
     blank_covariates_p: float = 0.25
     blank_drain_p: float = 0.10
+    # Caps the attainable confidence on the study head so the term keeps a
+    # gradient. m6_drain reached train cross-entropy 0.0000 by epoch 11,
+    # which is a dead term, with validation at 3.2400. The phase head has run
+    # at 0.05 since m2.
+    label_smoothing: float = 0.0
     blank_seed: int = 0
 
     @classmethod
@@ -375,6 +388,7 @@ class DrainConfig:
             w_genes=float(d.get("w_genes", 1.0)),
             blank_covariates_p=float(d.get("blank_covariates_p", 0.25)),
             blank_drain_p=float(d.get("blank_drain_p", 0.10)),
+            label_smoothing=float(d.get("label_smoothing", 0.0)),
             blank_seed=int(d.get("blank_seed", 0)),
         )
 

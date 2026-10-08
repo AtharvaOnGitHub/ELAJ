@@ -98,8 +98,22 @@ class DrainLoss(nn.Module):
 
     def __init__(self, targets: tuple[str, ...],
                  w_study: float = 1.0, w_depth: float = 1.0,
-                 w_genes: float = 1.0) -> None:
+                 w_genes: float = 1.0,
+                 label_smoothing: float = 0.0) -> None:
         super().__init__()
+        # WHY THIS EXISTS. m6_drain drove the study cross-entropy to exactly
+        # 0.0000 on training batches by epoch 11. Cross-entropy's gradient is
+        # softmax - onehot, so at perfect confidence the term contributes
+        # NOTHING and the drain's reward has switched itself off: by the final
+        # epoch the whole drain loss was 0.0106 against nb at 0.415. Its
+        # validation value was 3.2400 at the same time, which over eleven
+        # classes means the true study received probability e^-3.24 = 0.039
+        # against a chance of 0.091 -- confidently wrong, which is what an
+        # unbounded logit scale produces. Smoothing caps the attainable
+        # confidence, so the term keeps a gradient. The phase head has run at
+        # 0.05 since m2 and this had none, which was an inconsistency rather
+        # than a decision.
+        self.label_smoothing = float(label_smoothing)
         self.targets = tuple(targets)
         if not any(t in REGRESSION_TARGETS for t in self.targets):
             raise ValueError(
@@ -190,7 +204,8 @@ class DrainLoss(nn.Module):
             if predicted is None:
                 continue
             if name in CLASSIFICATION_TARGETS:
-                part = F.cross_entropy(predicted, target)
+                part = F.cross_entropy(
+                    predicted, target, label_smoothing=self.label_smoothing)
             else:
                 part = F.mse_loss(predicted, target)
             out[f"drain_{name}"] = part

@@ -292,6 +292,7 @@ def main() -> None:
         w_cls=model_cfg.loss.w_cls if model_cfg.classifier.enabled else 0.0,
         cls_label_smoothing=model_cfg.classifier.label_smoothing,
         free_bits=model_cfg.loss.free_bits,
+        free_bits_circ=model_cfg.loss.free_bits_circ,
         beta_max=train_cfg.kl_annealing.beta_max,
         warmup_fraction=train_cfg.kl_annealing.warmup_fraction,
         drain_targets=(tuple(model_cfg.drain.targets)
@@ -301,6 +302,7 @@ def main() -> None:
         w_drain_study=model_cfg.drain.w_study,
         w_drain_depth=model_cfg.drain.w_depth,
         w_drain_genes=model_cfg.drain.w_genes,
+        drain_label_smoothing=model_cfg.drain.label_smoothing,
     ).to(device)
     if model_cfg.drain.enabled:
         logger.info(

@@ -301,6 +301,97 @@ class TestDrainHead:
         assert latent.gaussian.mu_head.weight.grad is None
 
 
+class TestLabelSmoothingOnTheStudyHead:
+    """m6_drain drove the train study cross-entropy to exactly 0.0000 by
+    epoch 11. Cross-entropy's gradient is softmax - onehot, so at perfect
+    confidence the drain's reward contributes NOTHING and has switched itself
+    off. Smoothing caps the attainable confidence."""
+
+    @staticmethod
+    def _logits(n=64, n_studies=11, scale=1.0):
+        """Confident and correct logits for a single-study batch."""
+        logits = torch.zeros(n, n_studies)
+        logits[:, 3] = scale
+        return logits
+
+    def test_without_smoothing_a_confident_head_reaches_zero(self):
+        b = batch(n=64, study=3)
+        loss = DrainLoss(("study", "log_depth"), label_smoothing=0.0)
+        out = loss({"study": self._logits(scale=60.0),
+                    "log_depth": torch.zeros(64)}, b)
+        assert float(out["drain_study"]) < 1e-6
+
+    def test_with_smoothing_it_cannot(self):
+        """The floor is what keeps a gradient alive."""
+        b = batch(n=64, study=3)
+        loss = DrainLoss(("study", "log_depth"), label_smoothing=0.05)
+        out = loss({"study": self._logits(scale=60.0),
+                    "log_depth": torch.zeros(64)}, b)
+        assert float(out["drain_study"]) > 0.05
+
+    def test_the_gradient_survives_at_perfect_confidence(self):
+        """The property that matters, stated directly."""
+        b = batch(n=64, study=3)
+        for smoothing, alive in ((0.0, False), (0.05, True)):
+            logits = self._logits(scale=60.0).requires_grad_(True)
+            loss = DrainLoss(("study", "log_depth"), label_smoothing=smoothing)
+            loss({"study": logits, "log_depth": torch.zeros(64)},
+                 b)["drain_study"].backward()
+            norm = float(logits.grad.abs().sum())
+            assert (norm > 1e-4) is alive, (smoothing, norm)
+
+    def test_smoothing_does_not_touch_the_regressions(self):
+        b = batch(n=64)
+        preds = {"log_depth": torch.zeros(64), "log_genes": torch.zeros(64)}
+        a = DrainLoss(("log_depth", "log_genes"), label_smoothing=0.0)(preds, b)
+        c = DrainLoss(("log_depth", "log_genes"), label_smoothing=0.3)(preds, b)
+        assert torch.allclose(a["drain_log_depth"], c["drain_log_depth"])
+        assert torch.allclose(a["drain_log_genes"], c["drain_log_genes"])
+
+
+class TestCircularFreeBitsIsSeparate:
+    """A Gaussian dimension's KL grows with the square of its mean; a circular
+    dimension's is 0.5*ln(kappa) + 0.072, logarithmic in precision. The same
+    floor means very different things to the two branches, so they get their
+    own."""
+
+    def test_none_falls_back_to_the_gaussian_floor(self):
+        from endo_model.model.objectives.composite import CompositeLoss
+
+        loss = CompositeLoss(n_studies=11, d_gauss=8, n_circular=2,
+                             free_bits=0.25)
+        assert loss.free_bits_circ == pytest.approx(0.25)
+
+    def test_an_explicit_value_overrides_it(self):
+        from endo_model.model.objectives.composite import CompositeLoss
+
+        loss = CompositeLoss(n_studies=11, d_gauss=8, n_circular=2,
+                             free_bits=0.25, free_bits_circ=1.0)
+        assert loss.free_bits == pytest.approx(0.25)
+        assert loss.free_bits_circ == pytest.approx(1.0)
+
+    def test_zero_is_honoured_rather_than_read_as_absent(self):
+        """0.0 and None are different requests and `or` would conflate them."""
+        from endo_model.model.objectives.composite import CompositeLoss
+
+        loss = CompositeLoss(n_studies=11, d_gauss=8, n_circular=2,
+                             free_bits=0.25, free_bits_circ=0.0)
+        assert loss.free_bits_circ == pytest.approx(0.0)
+
+    def test_the_floor_is_what_the_circular_kl_receives(self):
+        """A floored KL cannot fall below free_bits per dimension, so a
+        near-uniform posterior reads as n_circular * floor rather than ~0."""
+        from endo_model.model.objectives.kl_divergence import (
+            PowerSphericalKLLoss,
+        )
+
+        kappa = torch.full((16, 4), 1.0001)      # essentially uniform
+        bare = float(PowerSphericalKLLoss()(kappa, 0.0))
+        floored = float(PowerSphericalKLLoss()(kappa, 1.0))
+        assert bare < 0.5
+        assert floored == pytest.approx(4.0, abs=1e-3)
+
+
 class TestWithinStudyShare:
     """The diagnostic that says whether the drain did its job or became a
     lookup table. Reported every epoch for that reason."""

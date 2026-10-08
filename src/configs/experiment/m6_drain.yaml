@@ -78,7 +78,24 @@ output_dir: outputs/m_series/m6_drain/
 seed: 24
 
 overrides:
-  training.max_epochs: 14
+  # 14 -> 19, for a RESUME from the epoch-13 checkpoint rather than a fresh
+  # run. Every axis was still moving at 14: val_nb reached its minimum at the
+  # final epoch, which no previous arm did, phase_xdonor was at 0.7431 and
+  # climbing, family_xdonor at 0.9707 and climbing.
+  #
+  # IT WAS DOING THAT ON ALMOST NO LEARNING RATE. build_scheduler sets
+  # T_max = max_epochs on CosineAnnealingLR with the default eta_min 0, so at
+  # lr 1e-3 over 14 epochs the last three ran at 1.9e-4, 1.1e-4 and 1.3e-5.
+  #
+  # RAISING THE HORIZON RAISES T_max, so the resumed run restarts the cosine
+  # from the new curve: about 1.6e-4 at epoch 14 rather than 1.3e-5, decaying
+  # to zero by 19. That is a thirteenfold jump and a regime change, not a
+  # smooth continuation. Read the extra epochs with that in mind.
+  #
+  # The other schedules are unaffected. The DAB ramp is min(1, 2*step/total)
+  # and was already saturated; the KL warmup at 0.05 of total finished inside
+  # epoch 1.
+  training.max_epochs: 19
   training.early_stop_patience: 5
   training.early_stop_warmup_epochs: 2
   training.batch_size: 256

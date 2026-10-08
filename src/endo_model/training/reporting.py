@@ -56,6 +56,14 @@ class LatentCollector:
     study_id: list = field(default_factory=list)
     disease: list = field(default_factory=list)
     tissue: list = field(default_factory=list)
+    # Only present when the model has a drain block. Collected so the
+    # attribution figure can say what those dimensions hold, which no metric
+    # reads: see evaluation/latent_attribution.py.
+    mu_drain: list = field(default_factory=list)
+    platform: list = field(default_factory=list)
+    phase: list = field(default_factory=list)
+    log_depth: list = field(default_factory=list)
+    log_genes: list = field(default_factory=list)
     _n: int = 0
     _per_study: dict = field(default_factory=dict)
 
@@ -81,6 +89,17 @@ class LatentCollector:
         self.study_id.append(batch["study_id"].cpu().numpy())
         self.disease.append(batch["disease_status"].cpu().numpy())
         self.tissue.append(batch["tissue_levels"].cpu().numpy())
+        # The drain's own targets and the biology labels it must NOT hold, so
+        # the attribution figure can tell those two cases apart.
+        self.platform.append(batch["platform_codes"].cpu().numpy())
+        self.phase.append(batch["phase_label"].cpu().numpy())
+        library = batch["library_size"].detach().float().cpu().numpy()
+        self.log_depth.append(np.log1p(library))
+        counts = batch["counts"]
+        detected = ((counts > 0) & ~batch["is_dns"]).sum(dim=1)
+        self.log_genes.append(np.log1p(grab(detected)))
+        if "mu_drain" in output:
+            self.mu_drain.append(grab(output["mu_drain"]))
         self._n += int(output["mu_gauss"].shape[0])
 
     def _subsample(self, study_id: np.ndarray) -> np.ndarray:
@@ -109,7 +128,16 @@ class LatentCollector:
             "study_id": np.concatenate(self.study_id),
             "disease": np.concatenate(self.disease),
             "tissue": np.concatenate(self.tissue),
+            "platform": np.concatenate(self.platform),
+            "phase": np.concatenate(self.phase),
+            "log_depth": np.concatenate(self.log_depth),
+            "log_genes": np.concatenate(self.log_genes),
         }
+        # Absent on a model with no drain, and the key must then stay absent
+        # rather than arrive empty: `draw_latents` keys the whole attribution
+        # figure off its presence.
+        if self.mu_drain:
+            full["mu_drain"] = np.concatenate(self.mu_drain)
         rows = self._subsample(full["study_id"])
         return {name: values[rows] for name, values in full.items()}
 
@@ -209,6 +237,87 @@ class EpochReporter:
                 lambda: circular_latent(latents["mu_angle"], latents["kappa"], epoch),
             )
         self._draw_umap(epoch, latents)
+        self._draw_drain(epoch, latents)
+
+    def _draw_drain(self, epoch: int, latents: dict) -> None:
+        """What the drain block holds, against what the biology block holds.
+
+        WHY IT IS WORTH A FIGURE. m6_drain's drain held 26.5 nats over eight
+        dimensions. Its three targets cannot account for that: naming one of
+        eleven studies is at most ln(11) = 2.40 nats, and depth and detected-
+        gene count are one continuous quantity each. So it holds something
+        else, and nothing in the project could say what.
+
+        It is also the one block no metric reads. `DABClassifier`,
+        `LabelClassifier`, `validate_latent` and the benchmark all take
+        `mu_gauss` and `mu_angle`, which is the structural guarantee that the
+        drain cannot inflate a reported number -- and equally the reason
+        biology parked there would be invisible. This is where it shows.
+
+        Drawn beside the biology block over the same variables, because the
+        drain's numbers mean nothing on their own: a column high in both is
+        shared structure, and high in the drain alone is the failure.
+        """
+        drain = latents.get("mu_drain")
+        if drain is None or drain.shape[1] == 0:
+            return
+        from endo_model.evaluation.latent_attribution import attribute, describe
+        from endo_model.viz.drain_panels import drain_attribution
+
+        categorical = {
+            "study": latents["study_id"],
+            "platform": latents["platform"][:, 0],
+            "tissue type": latents["tissue"][:, 2],
+            "disease": latents["disease"],
+            "phase": latents["phase"],
+        }
+        continuous = {
+            "log depth": latents["log_depth"],
+            "log genes": latents["log_genes"],
+        }
+        try:
+            drain_table = attribute(drain, categorical, continuous)
+            biology = np.concatenate(
+                [latents["mu_gauss"],
+                 np.cos(latents["mu_angle"]), np.sin(latents["mu_angle"])],
+                axis=1) if latents["mu_angle"].shape[1] else latents["mu_gauss"]
+            biology_table = attribute(biology, categorical, continuous)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Latent attribution skipped (%s: %s).",
+                           type(exc).__name__, exc)
+            return
+        logger.info("%s", describe(drain_table, "DRAIN"))
+        logger.info("%s", describe(biology_table, "BIOLOGY"))
+        self._draw(
+            f"latent_attribution_epoch{epoch:03d}",
+            lambda: drain_attribution(
+                drain_table, biology_table, drain.shape[1],
+                biology.shape[1], epoch,
+                note="variance explained is not information: a low value is "
+                     "weak evidence of absence, a high one is strong evidence "
+                     "of presence",
+            ),
+        )
+        self._draw_drain_umap(epoch, latents)
+
+    def _draw_drain_umap(self, epoch: int, latents: dict) -> None:
+        """The drain block's own UMAP, coloured the way the Gaussian one is."""
+        coords = safe_umap(latents["mu_drain"], seed=self.seed)
+        if coords is None:
+            return
+        labels = {
+            "by study": (latents["study_id"], self.id_to_name,
+                         "separation here is the drain WORKING"),
+            "by tissue type": (latents["tissue"][:, 2],
+                               self.tissue_names.get(2), None),
+            "by disease status": (latents["disease"], _DISEASE_NAMES,
+                                  "separation here is biology in the wrong "
+                                  "block"),
+        }
+        self._draw(
+            f"latent_umap_drain_epoch{epoch:03d}",
+            lambda: latent_umap(coords, labels, epoch, branch="Drain"),
+        )
 
     def report_mixing(self, latents: dict) -> list[dict]:
         """Log study mixing for this set of latents, corpus and per study.

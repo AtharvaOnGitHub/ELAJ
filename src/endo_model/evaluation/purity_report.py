@@ -96,14 +96,38 @@ def run_stop_metric(run_dir: Path) -> str:
         return "nb"
 
 
+def run_guard(run_dir: Path) -> tuple[str, float]:
+    """The ceiling the run refused to call a checkpoint best above.
+
+    Read from run_config.json (`training.guard_metric` and
+    `training.guard_max`), the same place `run_stop_metric` reads from.
+    `("", inf)` for a run that set no guard, which is every arm before the
+    m-series.
+    """
+    config = run_dir / "run_config.json"
+    if not config.exists():
+        return "", float("inf")
+    try:
+        training = json.loads(config.read_text(encoding="utf-8")).get(
+            "training", {})
+        metric = str(training.get("guard_metric", "") or "")
+        ceiling = training.get("guard_max")
+        return metric, (float(ceiling) if ceiling is not None
+                        else float("inf"))
+    except (OSError, ValueError, TypeError):
+        return "", float("inf")
+
+
 def resolve_checkpoint(run_dir: Path, requested: str | None = None) -> Path:
     """The checkpoint to score: `best_checkpoint`, or an explicit one.
 
-    WHY AN OVERRIDE EXISTS AT ALL. `best_checkpoint` ranks by `val_nb` and
-    nothing else, and on m6_drain it separated epoch 16 from epoch 13 by
-    0.0013 while those two epochs differed by 0.0161 in study purity and
-    0.0119 in cross-donor phase. A tie-break that small should not decide
-    which model is reported.
+    WHY AN OVERRIDE EXISTS AT ALL. `best_checkpoint` now applies the run's
+    own guard, so it agrees with what the run selected -- but it still ranks
+    within that by the stop metric alone, and on m6_drain that separated
+    epoch 16 from epoch 13 by 0.0013 while the two differed by 0.0161 in
+    study purity. The override also covers the case this arm is in: epoch 13
+    was the selection of the ORIGINAL 14-epoch run, before a resume restarted
+    the cosine schedule, and metrics.csv now holds both runs' epochs.
 
     WHAT USING IT COSTS, AND IT IS NOT NOTHING. `OUTSTANDING.md` plans this
     Methods sentence: "the reported checkpoint was selected by reconstruction
@@ -166,15 +190,65 @@ def best_checkpoint(run_dir: Path) -> Path:
     column = "val_nb" if metric == "nb" else f"val_{metric}"
     sign = 1.0 if metric == "nb" else -1.0          # lower is better after sign
 
+    # THE GUARD IS PART OF SELECTION, NOT A SEPARATE OPINION ABOUT IT. The
+    # trainer and FinalReporter rank through checkpoint_ranking, which refuses
+    # to call an epoch best when `guard_metric` exceeds `guard_max`; this
+    # function ranked on the stop metric alone and so could disagree with the
+    # run about which checkpoint the run had chosen. On m6_drain_circ that was
+    # epoch 8 against the run's epoch 6, and on m6_drain_hard epoch 12 against
+    # epoch 8 -- the latter decided by 0.0001 of val_nb while the guard
+    # separated study purity 0.8253 from 0.7650. The figures in figures/best
+    # and the scored benchmark row were describing different models.
+    guard_metric, guard_max = run_guard(run_dir)
+    guard_column = (("val_nb" if guard_metric == "nb" else f"val_{guard_metric}")
+                    if guard_metric else "")
+
+    def breaches(row: dict) -> bool:
+        """True when this epoch is one the run would not call best.
+
+        An unreadable or missing guard value does NOT exclude the epoch: a
+        metric that failed to compute is not evidence of a breach, and
+        treating it as one would silently narrow the field.
+        """
+        if not guard_column:
+            return False
+        try:
+            value = float(row.get(guard_column, ""))
+        except (TypeError, ValueError):
+            return False
+        return value == value and value > guard_max
+
     rows = list(csv.DictReader(metrics.open()))
-    scored = []
+    scored, excluded = [], 0
     for r in rows:
         try:
             value = float(r.get(column, ""))
         except ValueError:
             continue
-        if value == value:                           # not NaN
-            scored.append((sign * value, int(float(r["epoch"])), r))
+        if value != value:                           # NaN
+            continue
+        if breaches(r):
+            excluded += 1
+            continue
+        scored.append((sign * value, int(float(r["epoch"])), r))
+    if excluded:
+        logger.info("  %d epoch(s) excluded by the run's guard %s <= %.4g",
+                    excluded, guard_column, guard_max)
+    if not scored and excluded:
+        # Every epoch breached. Falling back to the unguarded ranking is
+        # better than failing, but the caller has to be told the reported
+        # checkpoint is one the run itself would not have chosen.
+        logger.warning(
+            "  EVERY epoch breaches the guard %s <= %.4g; ranking without it. "
+            "The scored checkpoint is not one this run would call best.",
+            guard_column, guard_max)
+        for r in rows:
+            try:
+                value = float(r.get(column, ""))
+            except ValueError:
+                continue
+            if value == value:
+                scored.append((sign * value, int(float(r["epoch"])), r))
     if not scored:
         logger.warning("  metrics.csv has no usable %s column; ranking the "
                        "retained checkpoints by their own payloads", column)

@@ -1,17 +1,41 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
-#SBATCH --time=12:00:00
+#SBATCH --time=05:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 #SBATCH --job-name=elaj_bench
 #SBATCH --output=logs/bench_%j.log
 
 # Scores scVI, scANVI, Harmony, Scanorama and PCA on the cells ELAJ is scored
 # on, with ELAJ's own checkpoint in the same table.
+#
+# SIZED FROM SEVEN RECORDED RUNS, not guessed. It asked for 12 hours and
+# 256G, and on 9 October 2026 that left a pass sitting on Priority while a
+# card stood free.
+#
+#   run                    memory      wall     baselines
+#   m3_study_v2             66.20 GB   3:12:53  refitted
+#   r8_inductive           101.88 GB   2:26:37  refitted
+#   r8_all                  74.47 GB   2:17:34  refitted
+#   m3_study_mixing         68.36 GB   1:44:03  refitted
+#   m5_disease              70.92 GB   1:10:54  reused
+#   m5_study_v2             66.97 GB   1:03:17  reused
+#   m4_tight16_study_v2     65.94 GB   0:58:11  reused
+#
+# MEMORY IS THE BINDING CONSTRAINT AND 128G IS NOT ARBITRARY. An a100_80 node
+# holds 512 GB across four GPUs, so 128G is exactly one GPU's proportional
+# share and the job can sit beside three others. At 256G a single-GPU job
+# needs half the node's memory and blocks two of them, so it only ever starts
+# where that much happens to be free. 128G is 26% above the worst run on
+# record.
+#
+# 5 hours covers the slowest full refit with 56% to spare. A reuse pass needs
+# about two: pass --time=02:00:00 for those. Both are overridable on the
+# sbatch command line, which beats editing this file for one run.
 #
 #   sbatch data_collation/scripts/benchmark_baselines.sh r8_direction \
 #       --runs-dir outputs/r8 --out outputs/benchmarks/r8_all

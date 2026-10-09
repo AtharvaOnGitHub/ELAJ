@@ -87,12 +87,17 @@ set -euo pipefail
 ARMS=()
 EXTRA=()
 INCLUDE_ELAJ=1
+# EVERY VALUE-TAKING FLAG MUST BE LISTED BELOW. One that is not falls to the
+# bare `-*` case, its value falls to the positional case, and the run dies
+# with "Give exactly one experiment name" -- which is what --checkpoint did
+# on 9 October, twice, because it was added to the python parser and not to
+# this one.
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-elaj) INCLUDE_ELAJ=0; shift ;;
         --k|--k-cross-donor|--permutations|--seed|--scvi-epochs|--scanvi-label|\
         --fit-split|--pca-components|--scvi-latent|--harmony-pcs|--scanorama-dimred|\
-        --reuse-baselines|\
+        --reuse-baselines|--checkpoint|\
         --out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --splits|--methods|--gene-policies)

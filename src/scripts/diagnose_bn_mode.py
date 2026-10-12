@@ -44,11 +44,25 @@ Then compare, on both:
   kNN study purity — the share of a cell's nearest neighbours that come from
                      its own study, which is what "are the studies mixed?"
                      actually means
+  cell family and menstrual phase kNN agreement — whether the shift costs the
+                     labels we actually report, which study purity cannot say
+  batches per study — how far each study's running estimate travelled from its
+                     initialisation, which is where a gap comes from
   a UMAP           — the picture, side by side
 
-If purity drops substantially in training mode, the separation we have been
-reading off these figures is largely this bug. If it does not move, the bug is
-real but small, and the separation is the model's.
+MEASURED ON m6_drain EPOCH 13: eval 0.763, training 0.643, so eval mode makes
+the studies look MORE separated, by 18% of the distance above the mixed floor.
+Every study-separation number reported, the benchmark's 0.736 included,
+therefore understates the batch correction.
+
+AND THE TRAINING-MODE COLUMN IS NOT A REPORTABLE NUMBER. Both modes use the
+cell's study label; they differ in where the statistics come from. Eval mode
+uses estimates accumulated during training, which is fixed and inductive.
+Training mode uses the statistics of the batch in front of it, and the sampler
+puts one study per batch, so it re-centres using the EVALUATION cells. That is
+transductive, and it is why 0.643 is not a better measurement of the same
+thing. What the gap measures is how far the per-study running estimates drift
+when applied to held-out donors of the same study.
 
 Usage
 -----
@@ -148,6 +162,104 @@ def normalisation_layers(model) -> list:
     return [m for m in model.modules() if isinstance(m, kinds)]
 
 
+def harmonised_labels(dataset, loader, vocab) -> dict:
+    """`{"cell family": values, "menstrual phase": values}` over the loader's order.
+
+    THROUGH CorpusMatrix ON PURPOSE. Label harmonisation has one
+    implementation, `scorer.add_harmonised_labels`, and it reads a
+    CorpusMatrix. Re-deriving the harmonisation here would give this script its
+    own second opinion about what a cell family is, and the whole value of
+    comparing these numbers with the benchmark's is that one piece of code
+    decides it.
+
+    The cost is one sparse slice of the split, which the benchmark pays
+    routinely. The counts themselves are never read, but the gene axis has to
+    be the right WIDTH or CorpusMatrix refuses the construction.
+    """
+    import numpy as np
+
+    from endo_model.evaluation.baselines.corpus_matrix import extract_corpus_matrix
+    from endo_model.evaluation.baselines.scorer import (
+        HARMONISED_LINEAGE, HARMONISED_PHASE, add_harmonised_labels,
+    )
+    from scripts.validate_latent import sampler_order
+
+    gene_names = [vocab.index_to_gene(i) for i in range(vocab.vocab_size)]
+    corpus = extract_corpus_matrix(dataset, gene_names=gene_names,
+                                   study_names={}, indices=sampler_order(loader))
+    add_harmonised_labels(corpus)
+    return {name: np.asarray(corpus.meta[name], dtype=object)
+            for name in (HARMONISED_LINEAGE, HARMONISED_PHASE)
+            if name in corpus.meta}
+
+
+def report_statistics_coverage(model) -> None:
+    """Log how many batches each study's running estimate was built from.
+
+    THE MECHANISM, IF THE TWO MODES DISAGREE. A study's running mean and
+    variance are an exponential moving average at momentum 0.1, updated once
+    per batch of that study and starting from zero mean and unit variance. So
+    after `n` updates the estimate has travelled 1 - 0.9^n of the way to the
+    truth: 65% at ten batches, 88% at twenty, 99% at forty-four. A study with
+    few batches keeps an estimate still part-way from its initialisation, and
+    eval mode normalises that study's cells by it.
+
+    Logged per study so a gap can be attributed rather than guessed at.
+    """
+    for layer in normalisation_layers(model):
+        tracked = getattr(layer, "num_batches_tracked", None)
+        if tracked is None or tracked.dim() == 0:
+            continue
+        logger.info("  running statistics, batches per study:")
+        for study, n in enumerate(tracked.tolist()):
+            converged = 1.0 - 0.9 ** n if n else 0.0
+            logger.info("    study %2d: %6d batches  (EMA %5.1f%% of the way "
+                        "from its initialisation)", study, n, 100 * converged)
+
+
+def biology_under_both_modes(results: dict, labels: dict, k: int) -> None:
+    """Log family and phase kNN agreement in each mode, beside study purity.
+
+    WHY THIS IS NOT OPTIONAL. The study-purity comparison says the latent we
+    score is shifted from the one the model optimised. It does not say what
+    that costs, and the shift could move biology in either direction. The
+    reported benchmark numbers are eval-mode numbers, so if biology drops in
+    eval mode too, every arm has been scored on a degraded latent.
+
+    READ THE TRAINING-MODE COLUMN WITH CARE. Training mode normalises each row
+    by the statistics of the batch in front of it, and the sampler puts one
+    study per batch, so it is a per-study centring computed from the
+    EVALUATION cells. That is transductive. It is a diagnostic of how far the
+    running estimates have drifted, never a number to report.
+    """
+    from endo_model.evaluation.latent_validation import label_knn_agreement
+
+    # The labels come from a SECOND pass over the sampler, so their order is
+    # the loader's only because shuffle=False makes PerStudyBatchSampler
+    # deterministic. That is an argument, and a length mismatch is the one
+    # symptom it would show, so check it rather than scoring a misaligned join.
+    n_rows = results["eval"]["biology"].shape[0]
+    for name, values in labels.items():
+        if len(values) != n_rows:
+            raise ValueError(
+                f"{name} has {len(values)} labels for {n_rows} embedded rows; "
+                f"the sampler order used for the labels is not the order the "
+                f"latents were collected in"
+            )
+
+    for name, values in labels.items():
+        row = []
+        for mode in ("eval", "train"):
+            res = label_knn_agreement(results[mode]["biology"], values,
+                                      k=k, seed=24)
+            row.append(res)
+        logger.info("  %-18s eval %.3f   train %.3f   difference %+.3f  "
+                    "(%d labels, chance %.3f)",
+                    name, row[0]["excess"], row[1]["excess"],
+                    row[1]["excess"] - row[0]["excess"],
+                    row[0]["n_labels"], row[0]["chance"])
+
+
 def set_batchnorm_training(model, training: bool) -> int:
     """Put every normalisation layer into the given mode, leaving the rest alone.
 
@@ -176,6 +288,7 @@ def set_batchnorm_training(model, training: bool) -> int:
 
 
 def main() -> None:
+    import numpy as np
     import torch
 
     args = parse_args()
@@ -199,10 +312,16 @@ def main() -> None:
     model_cfg.n_studies = len(study_configs)
     model_cfg.n_groups = len(vocab.group_names)
 
+    from endo_model.evaluation.baselines.scorer import required_obs_columns
+
     val = EndometriosisDataset(
         split="val",
         study_configs=study_configs,
         vocab=vocab,
+        # The label columns the biology comparison needs. Asked for here rather
+        # than derived, because label harmonisation has one implementation and
+        # it reads these source columns off the dataset.
+        extra_obs_columns=required_obs_columns(),
         val_fraction=data_cfg.splits.val_fraction,
         test_fraction=data_cfg.splits.test_fraction,
         seed=data_cfg.splits.seed,
@@ -269,6 +388,18 @@ def main() -> None:
         if latents is None:
             logger.error("Validation loader yielded no batches.")
             sys.exit(1)
+        # The biology block as the benchmark scores it: the Gaussian means plus
+        # each angle as (cos, sin). On an arm with no circular branch this is
+        # mu_gauss alone, but reading mu_gauss unconditionally would silently
+        # score a partial latent on m6_drain_circ.
+        from endo_model.evaluation.latent_validation import circular_coordinates
+
+        angles = latents.get("mu_angle")
+        latents["biology"] = (
+            np.concatenate([latents["mu_gauss"], circular_coordinates(angles)],
+                           axis=-1)
+            if angles is not None and angles.shape[-1] else latents["mu_gauss"]
+        )
         results[label] = latents
         logger.info("  %s", describe(latents["mu_gauss"], latents["study_id"], args.k))
 
@@ -289,7 +420,24 @@ def main() -> None:
         "  %.0f%% of the eval-mode separation above the mixed floor disappears "
         "when BatchNorm is put back into training mode.", 100 * share,
     )
+    logger.info("")
+    logger.info("  The training-mode column is TRANSDUCTIVE and is not a "
+                "reportable number: it")
+    logger.info("  normalises by the statistics of the batch in front of it, "
+                "and the sampler")
+    logger.info("  puts one study per batch, so it re-centres using the "
+                "evaluation cells.")
     logger.info("=" * 68)
+
+    # ── What the shift costs, if anything ───────────────────────────────────
+    # Study purity says the scored latent is shifted. These say whether the
+    # labels we actually report move with it.
+    logger.info("")
+    logger.info("Biology under both modes (kNN agreement, excess over chance):")
+    biology_under_both_modes(results, harmonised_labels(val, loader, vocab), args.k)
+    logger.info("")
+    logger.info("Where the shift comes from:")
+    report_statistics_coverage(model)
 
     from endo_model.viz.latent_panels import latent_umap, safe_umap
     from endo_model.viz import apply_theme, save_figure

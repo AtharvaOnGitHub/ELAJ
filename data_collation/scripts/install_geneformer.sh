@@ -8,6 +8,14 @@
 # through sbatch. This is a file transfer plus a pip install, which is what a
 # login node is for; it is not the kind of work that earned the overuse email.
 #
+# NO git-lfs, AND NOT BY PREFERENCE. Geneformer's own instructions are
+# `git lfs install && git clone`, and BlueBEAR has no git-lfs module at all:
+# `module avail git` lists only eb-conf/github. So this uses
+# huggingface_hub.snapshot_download, which fetches real file content over
+# HTTP and never involves LFS pointers. It also filters by pattern, which git
+# clone cannot do, so the V2 checkpoints are never written to disk rather than
+# being pulled and then ignored.
+#
 # WHICH CHECKPOINT, AND WHY IT IS THE ONLY ONE WE MAY USE.
 #   Geneformer-V1-10M    Genecorpus-30M, assembled 2021, input size 2048
 #   Geneformer-V2-104M   Genecorpus-104M, assembled 2024
@@ -15,8 +23,22 @@
 # Every accession in our corpus is 2021 or later, so a 2024 corpus could
 # contain our held-out donors and a model pretrained on it is not inductive in
 # the sense ELAJ is. V1-10M predates all but our earliest deposition. The V2
-# models are deliberately NOT fetched: having them on disk is how one ends up
-# in a table.
+# weights are excluded below deliberately: having them on disk is how one ends
+# up in a table.
+#
+# WHICH DICTIONARIES, WHICH IS THE EASY ONE TO GET WRONG. The dictionaries
+# directly under geneformer/ are the gc104M ones. V1-10M's live separately:
+#
+#   gene_dictionaries_30m/token_dictionary_gc30M.pkl
+#   gene_dictionaries_30m/gene_median_dictionary_gc30M.pkl
+#   gene_dictionaries_30m/gene_name_id_dict_gc30M.pkl
+#
+# A V1 model must be used with its own two: the token ids index the model's
+# embedding table, and the medians are what the rank-value encoding divides
+# by. Pairing 104M dictionaries with 30M weights is wrong in the way that
+# produces numbers rather than an error. gene_name_id_dict_gc30M.pkl is also
+# where the HGNC-symbol to Ensembl mapping comes from, so we do not introduce
+# a second one of our own.
 #
 # A SEPARATE VENV, NOT THE elaj ONE. Geneformer wants transformers and
 # datasets, which no module provides, and its own dependency resolution would
@@ -30,11 +52,11 @@
 # versions are read at runtime into a constraints file and pip may not move
 # them.
 #
-# EXPECT THIS TO NEED A SECOND PASS. The pins below are reasoned, not
-# measured: Geneformer's setup may want a numpy 2 era stack that the 2024a
-# modules do not provide. If it does, the verify step at the end says so by
-# importing rather than by trusting pip, and the fix is a pin here rather than
-# a surprise inside a GPU job three hours in.
+# EXPECT THIS TO NEED A SECOND PASS. The pins are reasoned, not measured:
+# Geneformer's setup may want a numpy 2 era stack that the 2024a modules do
+# not provide. The verify step says so by importing and by reading file sizes
+# rather than by trusting pip, so a problem surfaces here rather than three
+# hours into a GPU job.
 
 set -euo pipefail
 
@@ -55,77 +77,19 @@ module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
 
-# ── 0. git-lfs is required, and failing here is cheaper than failing later ──
-# The dictionaries Geneformer needs -- the token dictionary and the gene
-# median dictionary its rank-value encoding is built from -- are LFS-tracked.
-# Without git-lfs they clone as text pointer files, the package imports
-# cleanly, and the first tokenisation fails on a pickle that is 130 bytes of
-# ASCII. Check now.
-if ! command -v git-lfs >/dev/null 2>&1; then
-    echo "REFUSING: git-lfs is not on PATH." >&2
-    echo "Geneformer's dictionaries are LFS-tracked and would clone as" >&2
-    echo "pointer files, which fails only at first use. Try:" >&2
-    echo "    module load git-lfs      # or: module avail git" >&2
-    exit 1
-fi
-git lfs install --skip-repo
-
-# ── 1. fetch the repository, weights excluded until we choose them ──────────
-mkdir -p "${MODELS}"
-if [[ -d "${REPO}/.git" ]]; then
-    echo "── repository already at ${REPO}; fetching ──"
-    git -C "${REPO}" fetch --quiet origin
-    git -C "${REPO}" checkout --quiet main
-    git -C "${REPO}" pull --quiet
-else
-    echo "── cloning Geneformer (LFS payloads deferred) ──"
-    # SKIP_SMUDGE so the clone does not pull every checkpoint including the
-    # 316M one. The files we want are pulled explicitly below.
-    GIT_LFS_SKIP_SMUDGE=1 git clone --quiet \
-        https://huggingface.co/ctheodoris/Geneformer "${REPO}"
-fi
-
-echo
-echo "── pulling V1-10M, the 30M dictionaries, and the package defaults ──"
-#
-# gene_dictionaries_30m/ IS NOT OPTIONAL AND IS EASY TO MISS. The dictionaries
-# directly under geneformer/ are the gc104M ones:
-#
-#   geneformer/token_dictionary_gc104M.pkl
-#   geneformer/gene_median_dictionary_gc104M.pkl
-#   geneformer/gene_name_id_dict_gc104M.pkl
-#
-# while V1-10M's are
-#
-#   gene_dictionaries_30m/token_dictionary_gc30M.pkl
-#   gene_dictionaries_30m/gene_median_dictionary_gc30M.pkl
-#   gene_dictionaries_30m/gene_name_id_dict_gc30M.pkl
-#
-# A V1 model must be used with its own token dictionary and gene median
-# dictionary: the token ids index the model's embedding table, and the medians
-# are what the rank-value encoding divides by. Pairing 104M dictionaries with
-# 30M weights is wrong in a way that produces numbers rather than an error.
-#
-# The gc104M files are pulled anyway, because the package loads them as its
-# defaults at import and a pointer file there breaks the import.
-git -C "${REPO}" lfs pull \
-    --include="Geneformer-V1-10M/**" \
-    --include="gene_dictionaries_30m/**" \
-    --include="geneformer/*.pkl" \
-    --include="geneformer/*.json"
-
-# ── 2. the venv, and the pins the modules force ─────────────────────────────
+# ── 1. the venv, first, because the downloader lives in it ──────────────────
 if [[ ! -d "${VENV}" ]]; then
-    echo
     echo "── creating ${VENV} ──"
     python -m venv "${VENV}"
 fi
 source "${VENV}/bin/activate"
 pip install --quiet --upgrade pip
+pip install --quiet "huggingface_hub>=0.23"
 
 WORK="$(mktemp -d)"
 CONSTRAINTS="$WORK/constraints.txt"
 
+# ── 2. read what the modules provide, and forbid pip from changing it ───────
 echo
 echo "── module-provided versions (these are pinned) ──"
 python - "$CONSTRAINTS" <<'PYEOF'
@@ -144,21 +108,50 @@ pins += ["zarr<3", "numcodecs<0.14", "xarray<2025"]
 open(sys.argv[1], "w").write("\n".join(pins) + "\n")
 PYEOF
 
-# ── 3. install the package from the clone ───────────────────────────────────
+# ── 3. download everything except the V2 weights ────────────────────────────
+# ignore_patterns rather than allow_patterns: a pip install needs whatever
+# build files the repository happens to carry, and an allow-list that misses
+# one fails at step 4 for a reason that looks unrelated. Excluding the three
+# V2 checkpoint directories is the specific thing we want, and it is the
+# property worth being deliberate about.
+echo
+echo "── downloading Geneformer to ${REPO} (V2 checkpoints excluded) ──"
+mkdir -p "${MODELS}"
+python - "$REPO" <<'PYEOF'
+import sys
+from huggingface_hub import snapshot_download
+
+path = snapshot_download(
+    repo_id="ctheodoris/Geneformer",
+    repo_type="model",
+    local_dir=sys.argv[1],
+    ignore_patterns=[
+        "Geneformer-V2-104M/*",
+        "Geneformer-V2-104M_CLcancer/*",
+        "Geneformer-V2-316M/*",
+        "fine_tuned_models/*",
+        "examples/*",
+        "docs/*",
+    ],
+)
+print(f"  downloaded to {path}")
+PYEOF
+
+# ── 4. install the package from the download ────────────────────────────────
 echo
 echo "── installing geneformer from ${REPO} ──"
 pip install -c "$CONSTRAINTS" "${REPO}"
 
 rm -rf "$WORK"
 
-# ── 4. verify by importing and by reading a dictionary, not by pip ──────────
-# The import proves the dependency resolution held. Reading the gene median
-# dictionary proves the LFS pull actually landed, which the import does not:
-# a pointer file is a perfectly importable package data file.
+# ── 5. verify by importing and by file size, not by pip's opinion ───────────
+# The import proves the dependency resolution held. The sizes prove the
+# download landed real content: with git-lfs this check caught pointer files,
+# and with snapshot_download it catches a pattern that excluded too much.
 echo
 echo "── verifying ──"
 python - "$REPO" <<'PYEOF'
-import importlib, pathlib, sys
+import importlib, pathlib, pickle, sys
 
 ok = True
 for pkg in ("numpy", "pandas", "anndata", "torch", "transformers",
@@ -171,40 +164,44 @@ for pkg in ("numpy", "pandas", "anndata", "torch", "transformers",
         print(f"  {pkg:<14} MISSING ({type(exc).__name__}: {exc})")
 
 repo = pathlib.Path(sys.argv[1])
+
 model = repo / "Geneformer-V1-10M"
-if not model.is_dir():
-    print(f"  checkpoint     MISSING at {model}")
+weights = next((p for p in (model / "model.safetensors",
+                            model / "pytorch_model.bin") if p.is_file()), None)
+if weights is None:
+    print(f"  checkpoint     MISSING in {model}")
     ok = False
 else:
-    weights = sorted(p.name for p in model.glob("*.safetensors")) or \
-              sorted(p.name for p in model.glob("*.bin"))
-    sizes = {p.name: p.stat().st_size for p in model.iterdir() if p.is_file()}
-    big = [n for n, s in sizes.items() if s > 1_000_000]
-    print(f"  checkpoint     {model.name}: {', '.join(weights) or 'no weight file'}")
-    if not big:
-        print("  LFS            POINTER FILES ONLY — nothing over 1 MB in the "
-              "checkpoint directory. `git lfs pull` did not land.")
-        ok = False
-    else:
-        print(f"  LFS            ok ({len(big)} file(s) over 1 MB)")
+    print(f"  checkpoint     {weights.name} ({weights.stat().st_size / 1e6:.1f} MB)")
 
-# The 30M dictionaries, by size as well as by presence. These are the ones a
-# V1 run must use, and a pointer file here is a 130-byte pickle that unpickles
-# as nothing useful only once tokenisation starts.
+# The V2 weights must NOT be here. Finding them means ignore_patterns did not
+# apply, and the next person to pass a model directory has three to choose
+# from where there should be one.
+for name in ("Geneformer-V2-104M", "Geneformer-V2-316M",
+             "Geneformer-V2-104M_CLcancer"):
+    if (repo / name).is_dir() and any((repo / name).iterdir()):
+        print(f"  {name:<26} PRESENT — should have been excluded")
+        ok = False
+
+# The 30M dictionaries, unpickled rather than stat-ed: these are the ones a V1
+# run must use, and the gene name dictionary is also our symbol-to-Ensembl map,
+# so its size is worth printing as a sanity check on coverage.
 dicts = repo / "gene_dictionaries_30m"
-wanted = ("token_dictionary_gc30M.pkl",
-          "gene_median_dictionary_gc30M.pkl",
-          "gene_name_id_dict_gc30M.pkl")
-for name in wanted:
+for name in ("token_dictionary_gc30M.pkl",
+             "gene_median_dictionary_gc30M.pkl",
+             "gene_name_id_dict_gc30M.pkl"):
     path = dicts / name
     if not path.is_file():
         print(f"  {name:<34} MISSING")
         ok = False
-    elif path.stat().st_size < 100_000:
-        print(f"  {name:<34} POINTER FILE ({path.stat().st_size} bytes)")
+        continue
+    try:
+        with path.open("rb") as fh:
+            loaded = pickle.load(fh)
+        print(f"  {name:<34} ok ({len(loaded):,} entries)")
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  {name:<34} UNREADABLE ({type(exc).__name__}: {exc})")
         ok = False
-    else:
-        print(f"  {name:<34} ok ({path.stat().st_size / 1e6:.1f} MB)")
 
 import torch
 print(f"  cuda           {torch.cuda.is_available()}  "
@@ -213,6 +210,6 @@ raise SystemExit(0 if ok else 1)
 PYEOF
 
 echo
-echo "Done. Checkpoint:  ${REPO}/Geneformer-V1-10M"
-echo "      Dictionaries: ${REPO}/gene_dictionaries_30m (gc30M, NOT the gc104M ones)"
-echo "      Environment: ${VENV}"
+echo "Done. Checkpoint:    ${REPO}/Geneformer-V1-10M"
+echo "      Dictionaries: ${REPO}/gene_dictionaries_30m  (gc30M, NOT gc104M)"
+echo "      Environment:  ${VENV}"

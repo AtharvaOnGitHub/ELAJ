@@ -78,8 +78,13 @@ module load SciPy-bundle/2024.05-gfbf-2024a
 module load tqdm/4.66.5-GCCcore-13.3.0
 module load anndata/0.10.9-foss-2024a
 module load h5py/3.12.1-foss-2024a
+module load Pillow/10.4.0-GCCcore-13.3.0
 module load matplotlib/3.9.2-gfbf-2024a
 
+# This is the project's standard module block minus R, which nothing here
+# touches. Keep it in step with install_baselines.sh and train.sh: a module
+# this list OMITS is one pip is then free to install into the venv as a second
+# copy, which is the shadowing problem from the other direction.
 export PYTHONNOUSERSITE=1
 
 # ── 1. the venv, first, because the downloader lives in it ──────────────────

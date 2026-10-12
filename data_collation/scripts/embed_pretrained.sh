@@ -55,7 +55,10 @@ case "${MODEL}" in
 esac
 
 OUT="outputs/benchmarks/latents/${MODEL}"
-WORK="/scratch/${SLURM_JOB_ID:-$$}/${MODEL}"
+# On the project filesystem, not /scratch, which this script has never
+# verified exists on BlueBEAR. The tokenised dataset for 416,256 cells at
+# input size 2048 is several GB, so it does not belong in the repository.
+WORK="/rds/projects/a/acharjea-multi-omics/Atharva/scratch/${MODEL}_${SLURM_JOB_ID:-manual}"
 
 module purge
 module load bear-apps/2024a
@@ -79,6 +82,7 @@ echo "Model:      ${MODEL}"
 echo "Repository: ${REPO}"
 echo "Run:        ${RUN}"
 echo "Gene axis:  ${PROCESSED}/vocabulary_wide.json"
+mkdir -p "${WORK}"
 echo "Work:       ${WORK}"
 echo "Out:        ${OUT}"
 echo ""

@@ -22,6 +22,15 @@ on ELAJ's terms. `intersection` removes the genes any study did not measure,
 which removes the DNS sentinel's advantage. `hvg2000` is each method's own
 best case. Run `all` first; see evaluation/baselines/gene_policy.py.
 
+AND THAT VOCABULARY IS NOT THE UNION. `build_vocabulary.py --drop-unassigned`
+keeps 15,495 of the 30,962 measured genes, discarding every gene that matched
+no curated pathway, because ELAJ's group encoder needs each gene to sit in a
+coherent group. Giving scVI that set gives it a curation step it would not
+have in the field. `--baseline-vocabulary <wide.json>` puts the baselines on
+their own axis over every measured gene while ELAJ keeps its checkpoint's own,
+and the gene count goes into the row key so the two tables cannot be mixed by
+`--reuse-baselines`. See evaluation/baselines/gene_axis.py.
+
 THE SUPERVISED ROW. scANVI is trained on `--scanvi-label`. Its score on THAT
 label is not comparable to anyone else's and the table says so; its scores on
 other labels are the fair comparison.
@@ -81,6 +90,13 @@ def parse_args() -> argparse.Namespace:
                         "whose package is missing is skipped and reported.")
     p.add_argument("--gene-policies", nargs="+", default=["all"],
                    help="all | intersection | hvg<N>. Each is a separate pass.")
+    p.add_argument("--baseline-vocabulary", default=None,
+                   help="A vocabulary.json built WITHOUT --drop-unassigned, "
+                        "giving the baselines every measured gene instead of "
+                        "the pathway-annotated half ELAJ's group encoder "
+                        "requires. ELAJ still reads its checkpoint's own "
+                        "vocabulary. The gene count goes into the policy tag, "
+                        "so a wide row cannot collide with a narrow one.")
     p.add_argument("--scanvi-label", default="cell family",
                    help="Column scANVI is supervised on. Its score on this "
                         "label is flagged in the table.")
@@ -257,12 +273,40 @@ def main() -> None:
     logger.info("Corpus: %d cells x %d genes, %d studies, splits %s",
                 corpus.n_cells, corpus.n_genes, corpus.n_studies, corpus.split)
 
+    # ── the baselines' own gene axis, if they are not to read ELAJ's ───────
+    # ELAJ keeps the vocabulary its checkpoint was trained against, because an
+    # embedding table has no row for a gene that was not in it. The baselines
+    # have no such constraint and are given every measured gene.
+    wide_axis = None
+    baseline_corpus = corpus
+    if args.baseline_vocabulary:
+        from endo_model.evaluation.baselines.gene_axis import (
+            WideGeneAxis, require_same_cells,
+        )
+
+        wide_axis = WideGeneAxis(str(Path(root) / args.baseline_vocabulary)
+                                 if not Path(args.baseline_vocabulary).is_absolute()
+                                 else args.baseline_vocabulary)
+        baseline_corpus = _build_corpus(
+            root, exp_cfg, train_cfg, data_cfg, wide_axis.vocabulary,
+            study_configs, args.splits, orders, obs_columns,
+            wide_axis.gene_names, names,
+        )
+        require_same_cells(corpus, baseline_corpus)
+        logger.info("Baseline corpus: %d cells x %d genes (ELAJ reads %d)",
+                    baseline_corpus.n_cells, baseline_corpus.n_genes,
+                    corpus.n_genes)
+
     # ── the fit corpus, if the baselines are to be held out like ELAJ ──────
+    # Built on the BASELINES' axis: it is what they fit on, and a fit corpus on
+    # a different gene axis from the scored corpus is not a comparison at all.
     fit_corpus = None
     if args.fit_split:
-        fit_corpus = _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab,
+        fit_vocab = wide_axis.vocabulary if wide_axis else vocab
+        fit_gene_names = wide_axis.gene_names if wide_axis else gene_names
+        fit_corpus = _build_corpus(root, exp_cfg, train_cfg, data_cfg, fit_vocab,
                                    study_configs, [args.fit_split], {},
-                                   obs_columns, gene_names, names)
+                                   obs_columns, fit_gene_names, names)
         logger.info("Fit corpus: %d cells x %d genes, %d studies, split %s",
                     fit_corpus.n_cells, fit_corpus.n_genes,
                     fit_corpus.n_studies, fit_corpus.split)
@@ -303,20 +347,23 @@ def main() -> None:
             # The gene set is chosen on the fit corpus when there is one, so
             # an HVG list is selected without looking at the scored cells,
             # then applied to both so their gene axes match.
-            chosen = fit_corpus if fit_corpus is not None else corpus
+            chosen = fit_corpus if fit_corpus is not None else baseline_corpus
             mask = policy.select(chosen)
-            restricted = corpus.restrict_genes(mask)
+            restricted = baseline_corpus.restrict_genes(mask)
             restricted_fit = (fit_corpus.restrict_genes(mask)
                               if fit_corpus is not None else None)
         except ImportError as exc:
             report.record_skip(f"*/{policy.name}", str(exc))
             continue
+        # The tag carries the gene count when the baselines are on their own
+        # axis, so `scvi/all/train` and `scvi/all30962/train` are two rows.
+        policy_tag = wide_axis.tag(policy.name) if wide_axis else policy.name
         logger.info("Gene policy %-12s keeps %6d of %d genes",
-                    policy.name, restricted.n_genes, corpus.n_genes)
+                    policy_tag, restricted.n_genes, baseline_corpus.n_genes)
         for method_name in args.methods:
             method = build_method(method_name, seed=args.seed,
                                   **_method_kwargs(method_name, args))
-            key = "/".join(p for p in (method.name, policy.name, fit_tag) if p)
+            key = "/".join(p for p in (method.name, policy_tag, fit_tag) if p)
             if key in already:
                 logger.info("── %s reused from %s", key, args.reuse_baselines)
                 continue
@@ -334,9 +381,12 @@ def main() -> None:
                 report.record_skip(key, f"{type(exc).__name__}: {exc}")
                 continue
             supervised = (args.scanvi_label if method_name == "scanvi" else "")
-            report.add(scorer.score(emb, restricted, gene_policy=policy.name,
+            if wide_axis:
+                emb.settings["gene_vocabulary"] = wide_axis.path
+                emb.settings["n_genes"] = restricted.n_genes
+            report.add(scorer.score(emb, restricted, gene_policy=policy_tag,
                                     supervised_on=supervised))
-            report.record_settings(method.name, policy.name, emb.settings,
+            report.record_settings(method.name, policy_tag, emb.settings,
                                    fit_on=emb.fit_on)
             # Write after every method so a killed job still leaves a table.
             report.write_csv(out / "benchmark.csv")

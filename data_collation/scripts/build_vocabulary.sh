@@ -129,8 +129,23 @@ PYEOF
 # attention at batch 256 for that one group.  The ceiling trims that tail.
 # Keep it at >= 2x --min-group-size: the floor pass accumulates a merged group
 # until it clears the floor, so merged groups can reach roughly twice it.
+#
+# DROP_UNASSIGNED defaults to 1, which is what every c-, m- and v-series
+# checkpoint was trained against. Set it to 0 to keep the genes that matched no
+# curated pathway, which gives the full measured transcriptome rather than its
+# pathway-annotated half: 30,962 genes instead of 15,495. That vocabulary is
+# NOT for training, because the group encoder's attention is sized to coherent
+# groups and the unassigned chunks are not; it is the gene axis the BASELINES
+# read, via benchmark_baselines.py --baseline-vocabulary.
+DROP_UNASSIGNED=${DROP_UNASSIGNED:-1}
+DROP_FLAG=()
+if [[ "${DROP_UNASSIGNED}" == "1" ]]; then
+  DROP_FLAG=(--drop-unassigned)
+fi
+
 echo ""
 echo "Building vocabulary by Reactome -> GO hierarchical roll-up ..."
+echo "  drop-unassigned: ${DROP_UNASSIGNED}"
 cd /rds/homes/a/axw1008/axw1008/src
 python scripts/build_vocabulary.py \
     --gene-list "${GENE_LIST}" \
@@ -141,7 +156,7 @@ python scripts/build_vocabulary.py \
     --min-group-size 250 \
     --max-group-size 500 \
     --go-groups 4 \
-    --drop-unassigned \
+    "${DROP_FLAG[@]}" \
     --out "${VOCAB_OUT}"
 
 echo ""

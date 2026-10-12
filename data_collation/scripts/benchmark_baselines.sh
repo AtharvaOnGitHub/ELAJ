@@ -52,6 +52,36 @@
 #       --runs-dir outputs/r8 --fit-split train --methods pca scvi scanvi \
 #       --out outputs/benchmarks/r8_inductive
 #
+# THE WIDE-AXIS PASS NEEDS ITS OWN SIZING, and the defaults above are wrong
+# for it. --baseline-vocabulary doubles the baselines' gene axis to 30,962 and
+# builds the corpus TWICE, once per axis, so both numbers move:
+#
+#   memory   the 15,496-gene inductive pass peaked at 168.80 GB inside 240G
+#            (job 56818203). The sparse corpora are the bulk of that and the
+#            unassigned half is lower-expression, so they grow by about 1.6x
+#            rather than 2x. PCA goes the other way: at 30,962 genes the fit
+#            corpus densifies to 144 GB, over DENSE_FRACTION of any allocation
+#            worth asking for, so it switches to chunked IncrementalPCA and
+#            its own peak drops to roughly 1 GB. Estimate 220-300 GB; ask 360G.
+#   wall     5:52:22 measured. scVI's and scANVI's first and last layers
+#            double, chunked PCA is slower than the exact decomposition, and
+#            the second corpus build reopens every .h5ad. Ask 20 hours.
+#
+#   sbatch --mem=360G --time=20:00:00 \
+#       data_collation/scripts/benchmark_baselines.sh m6_drain \
+#       --runs-dir outputs/m_series --fit-split train --methods pca scvi scanvi \
+#       --baseline-vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_wide.json \
+#       --checkpoint outputs/m_series/m6_drain/checkpoints/epoch_0013_step_0063518.pt \
+#       --out outputs/benchmarks/wide_m6_drain_ep13
+#
+# If the QoS refuses 20 hours, drop scanvi: it cost 6,554 s of the measured
+# run and its cell-family score is supervised and not comparable anyway.
+#
+# ELAJ's row in a wide pass is a CORRECTNESS CHECK, not a new number. It reads
+# its own 15,496-gene vocabulary either way, so it must reproduce the narrow
+# pass exactly. If it does not, the two gene axes disagree about which cell a
+# dataset index names, and gene_axis.require_same_cells should have caught it.
+#
 # The first positional argument is the experiment name; everything else is
 # passed through to scripts/benchmark_baselines.py. --include-elaj is on by
 # default here because the point of the table is ELAJ's row; pass
@@ -97,7 +127,7 @@ while [ $# -gt 0 ]; do
         --no-elaj) INCLUDE_ELAJ=0; shift ;;
         --k|--k-cross-donor|--permutations|--seed|--scvi-epochs|--scanvi-label|\
         --fit-split|--pca-components|--scvi-latent|--harmony-pcs|--scanorama-dimred|\
-        --reuse-baselines|--checkpoint|\
+        --reuse-baselines|--checkpoint|--baseline-vocabulary|\
         --out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --splits|--methods|--gene-policies)

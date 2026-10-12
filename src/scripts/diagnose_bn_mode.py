@@ -2,21 +2,35 @@
 
 The question
 -----------
-`DSBN` (endo_model/model/embeddings/dsbn.py) is one shared `BatchNorm1d`
-followed by a per-study scale and shift. BatchNorm behaves differently in the
-two modes PyTorch gives it:
+`DSBN` (endo_model/model/embeddings/dsbn.py) is a normalisation followed by a
+per-study scale and shift, and a normalisation with running statistics behaves
+differently in the two modes PyTorch gives it:
 
   training mode — normalise using the statistics of the batch in front of it
-  eval mode     — normalise using `running_mean` / `running_var`, one set of
-                  numbers accumulated over the whole run
+  eval mode     — normalise using the accumulated `running_mean` /
+                  `running_var`
 
-Batches in this project hold exactly one study. So in training mode each study
-is normalised by its own statistics, and the per-study scale and shift are
-learned against that. In eval mode every study is instead normalised by one
-corpus-wide average — and then corrected by a scale and shift calibrated for
-something else.
+Every figure in every run is drawn in eval mode, so if the two disagree, the
+figures are not showing what the model trained under.
 
-Every figure in every run so far is drawn in eval mode.
+WHAT THE ANSWER WAS, AND WHY IT MOVED. When DSBN held one shared
+`BatchNorm1d`, eval mode pooled every study into a single average that batch
+counts made essentially the largest studies', and the cost ran from +0.0052
+for the study holding 35.5% of validation to +0.2770 for the one holding 1.0%.
+`PerStudyBatchNorm` closed that by giving each study its own statistics, so on
+a current checkpoint this script is asking whether anything is LEFT, not
+whether the original bug is there.
+
+It is still worth asking, because the per-study estimates are an exponential
+moving average at momentum 0.1 updated once per batch of that study, and a
+study with few batches keeps an estimate still part-way from its
+initialisation. `num_batches_tracked` says which studies those are.
+
+A NOTE ON WHAT IS MATCHED. `PerStudyBatchNorm` is not a `_BatchNorm` subclass,
+and for a while this script's selector was an isinstance check against
+`_BatchNorm` alone. It matched nothing, toggled nothing, and reported +0.000.
+See `normalisation_layers`, which now refuses to run on a model where it finds
+no such layer.
 
 The test
 --------
@@ -111,21 +125,54 @@ def resolve_checkpoint(out_dir: Path) -> Path:
     return fallback
 
 
+def normalisation_layers(model) -> list:
+    """Every layer whose behaviour differs between training and eval mode.
+
+    `PerStudyBatchNorm` IS ONE OF THEM AND IS NOT A `_BatchNorm`. It keeps its
+    statistics as one buffer indexed by study rather than as N child
+    `BatchNorm1d` modules, which is the whole point of the class, so
+    `isinstance(m, nn.modules.batchnorm._BatchNorm)` does not match it. On
+    12 October 2026 this function was that isinstance check alone, it matched
+    nothing on m6_drain, and the script reported a difference of +0.000 — not
+    the finding it reads as, but a computation compared with itself.
+
+    `nn.LayerNorm` is deliberately absent: it holds no running statistics and
+    behaves identically in both modes, so toggling it would change nothing and
+    inflate the count this function is trusted for.
+    """
+    import torch.nn as nn
+
+    from endo_model.model.embeddings.per_study_batch_norm import PerStudyBatchNorm
+
+    kinds = (nn.modules.batchnorm._BatchNorm, PerStudyBatchNorm)
+    return [m for m in model.modules() if isinstance(m, kinds)]
+
+
 def set_batchnorm_training(model, training: bool) -> int:
-    """Put every BatchNorm layer into the given mode, leaving the rest alone.
+    """Put every normalisation layer into the given mode, leaving the rest alone.
 
     Dropout must stay off and the latent branches must stay deterministic, so
     `model.train()` is not what is wanted — that would change three things at
     once and the comparison would mean nothing.
-    """
-    import torch.nn as nn
 
-    n = 0
-    for module in model.modules():
-        if isinstance(module, nn.modules.batchnorm._BatchNorm):
-            module.train(training)
-            n += 1
-    return n
+    Raises:
+        RuntimeError: if the model holds no such layer. The entire question
+            this script asks is what those layers do between modes; with none
+            found there is nothing to ask, and printing +0.000 would answer it
+            falsely.
+    """
+    layers = normalisation_layers(model)
+    if not layers:
+        raise RuntimeError(
+            "no BatchNorm or PerStudyBatchNorm layer in this model, so there "
+            "is nothing to toggle and the two passes would be identical. "
+            "Either the architecture normalises some other way, in which case "
+            "normalisation_layers() needs to learn about it, or this config "
+            "has no normalisation at all and the question does not apply."
+        )
+    for module in layers:
+        module.train(training)
+    return len(layers)
 
 
 def main() -> None:

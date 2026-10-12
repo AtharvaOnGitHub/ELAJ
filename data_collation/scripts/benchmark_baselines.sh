@@ -68,19 +68,28 @@
 #            the second corpus build reopens every .h5ad. Ask 20 hours.
 #
 #   sbatch --mem=360G --time=20:00:00 \
-#       data_collation/scripts/benchmark_baselines.sh m6_drain \
-#       --runs-dir outputs/m_series --fit-split train --methods pca scvi scanvi \
+#       data_collation/scripts/benchmark_baselines.sh m6_drain --no-elaj \
+#       --fit-split train --methods pca scvi scanvi \
 #       --baseline-vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_wide.json \
-#       --checkpoint outputs/m_series/m6_drain/checkpoints/epoch_0013_step_0063518.pt \
 #       --out outputs/benchmarks/wide_m6_drain_ep13
 #
 # If the QoS refuses 20 hours, drop scanvi: it cost 6,554 s of the measured
 # run and its cell-family score is supervised and not comparable anyway.
 #
-# ELAJ's row in a wide pass is a CORRECTNESS CHECK, not a new number. It reads
-# its own 15,496-gene vocabulary either way, so it must reproduce the narrow
-# pass exactly. If it does not, the two gene axes disagree about which cell a
-# dataset index names, and gene_axis.require_same_cells should have caught it.
+# --no-elaj, BECAUSE ELAJ'S ROW CANNOT MOVE. It reads the vocabulary its
+# checkpoint was trained against whatever the baselines are given, on the same
+# cells, in eval mode, with blanking off and the same scorer seed. Embedding it
+# again would reproduce the narrow pass by construction and cost 29 minutes to
+# learn nothing, so the wide table carries no elaj row and is read beside the
+# narrow one.
+#
+# WHAT TO CHECK INSTEAD, and it is the thing that would void the comparison:
+# the log must say 416,256 cells. Without --include-elaj the cell order comes
+# from a fresh sampler_order() call rather than from ELAJ's loader pass, and if
+# those two disagree the baselines are on a different cell set from the narrow
+# table's. The alignment of the two GENE axes is separately checked on every
+# row by gene_axis.require_same_cells, which is why the narrow corpus is still
+# built when nothing scores against it.
 #
 # The first positional argument is the experiment name; everything else is
 # passed through to scripts/benchmark_baselines.py. --include-elaj is on by

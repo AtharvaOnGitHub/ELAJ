@@ -86,9 +86,31 @@ else
 fi
 
 echo
-echo "── pulling V1-10M and the package dictionaries only ──"
+echo "── pulling V1-10M, the 30M dictionaries, and the package defaults ──"
+#
+# gene_dictionaries_30m/ IS NOT OPTIONAL AND IS EASY TO MISS. The dictionaries
+# directly under geneformer/ are the gc104M ones:
+#
+#   geneformer/token_dictionary_gc104M.pkl
+#   geneformer/gene_median_dictionary_gc104M.pkl
+#   geneformer/gene_name_id_dict_gc104M.pkl
+#
+# while V1-10M's are
+#
+#   gene_dictionaries_30m/token_dictionary_gc30M.pkl
+#   gene_dictionaries_30m/gene_median_dictionary_gc30M.pkl
+#   gene_dictionaries_30m/gene_name_id_dict_gc30M.pkl
+#
+# A V1 model must be used with its own token dictionary and gene median
+# dictionary: the token ids index the model's embedding table, and the medians
+# are what the rank-value encoding divides by. Pairing 104M dictionaries with
+# 30M weights is wrong in a way that produces numbers rather than an error.
+#
+# The gc104M files are pulled anyway, because the package loads them as its
+# defaults at import and a pointer file there breaks the import.
 git -C "${REPO}" lfs pull \
     --include="Geneformer-V1-10M/**" \
+    --include="gene_dictionaries_30m/**" \
     --include="geneformer/*.pkl" \
     --include="geneformer/*.json"
 
@@ -166,6 +188,24 @@ else:
     else:
         print(f"  LFS            ok ({len(big)} file(s) over 1 MB)")
 
+# The 30M dictionaries, by size as well as by presence. These are the ones a
+# V1 run must use, and a pointer file here is a 130-byte pickle that unpickles
+# as nothing useful only once tokenisation starts.
+dicts = repo / "gene_dictionaries_30m"
+wanted = ("token_dictionary_gc30M.pkl",
+          "gene_median_dictionary_gc30M.pkl",
+          "gene_name_id_dict_gc30M.pkl")
+for name in wanted:
+    path = dicts / name
+    if not path.is_file():
+        print(f"  {name:<34} MISSING")
+        ok = False
+    elif path.stat().st_size < 100_000:
+        print(f"  {name:<34} POINTER FILE ({path.stat().st_size} bytes)")
+        ok = False
+    else:
+        print(f"  {name:<34} ok ({path.stat().st_size / 1e6:.1f} MB)")
+
 import torch
 print(f"  cuda           {torch.cuda.is_available()}  "
       f"(False on a login node is normal)")
@@ -174,4 +214,5 @@ PYEOF
 
 echo
 echo "Done. Checkpoint:  ${REPO}/Geneformer-V1-10M"
+echo "      Dictionaries: ${REPO}/gene_dictionaries_30m (gc30M, NOT the gc104M ones)"
 echo "      Environment: ${VENV}"

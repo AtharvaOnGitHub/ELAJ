@@ -160,6 +160,29 @@ def _method_kwargs(name: str, args) -> dict:
     return {k: v for k, v in given.items() if v is not None}
 
 
+def pending_keys(args, wide_axis, already) -> list[str]:
+    """Row keys this run would compute, after `--reuse-baselines` is applied.
+
+    WHY THIS IS WORKED OUT BEFORE THE FIT CORPUS IS BUILT. `--fit-split train`
+    builds a 1,161,472-cell CorpusMatrix, and on 12 October 2026 a job did that
+    alongside `--reuse-baselines` supplying every requested row, reached
+    111.9 GB of a 128G allocation, and was OOM-killed eleven minutes in over a
+    corpus no method was going to read.
+
+    The policy tag is computable from the vocabulary alone, so this needs
+    neither corpus.
+    """
+    fit_tag = args.fit_split or ""
+    keys = []
+    for policy_name in args.gene_policies:
+        tag = (wide_axis.tag(policy_name) if wide_axis else policy_name)
+        for method_name in args.methods:
+            key = "/".join(p for p in (method_name, tag, fit_tag) if p)
+            if key not in already:
+                keys.append(key)
+    return keys
+
+
 def build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
                   splits, orders, obs_columns, gene_names, names):
     """One CorpusMatrix over the sampler order of each split, concatenated."""
@@ -305,11 +328,23 @@ def main() -> None:
                     baseline_corpus.n_cells, baseline_corpus.n_genes,
                     corpus.n_genes)
 
+    scorer = EmbeddingScorer(ScorerSettings(
+        k=args.k, k_cross_donor=args.k_cross_donor,
+        permutations=args.permutations, seed=args.seed,
+    ))
+    report = (BenchmarkReport.read_csv(args.reuse_baselines, exclude_methods=("elaj",))
+              if args.reuse_baselines else BenchmarkReport())
+    already = set(report.methods())
+
     # ── the fit corpus, if the baselines are to be held out like ELAJ ──────
     # Built on the BASELINES' axis: it is what they fit on, and a fit corpus on
     # a different gene axis from the scored corpus is not a comparison at all.
+    #
+    # AND ONLY IF SOMETHING WILL READ IT. It is 1,161,472 cells, which is the
+    # single most expensive object this script builds; see pending_keys.
+    pending = pending_keys(args, wide_axis, already)
     fit_corpus = None
-    if args.fit_split:
+    if args.fit_split and pending:
         fit_vocab = wide_axis.vocabulary if wide_axis else vocab
         fit_gene_names = wide_axis.gene_names if wide_axis else gene_names
         fit_corpus = build_corpus(root, exp_cfg, train_cfg, data_cfg, fit_vocab,
@@ -318,14 +353,12 @@ def main() -> None:
         logger.info("Fit corpus: %d cells x %d genes, %d studies, split %s",
                     fit_corpus.n_cells, fit_corpus.n_genes,
                     fit_corpus.n_studies, fit_corpus.split)
-
-    scorer = EmbeddingScorer(ScorerSettings(
-        k=args.k, k_cross_donor=args.k_cross_donor,
-        permutations=args.permutations, seed=args.seed,
-    ))
-    report = (BenchmarkReport.read_csv(args.reuse_baselines, exclude_methods=("elaj",))
-              if args.reuse_baselines else BenchmarkReport())
-    already = set(report.methods())
+    elif args.fit_split:
+        logger.info(
+            "--fit-split %s given but every requested row is already in %s, "
+            "so the fit corpus is not built.", args.fit_split,
+            args.reuse_baselines,
+        )
 
     if elaj_latent is not None:
         if elaj_latent.shape[0] != corpus.n_cells:
@@ -372,8 +405,12 @@ def main() -> None:
         report.write_settings(out / "settings.json")
 
     # ── every policy x every method ─────────────────────────────────────────
+    # Skipped entirely when nothing is pending, so an HVG policy does not run
+    # scanpy's gene selection for a set of methods that are all being reused.
     fit_tag = args.fit_split or ""
-    for policy_name in args.gene_policies:
+    if not pending:
+        logger.info("No method left to run; every requested row was reused.")
+    for policy_name in (args.gene_policies if pending else []):
         policy = policy_from_name(policy_name)
         try:
             # The gene set is chosen on the fit corpus when there is one, so

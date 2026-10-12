@@ -376,7 +376,7 @@ def main() -> None:
         seed=exp_cfg.seed,
     )
 
-    results = {}
+    results, retained = {}, {}
     for label, bn_training in (("eval", False), ("train", True)):
         model.eval()
         n_bn = set_batchnorm_training(model, bn_training)
@@ -384,10 +384,15 @@ def main() -> None:
             "Pass '%s': %d BatchNorm layer(s) in %s mode",
             label, n_bn, "training" if bn_training else "eval",
         )
-        latents = collect_latents(model, loader, device, reporter.new_collector())
+        # The collector is kept, not discarded: stacked() returns a
+        # study-balanced subsample of what it collected, and a caller joining
+        # labels from elsewhere has to index them by the same rows.
+        collector = reporter.new_collector()
+        latents = collect_latents(model, loader, device, collector)
         if latents is None:
             logger.error("Validation loader yielded no batches.")
             sys.exit(1)
+        retained[label] = collector.retained_rows
         # The biology block as the benchmark scores it: the Gaussian means plus
         # each angle as (cos, sin). On an arm with no circular branch this is
         # mu_gauss alone, but reading mu_gauss unconditionally would silently
@@ -432,9 +437,27 @@ def main() -> None:
     # ── What the shift costs, if anything ───────────────────────────────────
     # Study purity says the scored latent is shifted. These say whether the
     # labels we actually report move with it.
-    logger.info("")
-    logger.info("Biology under both modes (kNN agreement, excess over chance):")
-    biology_under_both_modes(results, harmonised_labels(val, loader, vocab), args.k)
+    # The two passes subsample the same cells, because balanced_rows is
+    # deterministic in (study_id, max_cells, seed) and study_id does not depend
+    # on the BatchNorm mode. Checked rather than assumed: if they ever differ,
+    # the two columns below are over different cells and comparing them is
+    # meaningless.
+    if not np.array_equal(retained["eval"], retained["train"]):
+        logger.error(
+            "The two passes kept different cells (%d vs %d retained), so the "
+            "biology columns would not be comparable. Not scoring them.",
+            len(retained["eval"]), len(retained["train"]),
+        )
+    else:
+        labels = harmonised_labels(val, loader, vocab)
+        rows = retained["eval"]
+        logger.info("")
+        logger.info("Biology under both modes (kNN agreement, excess over "
+                    "chance, on the %d-cell balanced subsample):", len(rows))
+        biology_under_both_modes(
+            results, {name: values[rows] for name, values in labels.items()},
+            args.k,
+        )
     logger.info("")
     logger.info("Where the shift comes from:")
     report_statistics_coverage(model)

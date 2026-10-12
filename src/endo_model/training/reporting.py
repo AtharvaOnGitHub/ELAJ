@@ -45,6 +45,15 @@ class LatentCollector:
         max_cells: Stop after this many. A UMAP with `random_state` set runs
                    single-threaded, so the full 244k-cell split would take
                    longer than the epoch that produced it.
+
+    AND `stacked()` SUBSAMPLES, WHICH A CALLER JOINING LABELS MUST KNOW. The
+    returned arrays are a study-balanced selection of what was collected, not
+    everything, so a caller that reads labels from anywhere else -- the
+    dataset, a CorpusMatrix -- has to index them by the same rows or the join
+    is wrong. `retained_rows` is set by `stacked()` for exactly that. On
+    12 October 2026 diagnose_bn_mode handed in 190,976 labels for 19,972
+    embedded rows, and only an explicit length check stopped it scoring the
+    mismatch.
     """
 
     max_cells: int = 20000
@@ -66,6 +75,11 @@ class LatentCollector:
     log_genes: list = field(default_factory=list)
     _n: int = 0
     _per_study: dict = field(default_factory=dict)
+    #: Row positions into the collected arrays that `stacked()` returned.
+    #: Empty until `stacked()` has run. LAST in the field order deliberately,
+    #: so adding it cannot shift a positional construction.
+    retained_rows: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64))
 
     def add(self, output: dict, batch: dict) -> None:
         """Record every cell. Subsampling happens in `stacked`.
@@ -139,6 +153,7 @@ class LatentCollector:
         if self.mu_drain:
             full["mu_drain"] = np.concatenate(self.mu_drain)
         rows = self._subsample(full["study_id"])
+        self.retained_rows = rows
         return {name: values[rows] for name, values in full.items()}
 
 

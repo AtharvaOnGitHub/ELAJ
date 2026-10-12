@@ -29,9 +29,14 @@
 # WHICH DICTIONARIES, WHICH IS THE EASY ONE TO GET WRONG. The dictionaries
 # directly under geneformer/ are the gc104M ones. V1-10M's live separately:
 #
-#   gene_dictionaries_30m/token_dictionary_gc30M.pkl
-#   gene_dictionaries_30m/gene_median_dictionary_gc30M.pkl
-#   gene_dictionaries_30m/gene_name_id_dict_gc30M.pkl
+#   geneformer/gene_dictionaries_30m/token_dictionary_gc30M.pkl
+#   geneformer/gene_dictionaries_30m/gene_median_dictionary_gc30M.pkl
+#   geneformer/gene_dictionaries_30m/gene_name_id_dict_gc30M.pkl
+#   geneformer/gene_dictionaries_30m/ensembl_mapping_dict_gc30M.pkl
+#
+# UNDER THE PACKAGE DIRECTORY, not the repository root. The first verify pass
+# looked at the root, reported all three MISSING, and they had downloaded
+# perfectly.
 #
 # A V1 model must be used with its own two: the token ids index the model's
 # embedding table, and the medians are what the rank-value encoding divides
@@ -78,6 +83,15 @@ module load matplotlib/3.9.2-gfbf-2024a
 export PYTHONNOUSERSITE=1
 
 # ── 1. the venv, first, because the downloader lives in it ──────────────────
+# FRESH=1 REBUILDS IT, and after a failed attempt that is the right thing. The
+# first run installed transformers 5.19, pyarrow 26 and datasets 5.1 against
+# too few pins; asking pip to downgrade that in place leaves the resolver
+# choosing between what is installed and what the constraints now say, and a
+# venv is cheap to rebuild because the wheels are cached.
+if [[ "${FRESH:-0}" == "1" && -d "${VENV}" ]]; then
+    echo "── FRESH=1: removing ${VENV} ──"
+    rm -rf "${VENV}"
+fi
 if [[ ! -d "${VENV}" ]]; then
     echo "── creating ${VENV} ──"
     python -m venv "${VENV}"
@@ -94,17 +108,48 @@ echo
 echo "── module-provided versions (these are pinned) ──"
 python - "$CONSTRAINTS" <<'PYEOF'
 import importlib, sys
+
+# EVERY MODULE-PROVIDED PACKAGE, NOT JUST THE OBVIOUS SEVEN. pip cannot
+# uninstall a package that lives in a cluster module, and the module path sits
+# ahead of the venv, so installing a newer version into the venv changes
+# nothing at import time and breaks the package that asked for it. The first
+# attempt pinned numpy, pandas, scipy, anndata, h5py, matplotlib and torch,
+# and pip then installed regex 2026.9.29 beside the module's 2024.5.15, chose
+# transformers 5.19 because the metadata was satisfied, and transformers
+# refused to import against the regex actually on the path.
+#
+# regex, idna, click and rich come from Python-bundle-PyPI; protobuf from
+# protobuf-python. All four were in that "Not uninstalling" list, so all four
+# are pinned here, and pip is left to find versions of transformers and
+# datasets that fit rather than being told which.
+MODULE_PROVIDED = (
+    "numpy", "pandas", "scipy", "anndata", "h5py", "matplotlib", "torch",
+    "protobuf", "regex", "idna", "click", "rich", "requests", "attrs",
+    "psutil", "joblib", "filelock", "fsspec", "packaging", "yaml",
+)
+#: Import name -> pip name, where they differ.
+PIP_NAME = {"yaml": "pyyaml", "protobuf": "protobuf"}
+
 pins = []
-for dist in ("numpy", "pandas", "scipy", "anndata", "h5py", "matplotlib",
-             "torch"):
+for dist in MODULE_PROVIDED:
     try:
         m = importlib.import_module(dist)
     except Exception as exc:                                   # noqa: BLE001
         print(f"  {dist:<12} not importable ({type(exc).__name__}); not pinned")
         continue
-    print(f"  {dist:<12} {m.__version__}")
-    pins.append(f"{dist}=={m.__version__}")
-pins += ["zarr<3", "numcodecs<0.14", "xarray<2025"]
+    version = getattr(m, "__version__", None)
+    if version is None:
+        print(f"  {dist:<12} no __version__; not pinned")
+        continue
+    name = PIP_NAME.get(dist, dist)
+    print(f"  {name:<12} {version}")
+    pins.append(f"{name}=={version}")
+
+# pyarrow 17+ raises on numpy 1.x AT IMPORT and does not say so in its
+# metadata, so pinning numpy does not stop pip choosing pyarrow 26. This is
+# the one version bound that has to be named rather than read, because nothing
+# on the path declares it.
+pins += ["pyarrow<17", "zarr<3", "numcodecs<0.14", "xarray<2025"]
 open(sys.argv[1], "w").write("\n".join(pins) + "\n")
 PYEOF
 
@@ -186,10 +231,14 @@ for name in ("Geneformer-V2-104M", "Geneformer-V2-316M",
 # The 30M dictionaries, unpickled rather than stat-ed: these are the ones a V1
 # run must use, and the gene name dictionary is also our symbol-to-Ensembl map,
 # so its size is worth printing as a sanity check on coverage.
-dicts = repo / "gene_dictionaries_30m"
+# Under geneformer/, not at the repo root. build/lib/ holds a second copy
+# left by the wheel build; the package directory is the one pip installed
+# from, so it is the one that matters.
+dicts = repo / "geneformer" / "gene_dictionaries_30m"
 for name in ("token_dictionary_gc30M.pkl",
              "gene_median_dictionary_gc30M.pkl",
-             "gene_name_id_dict_gc30M.pkl"):
+             "gene_name_id_dict_gc30M.pkl",
+             "ensembl_mapping_dict_gc30M.pkl"):
     path = dicts / name
     if not path.is_file():
         print(f"  {name:<34} MISSING")
@@ -211,5 +260,5 @@ PYEOF
 
 echo
 echo "Done. Checkpoint:    ${REPO}/Geneformer-V1-10M"
-echo "      Dictionaries: ${REPO}/gene_dictionaries_30m  (gc30M, NOT gc104M)"
+echo "      Dictionaries: ${REPO}/geneformer/gene_dictionaries_30m  (gc30M, NOT gc104M)"
 echo "      Environment:  ${VENV}"

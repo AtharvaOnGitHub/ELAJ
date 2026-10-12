@@ -139,7 +139,7 @@ while [ $# -gt 0 ]; do
         --reuse-baselines|--checkpoint|--baseline-vocabulary|\
         --out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
-        --splits|--methods|--gene-policies)
+        --splits|--methods|--gene-policies|--external-latent)
             # nargs="+": take every following bare word.
             EXTRA+=("$1"); shift
             while [ $# -gt 0 ] && [[ "$1" != -* ]]; do

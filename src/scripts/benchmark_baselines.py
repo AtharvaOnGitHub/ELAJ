@@ -90,6 +90,14 @@ def parse_args() -> argparse.Namespace:
                         "whose package is missing is skipped and reported.")
     p.add_argument("--gene-policies", nargs="+", default=["all"],
                    help="all | intersection | hvg<N>. Each is a separate pass.")
+    p.add_argument("--external-latent", nargs="+", default=[],
+                   help="Directories written by scripts/embed_pretrained.py, "
+                        "each holding latent.npy and manifest.json. For models "
+                        "that cannot run in this interpreter: Geneformer, "
+                        "scGPT and scBERT each need their own venv. The row "
+                        "name and the gene coverage come from the manifest, "
+                        "and the rows are joined to the corpus by dataset "
+                        "index rather than by assuming a shared order.")
     p.add_argument("--baseline-vocabulary", default=None,
                    help="A vocabulary.json built WITHOUT --drop-unassigned, "
                         "giving the baselines every measured gene instead of "
@@ -338,6 +346,30 @@ def main() -> None:
                         settings=settings, fit_on="train")
         report.add(scorer.score(emb, corpus, gene_policy="native"))
         report.record_settings("elaj", "native", emb.settings, fit_on="train")
+
+    # ── latents computed elsewhere, in their own environments ──────────────
+    # Scored against `corpus` rather than `baseline_corpus`: the labels are
+    # identical and a pretrained model reads its OWN gene vocabulary, so
+    # neither gene axis here describes what it saw. Its coverage of our genes
+    # is in the manifest instead.
+    for directory in args.external_latent:
+        from endo_model.evaluation.baselines.external_latent import ExternalLatent
+
+        try:
+            external = ExternalLatent.read(Path(directory))
+            emb = external.embedding_for(corpus)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.error("external latent %s: %s", directory, exc)
+            report.record_skip(f"{Path(directory).name}/native", str(exc))
+            continue
+        logger.info("── %s (external, %d dims, fitted on %s) ──",
+                    emb.method, emb.width, emb.fit_on or "the scored cells")
+        report.add(scorer.score(emb, corpus, gene_policy="native"))
+        report.record_settings(emb.method, "native", emb.settings,
+                               fit_on=emb.fit_on)
+        report.write_csv(out / "benchmark.csv")
+        report.write_markdown(out / "benchmark.md")
+        report.write_settings(out / "settings.json")
 
     # ── every policy x every method ─────────────────────────────────────────
     fit_tag = args.fit_split or ""

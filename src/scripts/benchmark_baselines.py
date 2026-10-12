@@ -160,7 +160,7 @@ def _method_kwargs(name: str, args) -> dict:
     return {k: v for k, v in given.items() if v is not None}
 
 
-def _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
+def build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,
                   splits, orders, obs_columns, gene_names, names):
     """One CorpusMatrix over the sampler order of each split, concatenated."""
     from endo_model.evaluation.baselines import CorpusMatrix, extract_corpus_matrix
@@ -275,7 +275,7 @@ def main() -> None:
         )
 
     # ── the corpus: one CorpusMatrix over the same cells, in the same order ──
-    corpus = _build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab,
+    corpus = build_corpus(root, exp_cfg, train_cfg, data_cfg, vocab,
                            study_configs, args.splits, orders, obs_columns,
                            gene_names, names)
     logger.info("Corpus: %d cells x %d genes, %d studies, splits %s",
@@ -295,7 +295,7 @@ def main() -> None:
         wide_axis = WideGeneAxis(str(Path(root) / args.baseline_vocabulary)
                                  if not Path(args.baseline_vocabulary).is_absolute()
                                  else args.baseline_vocabulary)
-        baseline_corpus = _build_corpus(
+        baseline_corpus = build_corpus(
             root, exp_cfg, train_cfg, data_cfg, wide_axis.vocabulary,
             study_configs, args.splits, orders, obs_columns,
             wide_axis.gene_names, names,
@@ -312,7 +312,7 @@ def main() -> None:
     if args.fit_split:
         fit_vocab = wide_axis.vocabulary if wide_axis else vocab
         fit_gene_names = wide_axis.gene_names if wide_axis else gene_names
-        fit_corpus = _build_corpus(root, exp_cfg, train_cfg, data_cfg, fit_vocab,
+        fit_corpus = build_corpus(root, exp_cfg, train_cfg, data_cfg, fit_vocab,
                                    study_configs, [args.fit_split], {},
                                    obs_columns, fit_gene_names, names)
         logger.info("Fit corpus: %d cells x %d genes, %d studies, split %s",

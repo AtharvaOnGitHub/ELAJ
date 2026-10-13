@@ -48,3 +48,62 @@ class TestIncrementalChunkSize:
         speedup: about sixteen times on the axis that stalled."""
         old = int(1e9 / (30962 * 4))
         assert old / incremental_chunk_size(16) > 10
+
+
+class TestChunkedFitFeedsTheInductiveProjection:
+    """The chunked fit must leave behind what pca_projection reads.
+
+    WHY THIS IS TESTED SEPARATELY FROM THE SIZING. Every inductive PCA row goes
+    through pca_projection, which reads `fitted.varm["PCs"]` and
+    `fitted.X.mean(axis=0)`. Until the 30,962-gene axis, every run took the
+    EXACT path, so the chunked path had never fed that function. A chunked fit
+    that stored components elsewhere would be a crash hours into a job, or a
+    wrong number.
+    """
+
+    @staticmethod
+    def small_corpus(n_cells=400, n_genes=120, seed=0):
+        import anndata
+        import numpy as np
+        import scipy.sparse
+
+        from endo_model.evaluation.baselines.methods import log_normalise
+
+        rng = np.random.default_rng(seed)
+        counts = (rng.random((n_cells, n_genes)) < 0.2) * rng.poisson(
+            5, (n_cells, n_genes))
+        adata = anndata.AnnData(
+            X=scipy.sparse.csr_matrix(counts).astype("float32"))
+        log_normalise(adata)
+        return adata
+
+    def test_a_chunked_fit_populates_the_components(self):
+        from endo_model.evaluation.baselines.methods import pca
+
+        fit = self.small_corpus()
+        pca(fit, n_comps=8, seed=24, max_dense_gb=1e-9)   # forces chunking
+        assert "PCs" in fit.varm
+        assert fit.varm["PCs"].shape == (fit.n_vars, 8)
+
+    def test_projection_after_a_chunked_fit_reproduces_the_fit_embedding(self):
+        """Project the fit's OWN first rows: the answer is already known."""
+        import numpy as np
+
+        from endo_model.evaluation.baselines.methods import pca, pca_projection
+
+        fit = self.small_corpus()
+        embedded = pca(fit, n_comps=8, seed=24, max_dense_gb=1e-9)
+        query = fit[:40].copy()
+        projected = pca_projection(fit, query)
+        assert projected.shape == (40, 8)
+        np.testing.assert_allclose(projected, embedded[:40], atol=1e-4)
+
+    def test_a_chunked_fit_leaves_the_matrix_sparse(self):
+        """It exists to avoid densifying; densifying anyway would defeat it."""
+        import scipy.sparse
+
+        from endo_model.evaluation.baselines.methods import pca
+
+        fit = self.small_corpus()
+        pca(fit, n_comps=8, seed=24, max_dense_gb=1e-9)
+        assert scipy.sparse.issparse(fit.X)

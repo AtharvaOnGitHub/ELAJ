@@ -317,11 +317,23 @@ def dense_budget_gb() -> float:
 #: the total is `N * c * n_features`: LINEAR IN THE CHUNK SIZE. A smaller chunk
 #: is not a memory compromise, it is less work.
 #:
-#: The first version sized the chunk to about 1 GB of memory, which on the
-#: 30,962-gene axis gave 8,074 rows, so 1.16M x 8,074 x 30,962 is roughly
-#: 2.9e14 operations. Job 57265857 spent eleven and a half hours there and had
-#: not finished PCA, with scVI and scANVI still to run. At 512 rows the same
-#: fit is about 1.8e13, a factor of sixteen less.
+#: MEASURED, not assumed. On 8,000 cells x 2,000 genes at 16 components:
+#:
+#:     chunk   256    4.03 s      984 ps per (N*c*G) unit
+#:     chunk   512    4.86 s      593 ps
+#:     chunk  1024    8.57 s      523 ps
+#:     chunk  2048   14.72 s      449 ps
+#:
+#: Doubling from 512 costs 1.76x then 1.72x, so linear in the chunk as the
+#: model says. Below 512 it flattens -- 256 buys only 17% -- because per-chunk
+#: overhead and the k^2 term take over, which is why the floor sits there.
+#:
+#: Extrapolating at 593 ps: the real fit is 1.16M x 512 x 30,962 = 1.84e13
+#: units, about 3 hours on a 2019 Intel Mac and likely 1-2 on eight cluster
+#: cores. The first version sized the chunk to ~1 GB of MEMORY, which on the
+#: 30,962-gene axis gave 8,074 rows and so 2.9e14 units: 10-18 cluster hours.
+#: Job 57265857 spent 11.5 hours there without finishing, with scVI and scANVI
+#: still to run. The model reproducing that failure is the evidence for it.
 #:
 #: Below about `k` rows the stacked components start to dominate and the cost
 #: turns back upward as `k^2 * N / c`, so the optimum is near `c = k`. 32 times
@@ -329,6 +341,14 @@ def dense_budget_gb() -> float:
 #: sklearn's own requirement is merely `c >= k`.
 CHUNK_ROWS_PER_COMPONENT = 32
 MIN_CHUNK_ROWS = 512
+
+SECONDS_PER_CHUNK_UNIT = 593e-12
+"""Seconds per unit of `n_obs * chunk_size * n_vars`, at chunk 512.
+
+The 593 ps row of the table above, used to predict a fit's runtime in the log.
+Timed on one core of a 2019 Intel Mac, so the cluster should beat it; it is
+there to separate "slow" from "hung", not to be accurate.
+"""
 
 
 def incremental_chunk_size(n_comps: int) -> int:
@@ -364,12 +384,23 @@ def pca(adata, n_comps: int, seed: int,
         return np.asarray(adata.obsm["X_pca"], dtype=np.float32)
 
     chunk_size = incremental_chunk_size(n)
+    # PREDICT THE RUNTIME, BECAUSE THE FIT ITSELF IS SILENT. scanpy's chunked
+    # PCA logs nothing between start and finish, so on 13 October 2026 a fit
+    # that was merely slow was indistinguishable from one that had hung, and
+    # eleven and a half hours went by before anyone could tell. The rate is
+    # measured (see CHUNK_ROWS_PER_COMPONENT); a prediction in the log turns
+    # "stuck for hours" into "on schedule" or "something is wrong".
+    units = adata.n_obs * chunk_size * adata.n_vars
+    predicted_hours = units * SECONDS_PER_CHUNK_UNIT / 3600.0
     logger.info(
         "PCA: chunked at %d cells over %d chunks, because %d x %d would "
         "densify to %.1f GB (limit %.1f). IncrementalPCA, not the exact "
-        "decomposition.",
+        "decomposition. EXPECT ROUGHLY %.1f h (%.1e units at %.0f ps each, "
+        "timed on one 2019 Intel core, so faster here); no further log line "
+        "until it finishes.",
         chunk_size, -(-adata.n_obs // chunk_size), adata.n_obs, adata.n_vars,
-        dense_gb, max_dense_gb,
+        dense_gb, max_dense_gb, predicted_hours, units,
+        SECONDS_PER_CHUNK_UNIT * 1e12,
     )
     sc.pp.pca(adata, n_comps=n, random_state=seed,
               chunked=True, chunk_size=chunk_size)

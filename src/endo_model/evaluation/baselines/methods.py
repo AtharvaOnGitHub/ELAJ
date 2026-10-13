@@ -308,6 +308,34 @@ def dense_budget_gb() -> float:
         return FALLBACK_DENSE_GB
 
 
+#: Chunk rows per retained component, and a floor.
+#:
+#: SIZED FOR ARITHMETIC, NOT MEMORY, WHICH IS WHAT THE FIRST VERSION GOT
+#: WRONG. `IncrementalPCA.partial_fit` stacks the running components onto each
+#: chunk and takes an SVD of `(k + c) x n_features`, costing about
+#: `c^2 * n_features` for a chunk of `c` rows, and there are `N / c` chunks. So
+#: the total is `N * c * n_features`: LINEAR IN THE CHUNK SIZE. A smaller chunk
+#: is not a memory compromise, it is less work.
+#:
+#: The first version sized the chunk to about 1 GB of memory, which on the
+#: 30,962-gene axis gave 8,074 rows, so 1.16M x 8,074 x 30,962 is roughly
+#: 2.9e14 operations. Job 57265857 spent eleven and a half hours there and had
+#: not finished PCA, with scVI and scANVI still to run. At 512 rows the same
+#: fit is about 1.8e13, a factor of sixteen less.
+#:
+#: Below about `k` rows the stacked components start to dominate and the cost
+#: turns back upward as `k^2 * N / c`, so the optimum is near `c = k`. 32 times
+#: `k` sits well clear of that while keeping the per-chunk estimate stable;
+#: sklearn's own requirement is merely `c >= k`.
+CHUNK_ROWS_PER_COMPONENT = 32
+MIN_CHUNK_ROWS = 512
+
+
+def incremental_chunk_size(n_comps: int) -> int:
+    """Rows per IncrementalPCA chunk, for `n_comps` retained components."""
+    return max(MIN_CHUNK_ROWS, CHUNK_ROWS_PER_COMPONENT * int(n_comps))
+
+
 def pca(adata, n_comps: int, seed: int,
         max_dense_gb: float | None = None) -> np.ndarray:
     """PCA on ``adata.X`` (assumed log-normalised). Returns ``(n, n_comps)``.
@@ -335,14 +363,13 @@ def pca(adata, n_comps: int, seed: int,
         sc.pp.pca(adata, n_comps=n, random_state=seed)
         return np.asarray(adata.obsm["X_pca"], dtype=np.float32)
 
-    # A chunk holds chunk_size x n_vars floats. Sized to ~1 GB, which keeps
-    # the peak far below the allocation while staying well above n_comps
-    # (IncrementalPCA needs at least n_comps rows per chunk).
-    chunk_size = max(n + 1, int(1e9 / (adata.n_vars * 4)))
+    chunk_size = incremental_chunk_size(n)
     logger.info(
-        "PCA: chunked at %d cells, because %d x %d would densify to %.1f GB "
-        "(limit %.1f). IncrementalPCA, not the exact decomposition.",
-        chunk_size, adata.n_obs, adata.n_vars, dense_gb, max_dense_gb,
+        "PCA: chunked at %d cells over %d chunks, because %d x %d would "
+        "densify to %.1f GB (limit %.1f). IncrementalPCA, not the exact "
+        "decomposition.",
+        chunk_size, -(-adata.n_obs // chunk_size), adata.n_obs, adata.n_vars,
+        dense_gb, max_dense_gb,
     )
     sc.pp.pca(adata, n_comps=n, random_state=seed,
               chunked=True, chunk_size=chunk_size)

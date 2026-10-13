@@ -67,6 +67,15 @@
 #            double, chunked PCA is slower than the exact decomposition, and
 #            the second corpus build reopens every .h5ad. Ask 20 hours.
 #
+#   AND 20 HOURS WAS NOT ENOUGH THE FIRST TIME, FOR A FIXABLE REASON. Job
+#   57265857 spent 11.5 hours inside one IncrementalPCA fit without
+#   finishing, because the chunk size was sized to ~1 GB of memory and
+#   IncrementalPCA's total cost is LINEAR in the chunk size: see
+#   incremental_chunk_size in evaluation/baselines/methods.py. On the
+#   30,962-gene axis that gave 8,074 rows where 512 was wanted, so roughly
+#   sixteen times the arithmetic. Fixed; 20 hours should now be ample, and
+#   the first chunked PCA to finish should have its time recorded here.
+#
 #   sbatch --mem=360G --time=20:00:00 \
 #       data_collation/scripts/benchmark_baselines.sh m6_drain --no-elaj \
 #       --fit-split train --methods pca scvi scanvi \

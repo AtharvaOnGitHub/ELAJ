@@ -79,8 +79,8 @@
 #   sbatch --mem=360G --time=20:00:00 \
 #       data_collation/scripts/benchmark_baselines.sh m6_drain --no-elaj \
 #       --fit-split train --methods pca scvi scanvi \
-#       --baseline-vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_wide.json \
-#       --out outputs/benchmarks/wide_m6_drain_ep13
+#       --baseline-vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_axis.json \
+#       --out outputs/benchmarks/axis_m6_drain
 #
 # If the QoS refuses 20 hours, drop scanvi: it cost 6,554 s of the measured
 # run and its cell-family score is supervised and not comparable anyway.

@@ -21,9 +21,11 @@
 # install_geneformer.sh, which runs on a login node because compute nodes have
 # no outbound internet.
 #
-# THE WIDE GENE AXIS, DELIBERATELY. vocabulary.json is the pathway-annotated
-# half of the measured transcriptome, 15,495 genes of 30,962, filtered because
-# ELAJ's group encoder needs every gene in a coherent group. Handing that to a
+# THE WIDE GENE AXIS, DELIBERATELY. vocabulary.json holds 15,496 genes of the
+# 30,962 measured, because UnionCutStrategy drops any gene with no Reactome or
+# GO hierarchy entry. vocabulary_axis.json is the full axis, built by
+# build_gene_axis.sh, whose groups are meaningless chunks -- which is fine,
+# because no baseline reads them. Handing that to a
 # competitor gives it our curation, which is the asymmetry we found in the scVI
 # comparison on 12 October 2026. Geneformer reads its own 25,424-gene
 # vocabulary regardless; the only question is how much of it we offer, and the
@@ -81,7 +83,7 @@ echo ""
 echo "Model:      ${MODEL}"
 echo "Repository: ${REPO}"
 echo "Run:        ${RUN}"
-echo "Gene axis:  ${PROCESSED}/vocabulary_wide.json"
+echo "Gene axis:  ${PROCESSED}/vocabulary_axis.json"
 mkdir -p "${WORK}"
 echo "Work:       ${WORK}"
 echo "Out:        ${OUT}"
@@ -92,7 +94,7 @@ python -u -m scripts.embed_pretrained \
     --run "${RUN}" \
     --model "${MODEL}" \
     --repo "${REPO}" \
-    --vocabulary "${PROCESSED}/vocabulary_wide.json" \
+    --vocabulary "${PROCESSED}/vocabulary_axis.json" \
     --work "${WORK}" \
     --nproc 8 \
     --batch-size 64 \

@@ -45,7 +45,7 @@ pip install --quiet torch --index-url https://download.pytorch.org/whl/cu124
 
 echo "── shared: what our corpus code needs ──"
 # endo_model.data.dataset and the CorpusMatrix extractor, nothing more.
-pip install --quiet "numpy<2" scipy pandas anndata h5py pyyaml tqdm
+pip install --quiet "numpy<2" scipy pandas anndata h5py pyyaml tqdm "huggingface_hub>=0.23"
 
 case "${MODEL}" in
   geneformer)
@@ -66,12 +66,33 @@ case "${MODEL}" in
     CHECK="geneformer transformers datasets"
     ;;
   scgpt)
-    # No flash-attn: scGPT falls back to torch's own attention, which is
-    # correct and slower, and building flash-attn against a pip torch is a
-    # day we do not have.
-    pip install --quiet scgpt --no-deps
-    pip install --quiet torchtext==0.18.0 2>/dev/null || true
-    pip install --quiet scanpy scib einops numba "scikit-misc" torchtext || true
+    # No flash-attn, deliberately: scGPT made it an optional dependency, and
+    # building it against a pip torch is a day we do not have. embed_data is
+    # called with use_fast_transformer=False, which is correct and slower.
+    printf 'numpy<2\ntorch==%s\n' \
+        "$(python -c 'import torch; print(torch.__version__)')" > "${VENV}/constraints.txt"
+    pip install --quiet scgpt scanpy einops -c "${VENV}/constraints.txt"
+
+    # WEIGHTS, AND A PROVENANCE CAVEAT WORTH WRITING DOWN. scGPT distributes
+    # the whole-human checkpoint by Google Drive, which a login node cannot
+    # fetch. This is a THIRD-PARTY HuggingFace mirror, so the sha256 of
+    # best_model.pt is printed below and belongs in the Methods section: if the
+    # canonical file is ever checked, that is what it is checked against.
+    # The continual-pretrained checkpoint is NOT used -- more pretraining data
+    # means more overlap with our donors, and whole-human is what a reader
+    # reproduces.
+    mkdir -p "${MODELS}/scGPT"
+    python - "${MODELS}/scGPT" <<'PYEOF'
+import sys
+from huggingface_hub import snapshot_download
+path = snapshot_download(repo_id="MohamedMabrouk/scGPT", repo_type="model",
+                         local_dir=sys.argv[1],
+                         allow_patterns=["best_model.pt", "vocab.json",
+                                         "args.json"])
+print(f"  downloaded to {path}")
+PYEOF
+    echo "  sha256 of best_model.pt (record this):"
+    sha256sum "${MODELS}/scGPT/best_model.pt" || shasum -a 256 "${MODELS}/scGPT/best_model.pt"
     CHECK="scgpt"
     ;;
   scbert)

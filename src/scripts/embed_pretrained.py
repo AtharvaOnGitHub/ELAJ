@@ -48,7 +48,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("elaj.embed_pretrained")
 
-MODELS = ("geneformer",)
+MODELS = ("geneformer", "scgpt")
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +95,12 @@ def build_embedder(args, work: Path):
         return GeneformerEmbedder(
             repo=args.repo, work=work, emb_layer=args.emb_layer,
             batch_size=args.batch_size, nproc=args.nproc,
+        )
+    if args.model == "scgpt":
+        from endo_model.evaluation.baselines.pretrained import ScGPTEmbedder
+
+        return ScGPTEmbedder(
+            repo=args.repo, work=work, batch_size=args.batch_size,
         )
     raise ValueError(f"unknown model {args.model!r}; known: {list(MODELS)}")
 

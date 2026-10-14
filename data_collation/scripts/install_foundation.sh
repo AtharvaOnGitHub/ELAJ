@@ -3,7 +3,7 @@
 #
 #   bash data_collation/scripts/install_foundation.sh geneformer
 #   bash data_collation/scripts/install_foundation.sh scgpt
-#   bash data_collation/scripts/install_foundation.sh scbert
+#   bash data_collation/scripts/install_foundation.sh scimilarity
 #
 # Login node, once per model. Safe to re-run. FRESH=1 rebuilds the venv.
 #
@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-MODEL="${1:?usage: install_foundation.sh <geneformer|scgpt|scbert>}"
+MODEL="${1:?usage: install_foundation.sh <geneformer|scgpt|scimilarity>}"
 MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
 ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
 VENV="${ENVS}/fm_${MODEL}"
@@ -119,13 +119,31 @@ PYEOF
     sha256sum "${MODELS}/scGPT/best_model.pt"
     CHECK="scgpt"
     ;;
-  scbert)
-    # performer-pytorch is scBERT's attention; the repo itself is not on PyPI,
-    # so the model code is vendored under ${MODELS}/scBERT by the fetch step.
-    pip install --quiet performer-pytorch einops local-attention scanpy
-    CHECK="performer_pytorch"
+  scimilarity)
+    # Zero-shot cell embedding is what SCimilarity is FOR, so there is a
+    # documented call and nothing to improvise: align_dataset to the model's
+    # gene order, lognorm_counts, get_embeddings.
+    printf 'numpy<2\ntorch==%s\n' \
+        "$(python -c 'import torch; print(torch.__version__)')" > "${VENV}/constraints.txt"
+    pip install --quiet scimilarity -c "${VENV}/constraints.txt"
+
+    # Weights on Zenodo over plain HTTPS, which a login node can fetch -- no
+    # Google Drive, no SharePoint, no access form. Record 10685499.
+    mkdir -p "${MODELS}/SCimilarity"
+    if compgen -G "${MODELS}/SCimilarity/*/" > /dev/null; then
+        echo "  model directory already present; not re-fetching"
+    else
+        echo "  fetching from Zenodo 10685499 ..."
+        curl -L --fail --retry 3 -o "${MODELS}/SCimilarity/model.tar.gz" \
+          "https://zenodo.org/records/10685499/files/model_v1.1.tar.gz?download=1"
+        tar -xzf "${MODELS}/SCimilarity/model.tar.gz" -C "${MODELS}/SCimilarity"
+        rm -f "${MODELS}/SCimilarity/model.tar.gz"
+    fi
+    echo "  model directory holds:"
+    find "${MODELS}/SCimilarity" -maxdepth 2 -type f | head -12
+    CHECK="scimilarity"
     ;;
-  *) echo "unknown model '${MODEL}'" >&2; exit 2 ;;
+  *) echo "unknown model '${MODEL}'; known: geneformer scgpt scimilarity" >&2; exit 2 ;;
 esac
 
 echo
@@ -164,6 +182,14 @@ if "scgpt" in sys.argv[1].split():
     else:
         from scgpt.tasks import embed_data            # noqa: F401
         print("  embed_data           importable")
+if "scimilarity" in sys.argv[1].split():
+    try:
+        from scimilarity import CellEmbedding                  # noqa: F401
+        from scimilarity.utils import align_dataset, lognorm_counts  # noqa: F401
+        print("  scimilarity      CellEmbedding and utils importable")
+    except Exception as exc:                                   # noqa: BLE001
+        ok = False
+        print(f"  scimilarity      UNREACHABLE ({type(exc).__name__}: {exc})")
 if "geneformer" in sys.argv[1].split():
     try:
         from geneformer import EmbExtractor, TranscriptomeTokenizer  # noqa: F401

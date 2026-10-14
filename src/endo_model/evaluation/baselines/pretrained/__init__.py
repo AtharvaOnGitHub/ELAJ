@@ -16,5 +16,8 @@ contract that makes that safe.
 
 from endo_model.evaluation.baselines.pretrained.geneformer import GeneformerEmbedder
 from endo_model.evaluation.baselines.pretrained.scgpt import ScGPTEmbedder
+from endo_model.evaluation.baselines.pretrained.scimilarity import (
+    ScimilarityEmbedder,
+)
 
-__all__ = ["GeneformerEmbedder", "ScGPTEmbedder"]
+__all__ = ["GeneformerEmbedder", "ScGPTEmbedder", "ScimilarityEmbedder"]

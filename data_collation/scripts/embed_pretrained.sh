@@ -54,8 +54,8 @@ ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
 case "${MODEL}" in
     geneformer) REPO="${MODELS}/Geneformer"  ;;
     scgpt)      REPO="${MODELS}/scGPT"        ;;
-    scbert)     REPO="${MODELS}/scBERT"       ;;
-    *) echo "unknown model '${MODEL}'; known: geneformer scgpt scbert" >&2; exit 2 ;;
+    scimilarity) REPO="${MODELS}/SCimilarity" ;;
+    *) echo "unknown model '${MODEL}'; known: geneformer scgpt scimilarity" >&2; exit 2 ;;
 esac
 VENV="${ENVS}/fm_${MODEL}"
 

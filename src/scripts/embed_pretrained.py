@@ -48,7 +48,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("elaj.embed_pretrained")
 
-MODELS = ("geneformer", "scgpt")
+MODELS = ("geneformer", "scgpt", "scimilarity")
 
 
 def parse_args() -> argparse.Namespace:
@@ -102,6 +102,15 @@ def build_embedder(args, work: Path):
         return ScGPTEmbedder(
             repo=args.repo, work=work, batch_size=args.batch_size,
         )
+    if args.model == "scimilarity":
+        from endo_model.evaluation.baselines.pretrained import (
+            ScimilarityEmbedder,
+        )
+
+        # buffer_size, not the forward batch: SCimilarity embeds in buffers of
+        # 10,000 by default and --batch-size here is in units of cells either
+        # way, so the wrapper's 64 would be needlessly slow.
+        return ScimilarityEmbedder(repo=args.repo, work=work)
     raise ValueError(f"unknown model {args.model!r}; known: {list(MODELS)}")
 
 

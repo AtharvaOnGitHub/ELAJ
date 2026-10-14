@@ -58,8 +58,6 @@ case "${MODEL}" in
     *) echo "unknown model '${MODEL}'; known: geneformer scgpt scbert" >&2; exit 2 ;;
 esac
 VENV="${ENVS}/fm_${MODEL}"
-case "${MODEL}" in
-esac
 
 OUT="outputs/benchmarks/latents/${MODEL}"
 # On the project filesystem, not /scratch, which this script has never

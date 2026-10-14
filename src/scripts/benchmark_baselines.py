@@ -86,7 +86,13 @@ def parse_args() -> argparse.Namespace:
                    choices=["train", "val", "test"])
     p.add_argument("--methods", nargs="+",
                    default=["pca", "harmony", "scanorama", "scvi", "scanvi"],
-                   help="Any of: pca harmony scanorama scvi scanvi. A method "
+                   help="Any of: pca harmony scanorama scvi scanvi, or the "
+                        "single word 'none' to fit nothing. Use 'none' for a "
+                        "pass that only scores --external-latent rows beside "
+                        "a --reuse-baselines file: naming methods that are all "
+                        "being reused achieves nothing and risks a tag "
+                        "mismatch making them pending, which is how a "
+                        "1.16M-cell fit corpus got built for nobody. A method "
                         "whose package is missing is skipped and reported.")
     p.add_argument("--gene-policies", nargs="+", default=["all"],
                    help="all | intersection | hvg<N>. Each is a separate pass.")
@@ -161,6 +167,24 @@ def _method_kwargs(name: str, args) -> dict:
     return {k: v for k, v in given.items() if v is not None}
 
 
+NO_METHODS = "none"
+"""`--methods none`: fit nothing, score only what is reused or handed in.
+
+The combination this exists for is `--reuse-baselines` plus
+`--external-latent`, where every fitted row already exists and the only work is
+scoring a pretrained model's latent. Before it, that pass had to name the
+methods it was NOT going to run, so that `pending_keys` could tick them off,
+and a key that did not match the reuse file turned them all pending again.
+"""
+
+
+def requested_methods(args) -> list[str]:
+    """`args.methods`, with the `none` sentinel resolved to an empty list."""
+    if [m.strip().lower() for m in args.methods] == [NO_METHODS]:
+        return []
+    return list(args.methods)
+
+
 def pending_keys(args, wide_axis, already) -> list[str]:
     """Row keys this run would compute, after `--reuse-baselines` is applied.
 
@@ -177,7 +201,7 @@ def pending_keys(args, wide_axis, already) -> list[str]:
     keys = []
     for policy_name in args.gene_policies:
         tag = (wide_axis.tag(policy_name) if wide_axis else policy_name)
-        for method_name in args.methods:
+        for method_name in requested_methods(args):
             key = "/".join(p for p in (method_name, tag, fit_tag) if p)
             if key not in already:
                 keys.append(key)
@@ -430,7 +454,7 @@ def main() -> None:
         policy_tag = wide_axis.tag(policy.name) if wide_axis else policy.name
         logger.info("Gene policy %-12s keeps %6d of %d genes",
                     policy_tag, restricted.n_genes, baseline_corpus.n_genes)
-        for method_name in args.methods:
+        for method_name in requested_methods(args):
             method = build_method(method_name, seed=args.seed,
                                   **_method_kwargs(method_name, args))
             key = "/".join(p for p in (method.name, policy_tag, fit_tag) if p)

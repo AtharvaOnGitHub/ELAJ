@@ -69,3 +69,36 @@ class TestPendingKeys:
                             None, set())
         assert keys == ["pca/all/train", "scvi/all/train",
                         "pca/hvg2000/train", "scvi/hvg2000/train"]
+
+
+class TestNoMethods:
+    """`--methods none`: the reuse-plus-external pass, with nothing to fit.
+
+    WHY IT EXISTS. A pass that only scores an external latent beside a reuse
+    file used to have to NAME the methods it was not going to run, so that
+    pending_keys could tick them off against the file. On 14 October 2026 the
+    row tags did not match the file -- the command omitted
+    --baseline-vocabulary, so keys came out `pca/all/train` against the file's
+    `pca/all30962/train` -- all three went pending, the 1,162,786-cell fit
+    corpus was built for nobody, and the job was OOM-killed.
+    """
+
+    def test_none_means_nothing_is_pending(self):
+        assert pending_keys(args_for(["none"]), None, set()) == []
+
+    def test_none_is_case_insensitive_and_stripped(self):
+        assert pending_keys(args_for([" NONE "]), None, set()) == []
+
+    def test_nothing_is_pending_even_with_several_policies(self):
+        assert pending_keys(args_for(["none"], ("all", "hvg2000")),
+                            None, set()) == []
+
+    def test_nothing_is_pending_even_with_a_wide_axis(self):
+        """The tag cannot mismatch when no method is named."""
+        assert pending_keys(args_for(["none"]), FakeAxis(30962), set()) == []
+
+    def test_a_method_literally_called_none_is_not_special_cased_away(self):
+        """Only the SOLE value 'none' is the sentinel, so a list containing it
+        beside real methods is a user error rather than a silent no-op."""
+        keys = pending_keys(args_for(["none", "pca"]), None, set())
+        assert keys == ["none/all/train", "pca/all/train"]

@@ -56,25 +56,23 @@
 # for it. --baseline-vocabulary doubles the baselines' gene axis to 30,962 and
 # builds the corpus TWICE, once per axis, so both numbers move:
 #
-#   memory   the 15,496-gene inductive pass peaked at 168.80 GB inside 240G
-#            (job 56818203). The sparse corpora are the bulk of that and the
-#            unassigned half is lower-expression, so they grow by about 1.6x
-#            rather than 2x. PCA goes the other way: at 30,962 genes the fit
-#            corpus densifies to 144 GB, over DENSE_FRACTION of any allocation
-#            worth asking for, so it switches to chunked IncrementalPCA and
-#            its own peak drops to roughly 1 GB. Estimate 220-300 GB; ask 360G.
-#   wall     5:52:22 measured. scVI's and scANVI's first and last layers
-#            double, chunked PCA is slower than the exact decomposition, and
-#            the second corpus build reopens every .h5ad. Ask 20 hours.
+#   MEASURED, job 57362837, the 30,962-gene inductive pass with pca, scvi
+#   and scanvi, --no-elaj:
 #
-#   AND 20 HOURS WAS NOT ENOUGH THE FIRST TIME, FOR A FIXABLE REASON. Job
-#   57265857 spent 11.5 hours inside one IncrementalPCA fit without
-#   finishing, because the chunk size was sized to ~1 GB of memory and
-#   IncrementalPCA's total cost is LINEAR in the chunk size: see
-#   incremental_chunk_size in evaluation/baselines/methods.py. On the
-#   30,962-gene axis that gave 8,074 rows where 512 was wanted, so roughly
-#   sixteen times the arithmetic. Fixed; 20 hours should now be ample, and
-#   the first chunked PCA to finish should have its time recorded here.
+#       three corpus builds (narrow, wide, wide fit)      0:12
+#       pca, chunked IncrementalPCA over 2,269 chunks     2:41
+#       scvi, 7 epochs                                    1:03
+#       scanvi, 7 + 20 epochs                             2:41
+#       total                                             6:39
+#       peak memory                                     201 GB
+#
+#   So 360G and 20 hours are both comfortable, with 44% of the memory and
+#   two thirds of the wall unused. 240G would fit; 128G would not.
+#
+#   The estimates these replace were 220-300 GB and 8-10 hours, which were
+#   conservative in the right direction. The PCA line predicted 3.0 h against
+#   2:41 actual, so the prediction is worth trusting as a hung-or-slow
+#   discriminator within two minutes of a job starting.
 #
 #   sbatch --mem=360G --time=20:00:00 \
 #       data_collation/scripts/benchmark_baselines.sh m6_drain --no-elaj \

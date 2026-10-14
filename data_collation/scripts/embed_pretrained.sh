@@ -52,8 +52,13 @@ MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
 ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
 
 case "${MODEL}" in
-    geneformer) REPO="${MODELS}/Geneformer"; VENV="${ENVS}/geneformer" ;;
-    *) echo "unknown model '${MODEL}'; known: geneformer" >&2; exit 2 ;;
+    geneformer) REPO="${MODELS}/Geneformer"  ;;
+    scgpt)      REPO="${MODELS}/scGPT"        ;;
+    scbert)     REPO="${MODELS}/scBERT"       ;;
+    *) echo "unknown model '${MODEL}'; known: geneformer scgpt scbert" >&2; exit 2 ;;
+esac
+VENV="${ENVS}/fm_${MODEL}"
+case "${MODEL}" in
 esac
 
 OUT="outputs/benchmarks/latents/${MODEL}"
@@ -62,16 +67,14 @@ OUT="outputs/benchmarks/latents/${MODEL}"
 # input size 2048 is several GB, so it does not belong in the repository.
 WORK="/rds/projects/a/acharjea-multi-omics/Atharva/scratch/${MODEL}_${SLURM_JOB_ID:-manual}"
 
+# NO BEAR PYTHON MODULES. The venv built by install_foundation.sh carries its
+# own torch and everything else, precisely so nothing on the module path can
+# shadow a pip install. Only a bare python is loaded.
 module purge
 module load bear-apps/2024a
-module load PyTorch/2.7.1-foss-2024a-CUDA-12.6.0
-module load PyYAML/6.0.2-GCCcore-13.3.0
-module load SciPy-bundle/2024.05-gfbf-2024a
-module load tqdm/4.66.5-GCCcore-13.3.0
-module load anndata/0.10.9-foss-2024a
-module load h5py/3.12.1-foss-2024a
-module load Pillow/10.4.0-GCCcore-13.3.0
-module load matplotlib/3.9.2-gfbf-2024a
+module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
+  || module load Python/3.12.3-GCCcore-13.3.0 2>/dev/null \
+  || { echo "no bare Python module found" >&2; exit 1; }
 
 export PYTHONNOUSERSITE=1
 source "${VENV}/bin/activate"

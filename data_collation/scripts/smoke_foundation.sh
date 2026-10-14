@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
-#SBATCH --gres=gpu:a100_80:1
-#SBATCH --time=00:20:00
+#SBATCH --gres=gpu:1
+#SBATCH --time=00:15:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH --job-name=elaj_fm_smoke
 #SBATCH --output=logs/fm_smoke_%j.log
 
@@ -14,10 +14,23 @@
 #
 #   sbatch data_collation/scripts/smoke_foundation.sh geneformer
 #
-# SMALL ON PURPOSE: 20 minutes, 4 cores, 48G. A big request queues for hours
-# and then fails on an import, which is the opposite of what we want from a
-# check. 48G rather than 16G only because building the val+test corpus opens
-# every .h5ad; the model itself is 41 MB.
+# SIZED TO QUEUE FAST, WHICH IS THE POINT OF A CHECK. 15 minutes, 4 cores,
+# 32G, ANY GPU, and the val split only.
+#
+#   --gres=gpu:1, not gpu:a100_80:1. Geneformer V1-10M is 41 MB and scGPT's
+#   whole-human checkpoint is 207 MB; neither needs 80 GB of device memory,
+#   and asking for the scarcest card on the cluster to run them is how a
+#   twenty-minute check waits three hours. The real embed jobs can keep the
+#   a100_80.
+#
+#   --splits val, not val+test. The corpus build is the expensive part of this
+#   job -- it opens all eleven .h5ad files -- and building 225,280 test cells
+#   to then discard all but 2,000 is pure queue time. Which split the smoke
+#   test samples from does not matter; that it crosses the model's internal
+#   batch boundaries does.
+#
+#   32G, because the val corpus held sparse is a few GB and the model is
+#   trivial. 48G was a guess with no run behind it.
 #
 # WHAT IT PROVES. Not that the packages import -- the login-node verify
 # already does that. It runs the SAME code path the real job runs: the corpus
@@ -90,9 +103,10 @@ python -u -m scripts.embed_pretrained \
     --repo "${REPO}" \
     --vocabulary "${PROCESSED}/vocabulary_axis.json" \
     --work "${WORK}" \
+    --splits val \
     --max-cells "${CELLS}" \
     --nproc 4 \
-    --batch-size 16 \
+    --batch-size 32 \
     --root . \
     --out "${OUT}"
 

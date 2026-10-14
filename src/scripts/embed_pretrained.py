@@ -78,6 +78,10 @@ def parse_args() -> argparse.Namespace:
                         "convention. 0 is the last.")
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--nproc", type=int, default=8)
+    p.add_argument("--max-cells", type=int, default=None,
+                   help="Smoke test: embed only this many cells, balanced "
+                        "across studies. The full path runs in minutes "
+                        "instead of hours, on the same code.")
     p.add_argument("--out", required=True,
                    help="Directory for latent.npy and manifest.json.")
     return p.parse_args()
@@ -143,6 +147,17 @@ def main() -> None:
                           required_obs_columns(), gene_names, names)
     logger.info("Corpus: %d cells x %d genes, %d studies, splits %s",
                 corpus.n_cells, corpus.n_genes, corpus.n_studies, corpus.split)
+
+    if args.max_cells and args.max_cells < corpus.n_cells:
+        from endo_model.evaluation.study_mixing import balanced_rows
+
+        # Balanced across studies, not the first N: tokenisation is per study
+        # and a study with unusual gene names is exactly what a smoke test
+        # should hit.
+        corpus = corpus.subset_cells(
+            balanced_rows(corpus.study_id, args.max_cells, 24))
+        logger.warning("SMOKE TEST: %d cells across %d studies. This is NOT a "
+                       "reportable embedding.", corpus.n_cells, corpus.n_studies)
 
     embedder = build_embedder(args, work)
     latent, source_index, settings = embedder.embed(corpus)

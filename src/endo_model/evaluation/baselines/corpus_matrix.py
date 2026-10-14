@@ -127,6 +127,31 @@ class CorpusMatrix:
             source_index=self.source_index,
         )
 
+    def subset_cells(self, rows) -> "CorpusMatrix":
+        """A copy holding only `rows`, in that order.
+
+        For smoke tests: the full val+test corpus is 416,256 cells and six
+        hours of model forward passes, and a two-hundred-cell version
+        exercises the identical code path in minutes. `source_index` is carried
+        through, so an ExternalLatent built from a subset still joins by
+        dataset index rather than by position.
+        """
+        import numpy as np
+
+        keep = np.asarray(rows, dtype=np.int64)
+        return CorpusMatrix(
+            counts=self.counts[keep].tocsr(),
+            study_id=self.study_id[keep],
+            patient_id=self.patient_id[keep],
+            meta={c: v[keep] for c, v in self.meta.items()},
+            measured=self.measured,
+            gene_names=self.gene_names,
+            study_names=self.study_names,
+            split=self.split,
+            source_index=(self.source_index[keep] if self.source_index.size
+                          else self.source_index),
+        )
+
     @staticmethod
     def concatenate(parts: list["CorpusMatrix"]) -> "CorpusMatrix":
         """Stack several splits into one, in the order given.

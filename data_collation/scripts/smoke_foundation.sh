@@ -1,0 +1,108 @@
+#!/bin/bash
+#SBATCH --qos=bbgpu
+#SBATCH --gres=gpu:a100_80:1
+#SBATCH --time=00:20:00
+#SBATCH --account=acharjea-multi-omics
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=48G
+#SBATCH --job-name=elaj_fm_smoke
+#SBATCH --output=logs/fm_smoke_%j.log
+
+# Validates a foundation-model environment END TO END on 200 cells.
+#
+#   sbatch data_collation/scripts/smoke_foundation.sh geneformer
+#
+# SMALL ON PURPOSE: 20 minutes, 4 cores, 48G. A big request queues for hours
+# and then fails on an import, which is the opposite of what we want from a
+# check. 48G rather than 16G only because building the val+test corpus opens
+# every .h5ad; the model itself is 41 MB.
+#
+# WHAT IT PROVES. Not that the packages import -- the login-node verify
+# already does that. It runs the SAME code path the real job runs: the corpus
+# build, the symbol-to-Ensembl mapping, the h5ad write, tokenisation with the
+# gc30M dictionaries, a GPU forward pass, the cell_index label round-trip, and
+# an ExternalLatent written and read back. Every API mistake that would
+# otherwise surface six hours into the real job surfaces here in minutes.
+#
+# It writes to a _smoke output directory and the manifest says so. Never score
+# it: 200 cells across 11 studies is not a comparison.
+
+set -euo pipefail
+
+MODEL="${1:-geneformer}"
+RUN="${2:-m6_drain}"
+CELLS="${3:-200}"
+
+PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
+MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
+ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
+
+case "${MODEL}" in
+    geneformer) REPO="${MODELS}/Geneformer" ;;
+    scgpt)      REPO="${MODELS}/scGPT"      ;;
+    scbert)     REPO="${MODELS}/scBERT"     ;;
+    *) echo "unknown model '${MODEL}'" >&2; exit 2 ;;
+esac
+VENV="${ENVS}/fm_${MODEL}"
+OUT="outputs/benchmarks/latents/${MODEL}_smoke"
+WORK="/rds/projects/a/acharjea-multi-omics/Atharva/scratch/${MODEL}_smoke_${SLURM_JOB_ID:-manual}"
+
+module purge
+module load bear-apps/2024a
+module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
+  || module load Python/3.12.3-GCCcore-13.3.0 2>/dev/null \
+  || { echo "no bare Python module found" >&2; exit 1; }
+
+export PYTHONNOUSERSITE=1
+source "${VENV}/bin/activate"
+mkdir -p "${WORK}"
+cd /rds/homes/a/axw1008/axw1008/src
+
+echo "── 1. the GPU, before anything expensive ──"
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+python - <<'PYEOF'
+import torch
+assert torch.cuda.is_available(), "torch cannot see the GPU"
+x = torch.randn(1024, 1024, device="cuda")
+print(f"  torch {torch.__version__}  cuda build {torch.version.cuda}")
+print(f"  device {torch.cuda.get_device_name(0)}")
+print(f"  matmul on device: {float((x @ x).sum()):.3e}  (a number means it works)")
+PYEOF
+
+echo
+echo "── 2. the real path, on ${CELLS} cells ──"
+export PYTHONUNBUFFERED=1
+python -u -m scripts.embed_pretrained \
+    --run "${RUN}" \
+    --model "${MODEL}" \
+    --repo "${REPO}" \
+    --vocabulary "${PROCESSED}/vocabulary_axis.json" \
+    --work "${WORK}" \
+    --max-cells "${CELLS}" \
+    --nproc 4 \
+    --batch-size 16 \
+    --root . \
+    --out "${OUT}"
+
+echo
+echo "── 3. read the result back the way the scorer will ──"
+python - "${OUT}" <<'PYEOF'
+import sys
+from endo_model.evaluation.baselines.external_latent import ExternalLatent
+
+latent = ExternalLatent.read(sys.argv[1])
+print(f"  method        {latent.method}")
+print(f"  shape         {latent.latent.shape}")
+print(f"  fit_on        {latent.fit_on}")
+print(f"  finite        {bool(__import__('numpy').isfinite(latent.latent).all())}")
+for key in ("genes_offered", "genes_tokenisable", "cells_offered",
+            "cells_returned", "emb_mode", "emb_layer"):
+    if key in latent.settings:
+        print(f"  {key:<17} {latent.settings[key]}")
+PYEOF
+
+echo
+echo "SMOKE PASSED for ${MODEL}. Scratch at ${WORK} -- delete it."
+echo "The real run: sbatch data_collation/scripts/embed_pretrained.sh ${MODEL} ${RUN}"

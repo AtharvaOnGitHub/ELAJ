@@ -121,3 +121,71 @@ class TestConcatenate:
     def test_empty_list_is_an_error(self):
         with pytest.raises(ValueError):
             CorpusMatrix.concatenate([])
+
+
+class TestSubsetCells:
+    """The smoke-test path: the same code on 200 cells instead of 416,256."""
+
+    @staticmethod
+    def corpus_of(n_cells=6, n_genes=4):
+        import numpy as np
+        import scipy.sparse
+
+        from endo_model.evaluation.baselines.corpus_matrix import CorpusMatrix
+
+        return CorpusMatrix(
+            counts=scipy.sparse.csr_matrix(
+                np.arange(n_cells * n_genes, dtype=np.float32).reshape(
+                    n_cells, n_genes)),
+            study_id=np.arange(n_cells, dtype=np.int64) % 3,
+            patient_id=np.asarray([f"p{i}" for i in range(n_cells)], dtype=object),
+            meta={"cell family": np.asarray([f"f{i}" for i in range(n_cells)],
+                                            dtype=object)},
+            measured={0: np.ones(n_genes, dtype=bool)},
+            gene_names=[f"G{i}" for i in range(n_genes)],
+            study_names={0: "a", 1: "b", 2: "c"},
+            split="val",
+            source_index=np.arange(100, 100 + n_cells, dtype=np.int64),
+        )
+
+    def test_it_keeps_the_requested_rows_in_order(self):
+        import numpy as np
+
+        subset = self.corpus_of().subset_cells([4, 1])
+        assert subset.n_cells == 2
+        np.testing.assert_array_equal(subset.patient_id, ["p4", "p1"])
+
+    def test_the_counts_follow_the_rows(self):
+        import numpy as np
+
+        original = self.corpus_of()
+        subset = original.subset_cells([4, 1])
+        np.testing.assert_allclose(subset.counts.toarray(),
+                                   original.counts.toarray()[[4, 1]])
+
+    def test_metadata_follows_the_rows(self):
+        import numpy as np
+
+        subset = self.corpus_of().subset_cells([4, 1])
+        np.testing.assert_array_equal(subset.meta["cell family"], ["f4", "f1"])
+
+    def test_source_index_is_carried_so_the_join_still_works(self):
+        """An ExternalLatent from a subset must still join by dataset index."""
+        import numpy as np
+
+        subset = self.corpus_of().subset_cells([4, 1])
+        np.testing.assert_array_equal(subset.source_index, [104, 101])
+
+    def test_the_gene_axis_is_untouched(self):
+        subset = self.corpus_of().subset_cells([0])
+        assert subset.n_genes == 4
+        assert subset.gene_names == ["G0", "G1", "G2", "G3"]
+
+    def test_an_empty_source_index_stays_empty_rather_than_indexing(self):
+        import numpy as np
+
+        from endo_model.evaluation.baselines.corpus_matrix import CorpusMatrix
+
+        original = self.corpus_of()
+        original.source_index = np.empty(0, dtype=np.int64)
+        assert original.subset_cells([1, 2]).source_index.size == 0

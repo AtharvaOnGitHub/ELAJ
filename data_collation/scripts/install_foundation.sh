@@ -66,23 +66,41 @@ case "${MODEL}" in
     CHECK="geneformer transformers datasets"
     ;;
   scgpt)
-    # No flash-attn, deliberately: scGPT made it an optional dependency, and
-    # building it against a pip torch is a day we do not have. embed_data is
-    # called with use_fast_transformer=False, which is correct and slower.
+    # FROM MAIN, NOT PyPI, AND THAT IS THE WHOLE DIFFICULTY. The released
+    # scgpt on PyPI imports torchtext, which was discontinued and is ABI-locked
+    # to one torch (0.16.2 <-> torch 2.1.2), so `pip install scgpt` against
+    # torch 2.6 either fails or silently downgrades torch and discards the
+    # cu124 build. Main dropped torchtext and allows torch>=1.13 with no upper
+    # bound.
+    #
+    # --no-deps, because main's own pin set is hostile and none of it is needed
+    # by the one function we call: scvi-tools<1.0 drags an old jax, and
+    # pyarrow>=22 wants numpy 2 while our corpus code is tested against 1.26.
+    # What embed_data actually imports is installed explicitly below, and the
+    # verify step imports that function rather than the package.
     printf 'numpy<2\ntorch==%s\n' \
         "$(python -c 'import torch; print(torch.__version__)')" > "${VENV}/constraints.txt"
-    pip install --quiet scgpt scanpy einops -c "${VENV}/constraints.txt"
+    pip install --quiet --no-deps "git+https://github.com/bowang-lab/scGPT.git"
+    pip install --quiet -c "${VENV}/constraints.txt" \
+        scanpy einops numba scikit-misc umap-learn leidenalg "datasets<4" \
+        "pyarrow<17" torchmetrics
+    # No flash-attn, deliberately: scGPT lists it in an optional `fa2` group,
+    # embed_data is called with use_fast_transformer=False, and building it
+    # against a pip torch is a day we do not have.
 
-    # WEIGHTS, AND A PROVENANCE CAVEAT WORTH WRITING DOWN. scGPT distributes
-    # the whole-human checkpoint by Google Drive, which a login node cannot
-    # fetch. This is a THIRD-PARTY HuggingFace mirror, so the sha256 of
-    # best_model.pt is printed below and belongs in the Methods section: if the
-    # canonical file is ever checked, that is what it is checked against.
-    # The continual-pretrained checkpoint is NOT used -- more pretraining data
-    # means more overlap with our donors, and whole-human is what a reader
-    # reproduces.
+    # WEIGHTS, AND A PROVENANCE CAVEAT FOR THE METHODS SECTION. scGPT
+    # distributes the whole-human checkpoint by Google Drive, which a login
+    # node cannot fetch, so this is a THIRD-PARTY HuggingFace mirror and the
+    # sha256 of best_model.pt is printed below. If the canonical file is ever
+    # checked, that is what it is checked against. Already-present files are
+    # left alone, so rsyncing the canonical three from a laptop overrides this.
+    # The continual-pretrained checkpoint is NOT fetched: more pretraining data
+    # means more overlap with our donors.
     mkdir -p "${MODELS}/scGPT"
-    python - "${MODELS}/scGPT" <<'PYEOF'
+    if [[ -f "${MODELS}/scGPT/best_model.pt" ]]; then
+        echo "  weights already present; not re-fetching"
+    else
+        python - "${MODELS}/scGPT" <<'PYEOF'
 import sys
 from huggingface_hub import snapshot_download
 path = snapshot_download(repo_id="MohamedMabrouk/scGPT", repo_type="model",
@@ -91,8 +109,9 @@ path = snapshot_download(repo_id="MohamedMabrouk/scGPT", repo_type="model",
                                          "args.json"])
 print(f"  downloaded to {path}")
 PYEOF
-    echo "  sha256 of best_model.pt (record this):"
-    sha256sum "${MODELS}/scGPT/best_model.pt" || shasum -a 256 "${MODELS}/scGPT/best_model.pt"
+    fi
+    echo "  sha256 of best_model.pt (RECORD THIS for the Methods section):"
+    sha256sum "${MODELS}/scGPT/best_model.pt"
     CHECK="scgpt"
     ;;
   scbert)
@@ -116,6 +135,25 @@ for pkg in ("numpy", "pandas", "anndata", "torch", *sys.argv[1].split()):
     except Exception as exc:                                   # noqa: BLE001
         ok = False
         print(f"  {pkg:<16} MISSING ({type(exc).__name__}: {exc})")
+# THE ENTRY POINT, NOT JUST THE PACKAGE. `import scgpt` succeeding says
+# nothing about whether scgpt.tasks.embed_data can be reached: that module
+# pulls in the model, tokeniser and preprocessor, and a missing dependency
+# three levels down is exactly what --no-deps risks.
+if "scgpt" in sys.argv[1].split():
+    try:
+        from scgpt.tasks import embed_data            # noqa: F401
+        print("  scgpt.tasks      embed_data importable")
+    except Exception as exc:                                   # noqa: BLE001
+        ok = False
+        print(f"  scgpt.tasks      UNREACHABLE ({type(exc).__name__}: {exc})")
+if "geneformer" in sys.argv[1].split():
+    try:
+        from geneformer import EmbExtractor, TranscriptomeTokenizer  # noqa: F401
+        print("  geneformer       EmbExtractor and tokeniser importable")
+    except Exception as exc:                                   # noqa: BLE001
+        ok = False
+        print(f"  geneformer       UNREACHABLE ({type(exc).__name__}: {exc})")
+
 import torch
 print(f"  cuda available   {torch.cuda.is_available()}  (False on a login node is normal)")
 print(f"  torch cuda build {torch.version.cuda}")

@@ -238,6 +238,46 @@ class GeneformerEmbedder:
             )
         return pd.read_csv(csv)
 
+    @staticmethod
+    def describe_join(rows: np.ndarray, n_cells: int) -> None:
+        """Say exactly what came back, before anything depends on it.
+
+        WHY THIS IS NOT A ONE-LINE WARNING. On 14 October 2026 a 416,256-cell
+        run died in ExternalLatent with "source_index holds duplicates", and
+        nothing in the log said whether the duplication was a handful of cells
+        or every chunk repeated, which is the difference between a dropped
+        cell and a broken join. A 198-cell smoke test had passed, so the fault
+        only appears above some size and the counts are the evidence.
+        """
+        unique = np.unique(rows)
+        logger.info("Join key: %d rows returned, %d unique, corpus has %d",
+                    len(rows), len(unique), n_cells)
+        logger.info("Join key: range %d..%d, sorted=%s, is a permutation=%s",
+                    int(rows.min()) if rows.size else -1,
+                    int(rows.max()) if rows.size else -1,
+                    bool(np.all(np.diff(rows) >= 0)) if rows.size > 1 else True,
+                    len(unique) == n_cells and int(unique.max()) == n_cells - 1
+                    if rows.size else False)
+        if len(unique) != len(rows):
+            counts = np.bincount(rows, minlength=n_cells)
+            repeated = np.flatnonzero(counts > 1)
+            logger.error(
+                "DUPLICATED JOIN KEY. %d of %d values appear more than once; "
+                "the most repeated appears %d times. First ten repeated: %s. "
+                "Expected multiple of chunk size 512? %s",
+                len(repeated), len(unique), int(counts.max()),
+                repeated[:10].tolist(),
+                len(rows) % 512 == 0,
+            )
+        missing = np.setdiff1d(np.arange(n_cells), unique)
+        if missing.size:
+            logger.warning(
+                "Geneformer returned no embedding for %d of %d cells (first "
+                "ten: %s). Cells with no tokenisable gene are dropped by the "
+                "tokeniser; the missing ones are excluded from the scored set "
+                "rather than filled in.",
+                missing.size, n_cells, missing[:10].tolist())
+
     # ── putting it together ───────────────────────────────────────────────
 
     def embed(self, corpus: CorpusMatrix) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -259,14 +299,7 @@ class GeneformerEmbedder:
             )
         rows = frame[CELL_INDEX].to_numpy(dtype=np.int64)
         latent = frame.drop(columns=[CELL_INDEX]).to_numpy(dtype=np.float32)
-
-        if len(rows) != corpus.n_cells:
-            logger.warning(
-                "Geneformer returned %d of %d cells. Cells with no "
-                "tokenisable gene are dropped by the tokeniser; the missing "
-                "ones are excluded from the scored set rather than filled in.",
-                len(rows), corpus.n_cells,
-            )
+        self.describe_join(rows, corpus.n_cells)
         settings = {
             "checkpoint": str(self.model_directory),
             "pretraining_corpus": "Genecorpus-30M",

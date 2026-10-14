@@ -26,6 +26,11 @@
 # an ExternalLatent written and read back. Every API mistake that would
 # otherwise surface six hours into the real job surfaces here in minutes.
 #
+# AND IT HAS TO BE BIG ENOUGH TO EXERCISE THE BATCHING. A smoke test below the
+# tokeniser's chunk size is one chunk, which is how a 198-cell run passed and
+# the real one failed. Any size chosen here must stay above every internal
+# batch boundary the model uses.
+#
 # It writes to a _smoke output directory and the manifest says so. Never score
 # it: 200 cells across 11 studies is not a comparison.
 
@@ -33,7 +38,12 @@ set -euo pipefail
 
 MODEL="${1:-geneformer}"
 RUN="${2:-m6_drain}"
-CELLS="${3:-200}"
+# ABOVE THE TOKENISER'S CHUNK SIZE, WHICH 200 WAS NOT. Geneformer's
+# TranscriptomeTokenizer processes an h5ad in chunks of 512, so a 198-cell
+# smoke test is a single chunk and cannot exercise the chunk loop at all. It
+# passed, and the 416,256-cell run then died on a duplicated join key. 2,000
+# cells is four chunks and still minutes.
+CELLS="${3:-2000}"
 
 PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
 MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models

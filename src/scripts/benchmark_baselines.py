@@ -96,8 +96,9 @@ def parse_args() -> argparse.Namespace:
                         "that cannot run in this interpreter: Geneformer, "
                         "scGPT and scBERT each need their own venv. The row "
                         "name and the gene coverage come from the manifest, "
-                        "and the rows are joined to the corpus by dataset "
-                        "index rather than by assuming a shared order.")
+                        "and the rows are joined by corpus row position under "
+                        "a fingerprint of the corpus, rather than by assuming "
+                        "a shared order.")
     p.add_argument("--baseline-vocabulary", default=None,
                    help="A vocabulary.json built WITHOUT --drop-unassigned, "
                         "giving the baselines every measured gene instead of "
@@ -390,14 +391,14 @@ def main() -> None:
 
         try:
             external = ExternalLatent.read(Path(directory))
-            emb = external.embedding_for(corpus)
+            emb, scored = external.embedding_for(corpus)
         except (FileNotFoundError, ValueError) as exc:
             logger.error("external latent %s: %s", directory, exc)
             report.record_skip(f"{Path(directory).name}/native", str(exc))
             continue
         logger.info("── %s (external, %d dims, fitted on %s) ──",
                     emb.method, emb.width, emb.fit_on or "the scored cells")
-        report.add(scorer.score(emb, corpus, gene_policy="native"))
+        report.add(scorer.score(emb, scored, gene_policy="native"))
         report.record_settings(emb.method, "native", emb.settings,
                                fit_on=emb.fit_on)
         report.write_csv(out / "benchmark.csv")

@@ -172,4 +172,4 @@ class ScGPTEmbedder:
             "cells_offered": int(corpus.n_cells),
             "cells_returned": int(len(rows)),
         }
-        return latent, np.asarray(corpus.source_index)[rows], settings
+        return latent, rows, settings

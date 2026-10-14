@@ -283,9 +283,9 @@ class GeneformerEmbedder:
     def embed(self, corpus: CorpusMatrix) -> tuple[np.ndarray, np.ndarray, dict]:
         """``(latent, source_index, settings)`` for an ExternalLatent.
 
-        `source_index` is the corpus's own, selected by the cell_index labels
-        that came back, so a cell the tokeniser dropped is absent from both
-        rather than misaligning everything after it.
+        The second value is CORPUS ROW POSITIONS, not dataset indices: a
+        dataset index is unique only within a split, and build_corpus
+        concatenates val and test. See external_latent.py.
         """
         ensembl = self.ensembl_for(corpus.gene_names)
         covered = int(self.tokenisable(ensembl).sum())
@@ -312,4 +312,4 @@ class GeneformerEmbedder:
             "cells_returned": int(len(rows)),
             "cells_offered": int(corpus.n_cells),
         }
-        return latent, np.asarray(corpus.source_index)[rows], settings
+        return latent, rows, settings

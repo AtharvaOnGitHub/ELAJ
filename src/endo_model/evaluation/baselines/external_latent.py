@@ -12,14 +12,25 @@ THE RISK THAT CREATES, AND THE ONLY DEFENCE AGAINST IT. CorpusMatrix's
 docstring says it plainly: an embedding scored against labels in a different
 order is wrong in a way that looks plausible. Within one process the sampler
 order guarantees the join. Across two processes, started minutes apart from
-different environments, nothing does. So a latent does not travel alone. It
-travels with the dataset indices its rows came from, and `embedding_for`
-refuses a corpus whose cells are not the same set and REORDERS to the
-corpus's order rather than assuming the two agree.
+different environments, nothing does.
 
-That makes the contract "the same cells, in any order" instead of "the same
-cells, in the same order", which is the weaker promise two interpreters can
-actually keep.
+So a latent travels with the ROW POSITIONS it was built from, plus a
+fingerprint of the corpus those positions index. `embedding_for` checks the
+fingerprint and then reorders, which makes the contract "the same corpus, any
+order" rather than "the same cells, in the same order".
+
+NOT `source_index`, WHICH WAS THE FIRST ATTEMPT AND IS AMBIGUOUS. A dataset
+index is unique only WITHIN a split. `build_corpus` concatenates val and test,
+so val's cell 0 and test's cell 0 both arrive as 0, and every multi-split
+corpus carries a duplicated key by construction. A 416,256-cell Geneformer run
+died on exactly that; two smaller runs had passed, one because 198 cells drawn
+from 416,256 rarely collide and one because it used a single split. Both were
+luck.
+
+A fingerprint is also a STRONGER check than matching indices ever was. It
+covers the cells, their order, their donors and their studies in one value, so
+a corpus built from a different config or seed is caught rather than compared
+index by index.
 
 A CACHE, AS A SIDE EFFECT WORTH HAVING. scANVI cost 6,554 seconds in the
 inductive pass, and recutting that comparison meant paying it again because
@@ -42,6 +53,22 @@ logger = logging.getLogger(__name__)
 
 LATENT_FILE = "latent.npy"
 MANIFEST_FILE = "manifest.json"
+
+
+def corpus_fingerprint(corpus: CorpusMatrix) -> str:
+    """A hash identifying a corpus's cells, their order, donors and studies.
+
+    Deliberately NOT the counts: the baselines' gene axis and the model's can
+    differ (see gene_axis.py) while the cells are identical, and that is a
+    supported comparison rather than a mismatch.
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update(str(corpus.n_cells).encode())
+    digest.update(np.asarray(corpus.study_id, dtype=np.int64).tobytes())
+    digest.update("\x00".join(str(p) for p in corpus.patient_id).encode())
+    return digest.hexdigest()[:32]
 FIT_ON_PRETRAINED = "pretrained"
 """What `Embedding.fit_on` holds for a model trained on somebody else's corpus.
 
@@ -55,34 +82,43 @@ class ExternalLatent:
     """An embedding read from disk, plus the row identities to join it by.
 
     Attributes:
-        method:       Row name for the table, e.g. ``geneformer``.
-        latent:       ``(n_cells, d)`` float32.
-        source_index: ``(n_cells,)`` dataset indices, one per latent row.
-        settings:     Whatever the producing script wants recorded: checkpoint
-                      path, layer pooled, gene coverage, batch size.
-        fit_on:       Defaults to ``pretrained``.
+        method:      Row name for the table, e.g. ``geneformer``.
+        latent:      ``(n_rows, d)`` float32.
+        row_index:   ``(n_rows,)`` positions into the corpus, one per latent
+                     row. Need not be complete: a model that drops cells
+                     returns fewer rows, and those cells are then absent from
+                     the scored set rather than filled in.
+        fingerprint: ``corpus_fingerprint`` of the corpus those positions
+                     index.
+        settings:    Whatever the producing script wants recorded: checkpoint
+                     path, layer pooled, gene coverage, batch size.
+        fit_on:      Defaults to ``pretrained``.
     """
 
     def __init__(self, method: str, latent: np.ndarray,
-                 source_index: np.ndarray, settings: dict | None = None,
+                 row_index: np.ndarray, fingerprint: str,
+                 settings: dict | None = None,
                  fit_on: str = FIT_ON_PRETRAINED) -> None:
         self.method = str(method)
         self.latent = np.asarray(latent, dtype=np.float32)
-        self.source_index = np.asarray(source_index, dtype=np.int64)
+        self.row_index = np.asarray(row_index, dtype=np.int64)
+        self.fingerprint = str(fingerprint)
         self.settings = dict(settings or {})
         self.fit_on = str(fit_on)
         if self.latent.ndim != 2:
             raise ValueError(f"latent must be 2-D, got shape {self.latent.shape}")
-        if len(self.source_index) != self.latent.shape[0]:
+        if len(self.row_index) != self.latent.shape[0]:
             raise ValueError(
-                f"{len(self.source_index)} source indices for "
+                f"{len(self.row_index)} row indices for "
                 f"{self.latent.shape[0]} latent rows"
             )
-        if len(set(self.source_index.tolist())) != len(self.source_index):
+        if len(set(self.row_index.tolist())) != len(self.row_index):
             raise ValueError(
-                "source_index holds duplicates, so the join to a corpus would "
+                "row_index holds duplicates, so the join to a corpus would "
                 "be ambiguous"
             )
+        if self.row_index.size and self.row_index.min() < 0:
+            raise ValueError("row_index holds negative positions")
 
     @property
     def width(self) -> int:
@@ -100,7 +136,8 @@ class ExternalLatent:
             "fit_on": self.fit_on,
             "n_cells": int(self.latent.shape[0]),
             "width": self.width,
-            "source_index": self.source_index.tolist(),
+            "fingerprint": self.fingerprint,
+            "row_index": self.row_index.tolist(),
             "settings": self.settings,
         }, indent=2))
         logger.info("Wrote %s: %d cells x %d dims to %s",
@@ -122,52 +159,60 @@ class ExternalLatent:
         return cls(
             method=manifest["method"],
             latent=np.load(latent_path),
-            source_index=np.asarray(manifest["source_index"], dtype=np.int64),
+            row_index=np.asarray(manifest["row_index"], dtype=np.int64),
+            fingerprint=manifest.get("fingerprint", ""),
             settings=manifest.get("settings", {}),
             fit_on=manifest.get("fit_on", FIT_ON_PRETRAINED),
         )
 
     # ── joining to a corpus ───────────────────────────────────────────────
 
-    def embedding_for(self, corpus: CorpusMatrix) -> Embedding:
-        """An `Embedding` whose rows are in ``corpus``'s order.
+    def embedding_for(self, corpus: CorpusMatrix
+                      ) -> tuple[Embedding, CorpusMatrix]:
+        """`(embedding, corpus)` in agreeing row order.
+
+        THE CORPUS COMES BACK TOO, BECAUSE IT MAY NEED SUBSETTING. A model that
+        drops cells -- Geneformer's tokeniser discards a cell with no
+        tokenisable gene -- returns fewer rows than the corpus holds, and the
+        scorer requires the two to match exactly. Returning the pair keeps that
+        in one place instead of leaving every caller to work it out.
 
         Raises:
-            ValueError: if the two are not over the same set of cells. A
-                differing SET is a real disagreement about which cells were
-                embedded; a differing ORDER is not, and is fixed here.
+            ValueError: if the fingerprint does not match, or a row position
+                falls outside the corpus.
         """
-        mine = self.source_index
-        theirs = np.asarray(corpus.source_index, dtype=np.int64)
-        if theirs.size == 0:
+        expected = corpus_fingerprint(corpus)
+        if self.fingerprint and self.fingerprint != expected:
             raise ValueError(
-                "the corpus carries no source_index, so there is nothing to "
-                "join on; build it through extract_corpus_matrix"
+                f"{self.method} was embedded over a different corpus: "
+                f"fingerprint {self.fingerprint} against this corpus's "
+                f"{expected}. The cells, their order, their donors or their "
+                f"studies differ, so the join would be wrong."
             )
-        missing = np.setdiff1d(theirs, mine)
-        extra = np.setdiff1d(mine, theirs)
-        if missing.size or extra.size:
+        if not self.fingerprint:
+            logger.warning(
+                "%s carries no corpus fingerprint, so the join is unverified. "
+                "Re-run its embedding to get one.", self.method)
+        if self.row_index.size and int(self.row_index.max()) >= corpus.n_cells:
             raise ValueError(
-                f"{self.method} was embedded over a different cell set: "
-                f"{missing.size} corpus cell(s) absent from the latent, "
-                f"{extra.size} latent row(s) absent from the corpus "
-                f"(first missing: {missing[:3].tolist()}, "
-                f"first extra: {extra[:3].tolist()})"
+                f"{self.method} holds row position "
+                f"{int(self.row_index.max())} for a {corpus.n_cells}-cell "
+                f"corpus"
             )
-        order = self._reordering(mine, theirs)
-        if not np.array_equal(order, np.arange(len(order))):
-            logger.info("%s: reordering %d rows to the corpus's order",
-                        self.method, len(order))
-        return Embedding(
+        order = np.argsort(self.row_index)
+        rows = self.row_index[order]
+        scored = corpus
+        if len(rows) != corpus.n_cells:
+            logger.warning(
+                "%s covers %d of the corpus's %d cells; it is scored on those "
+                "and the rest are absent from its row rather than filled in.",
+                self.method, len(rows), corpus.n_cells)
+            scored = corpus.subset_cells(rows)
+        embedding = Embedding(
             method=self.method,
             latent=self.latent[order],
             fit_seconds=float(self.settings.get("fit_seconds", 0.0)),
             settings=self.settings,
             fit_on=self.fit_on,
         )
-
-    @staticmethod
-    def _reordering(mine: np.ndarray, theirs: np.ndarray) -> np.ndarray:
-        """Row positions in ``mine`` that put it in ``theirs`` order."""
-        rank = np.argsort(mine)
-        return rank[np.searchsorted(mine, theirs, sorter=rank)]
+        return embedding, scored

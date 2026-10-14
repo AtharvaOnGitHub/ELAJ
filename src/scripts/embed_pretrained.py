@@ -114,7 +114,9 @@ def main() -> None:
 
     from endo_model.configs import load_experiment
     from endo_model.data.vocabulary import GeneVocabulary
-    from endo_model.evaluation.baselines.external_latent import ExternalLatent
+    from endo_model.evaluation.baselines.external_latent import (
+        ExternalLatent, corpus_fingerprint,
+    )
     from endo_model.evaluation.baselines.scorer import required_obs_columns
     from scripts.benchmark_baselines import build_corpus
 
@@ -166,12 +168,13 @@ def main() -> None:
                        "reportable embedding.", corpus.n_cells, corpus.n_studies)
 
     embedder = build_embedder(args, work)
-    latent, source_index, settings = embedder.embed(corpus)
+    latent, row_index, settings = embedder.embed(corpus)
     settings["gene_vocabulary"] = str(vocabulary_path)
     settings["splits"] = "+".join(args.splits)
 
-    external = ExternalLatent(method=embedder.name, latent=latent,
-                              source_index=source_index, settings=settings)
+    external = ExternalLatent(
+        method=embedder.name, latent=latent, row_index=row_index,
+        fingerprint=corpus_fingerprint(corpus), settings=settings)
     external.write(out)
     logger.info("Score it with: --external-latent %s", out)
 

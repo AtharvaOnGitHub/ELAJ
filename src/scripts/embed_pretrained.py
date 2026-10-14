@@ -48,7 +48,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("elaj.embed_pretrained")
 
-MODELS = ("geneformer", "scgpt", "scimilarity")
+MODELS = ("geneformer", "scgpt", "scimilarity", "scfoundation")
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,6 +111,12 @@ def build_embedder(args, work: Path):
         # 10,000 by default and --batch-size here is in units of cells either
         # way, so the wrapper's 64 would be needlessly slow.
         return ScimilarityEmbedder(repo=args.repo, work=work)
+    if args.model == "scfoundation":
+        from endo_model.evaluation.baselines.pretrained import (
+            ScFoundationEmbedder,
+        )
+
+        return ScFoundationEmbedder(repo=args.repo, work=work)
     raise ValueError(f"unknown model {args.model!r}; known: {list(MODELS)}")
 
 

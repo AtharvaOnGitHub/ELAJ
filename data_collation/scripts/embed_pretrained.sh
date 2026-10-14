@@ -55,7 +55,8 @@ case "${MODEL}" in
     geneformer) REPO="${MODELS}/Geneformer"  ;;
     scgpt)      REPO="${MODELS}/scGPT"        ;;
     scimilarity) REPO="${MODELS}/SCimilarity" ;;
-    *) echo "unknown model '${MODEL}'; known: geneformer scgpt scimilarity" >&2; exit 2 ;;
+    scfoundation) REPO="${MODELS}/scFoundation" ;;
+    *) echo "unknown model '${MODEL}'; known: geneformer scgpt scimilarity scfoundation" >&2; exit 2 ;;
 esac
 VENV="${ENVS}/fm_${MODEL}"
 

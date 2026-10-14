@@ -4,6 +4,7 @@
 #   bash data_collation/scripts/install_foundation.sh geneformer
 #   bash data_collation/scripts/install_foundation.sh scgpt
 #   bash data_collation/scripts/install_foundation.sh scimilarity
+#   bash data_collation/scripts/install_foundation.sh scfoundation
 #
 # Login node, once per model. Safe to re-run. FRESH=1 rebuilds the venv.
 #
@@ -19,7 +20,7 @@
 
 set -euo pipefail
 
-MODEL="${1:?usage: install_foundation.sh <geneformer|scgpt|scimilarity>}"
+MODEL="${1:?usage: install_foundation.sh <geneformer|scgpt|scimilarity|scfoundation>}"
 MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
 ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
 VENV="${ENVS}/fm_${MODEL}"
@@ -143,12 +144,54 @@ PYEOF
     find "${MODELS}/SCimilarity" -maxdepth 2 -type f | head -12
     CHECK="scimilarity"
     ;;
-  *) echo "unknown model '${MODEL}'; known: geneformer scgpt scimilarity" >&2; exit 2 ;;
+  scfoundation)
+    # THEIR ENTRY POINT IS A SCRIPT, so the repository is cloned for
+    # get_embedding.py and OS_scRNA_gene_index.19264.tsv rather than pip
+    # installed. Nothing of theirs is imported; we run it as documented.
+    printf 'numpy<2\ntorch==%s\n' \
+        "$(python -c 'import torch; print(torch.__version__)')" > "${VENV}/constraints.txt"
+    pip install --quiet -c "${VENV}/constraints.txt" \
+        einops local-attention scanpy
+
+    mkdir -p "${MODELS}"
+    if [[ -d "${MODELS}/scFoundation/.git" ]]; then
+        echo "  repository present; fetching"
+        git -C "${MODELS}/scFoundation" pull --quiet || true
+    else
+        git clone --quiet --depth 1 \
+            https://github.com/biomap-research/scFoundation.git \
+            "${MODELS}/scFoundation"
+    fi
+
+    # WEIGHTS, AND THE SAME PROVENANCE CAVEAT AS scGPT. The canonical link is
+    # a SharePoint folder, which needs a browser session and so cannot be
+    # fetched from a login node. genbio-ai/scFoundation mirrors models.ckpt
+    # (1.43 GB, ungated) on HuggingFace. The sha256 is printed below and
+    # belongs in the Methods section. An existing file is left alone, so
+    # rsyncing the canonical checkpoint overrides this.
+    CKPT_DIR="${MODELS}/scFoundation/model/models"
+    mkdir -p "${CKPT_DIR}"
+    if [[ -f "${CKPT_DIR}/models.ckpt" ]]; then
+        echo "  checkpoint already present; not re-fetching"
+    else
+        python - "${CKPT_DIR}" <<'PYEOF'
+import sys
+from huggingface_hub import hf_hub_download
+path = hf_hub_download("genbio-ai/scFoundation", "models.ckpt",
+                       local_dir=sys.argv[1])
+print(f"  downloaded to {path}")
+PYEOF
+    fi
+    echo "  sha256 of models.ckpt (RECORD THIS for the Methods section):"
+    sha256sum "${CKPT_DIR}/models.ckpt"
+    CHECK="scfoundation"
+    ;;
+  *) echo "unknown model '${MODEL}'; known: geneformer scgpt scimilarity scfoundation" >&2; exit 2 ;;
 esac
 
 echo
 echo "── verifying (imports, not pip's opinion) ──"
-python - "$CHECK" <<'PYEOF'
+python - "$CHECK" "${MODELS}/scFoundation" <<'PYEOF'
 import importlib, sys
 ok = True
 for pkg in ("numpy", "pandas", "anndata", "torch", *sys.argv[1].split()):
@@ -182,6 +225,23 @@ if "scgpt" in sys.argv[1].split():
     else:
         from scgpt.tasks import embed_data            # noqa: F401
         print("  embed_data           importable")
+if "scfoundation" in sys.argv[1].split():
+    # NOT an import: their entry point is a script, so what matters is that
+    # the three files exist and the checkpoint is not a 1 kB error page.
+    import pathlib
+    model_dir = pathlib.Path(sys.argv[2]) / "model"
+    for rel, floor in (("get_embedding.py", 1_000),
+                       ("OS_scRNA_gene_index.19264.tsv", 100_000),
+                       ("models/models.ckpt", 100_000_000)):
+        path = model_dir / rel
+        if not path.is_file():
+            print(f"  {rel:<34} MISSING")
+            ok = False
+        elif path.stat().st_size < floor:
+            print(f"  {rel:<34} TOO SMALL ({path.stat().st_size} bytes)")
+            ok = False
+        else:
+            print(f"  {rel:<34} ok ({path.stat().st_size / 1e6:.1f} MB)")
 if "scimilarity" in sys.argv[1].split():
     try:
         from scimilarity import CellEmbedding                  # noqa: F401

@@ -83,7 +83,12 @@ case "${MODEL}" in
     pip install --quiet --no-deps "git+https://github.com/bowang-lab/scGPT.git"
     pip install --quiet -c "${VENV}/constraints.txt" \
         scanpy einops numba scikit-misc umap-learn leidenalg "datasets<4" \
-        "pyarrow<17" torchmetrics
+        "pyarrow<17" torchmetrics ipython
+    # SATISFY THE IMPORT, NOT THE TREE. scgpt/tasks/__init__.py imports every
+    # task, so reaching embed_data drags in modules for perturbation and GRN
+    # work we never call. Those are installed --no-deps: present enough to
+    # import, without pulling scvi-tools<1.0 and the old jax behind it.
+    pip install --quiet --no-deps cell-gears scib || true
     # No flash-attn, deliberately: scGPT lists it in an optional `fa2` group,
     # embed_data is called with use_fast_transformer=False, and building it
     # against a pip torch is a day we do not have.
@@ -140,12 +145,25 @@ for pkg in ("numpy", "pandas", "anndata", "torch", *sys.argv[1].split()):
 # pulls in the model, tokeniser and preprocessor, and a missing dependency
 # three levels down is exactly what --no-deps risks.
 if "scgpt" in sys.argv[1].split():
-    try:
+    # Walked in stages, because "No module named X" does not say WHERE in the
+    # chain X was wanted, and --no-deps makes that the only question worth
+    # answering. Each stage names the next package to add.
+    for label, target in (("scgpt", "scgpt"),
+                          ("scgpt.model", "scgpt.model"),
+                          ("scgpt.tokenizer", "scgpt.tokenizer"),
+                          ("scgpt.preprocess", "scgpt.preprocess"),
+                          ("scgpt.tasks", "scgpt.tasks"),
+                          ("scgpt.tasks.cell_emb", "scgpt.tasks.cell_emb")):
+        try:
+            importlib.import_module(target)
+            print(f"  {label:<20} ok")
+        except Exception as exc:                               # noqa: BLE001
+            ok = False
+            print(f"  {label:<20} FAILS ({type(exc).__name__}: {exc})")
+            break
+    else:
         from scgpt.tasks import embed_data            # noqa: F401
-        print("  scgpt.tasks      embed_data importable")
-    except Exception as exc:                                   # noqa: BLE001
-        ok = False
-        print(f"  scgpt.tasks      UNREACHABLE ({type(exc).__name__}: {exc})")
+        print("  embed_data           importable")
 if "geneformer" in sys.argv[1].split():
     try:
         from geneformer import EmbExtractor, TranscriptomeTokenizer  # noqa: F401

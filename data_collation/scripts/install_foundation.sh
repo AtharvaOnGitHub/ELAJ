@@ -128,20 +128,38 @@ PYEOF
         "$(python -c 'import torch; print(torch.__version__)')" > "${VENV}/constraints.txt"
     pip install --quiet scimilarity -c "${VENV}/constraints.txt"
 
-    # Weights on Zenodo over plain HTTPS, which a login node can fetch -- no
-    # Google Drive, no SharePoint, no access form. Record 10685499.
+    # WHICH ARCHIVE, BECAUSE ZENODO OFFERS THREE AND THEY DIFFER BY 260x.
+    #
+    #   record 15729925  scimilarity.tar.gz          116.5 MB  encoder only
+    #   record 8286452   annotation_model_v1.tar.gz    6.8 GB   API v0.1.0
+    #   record 10685499  model_v1.1.tar.gz            30.3 GB   API v0.2.0
+    #
+    # The 30.3 GB bundle is weights PLUS 23 million reference cell embeddings
+    # and kNN graphs, which CellQuery needs and CellEmbedding never touches.
+    # Downloading it to compute embeddings was my mistake: at the ~63 kB/s
+    # Zenodo was serving on 14 October it was a five-day transfer.
+    #
+    # So the encoder-only archive is the default. Override with
+    # SCIM_URL=... if it turns out to lack something CellEmbedding reads; the
+    # 6.8 GB annotation model is the next step up, and it pairs with
+    # scimilarity 0.1.x rather than the current release.
+    SCIM_URL="${SCIM_URL:-https://zenodo.org/records/15729925/files/scimilarity.tar.gz?download=1}"
     mkdir -p "${MODELS}/SCimilarity"
     if compgen -G "${MODELS}/SCimilarity/*/" > /dev/null; then
         echo "  model directory already present; not re-fetching"
     else
-        echo "  fetching from Zenodo 10685499 ..."
-        curl -L --fail --retry 3 -o "${MODELS}/SCimilarity/model.tar.gz" \
-          "https://zenodo.org/records/10685499/files/model_v1.1.tar.gz?download=1"
+        echo "  fetching ${SCIM_URL}"
+        # -C - resumes a partial file rather than starting again, which matters
+        # when Zenodo is slow. --speed-limit/--speed-time abandons a transfer
+        # stalled under 10 kB/s for two minutes instead of hanging for days.
+        curl -L --fail --retry 5 --retry-delay 10 -C - \
+             --speed-limit 10240 --speed-time 120 \
+             -o "${MODELS}/SCimilarity/model.tar.gz" "${SCIM_URL}"
         tar -xzf "${MODELS}/SCimilarity/model.tar.gz" -C "${MODELS}/SCimilarity"
         rm -f "${MODELS}/SCimilarity/model.tar.gz"
     fi
-    echo "  model directory holds:"
-    find "${MODELS}/SCimilarity" -maxdepth 2 -type f | head -12
+    echo "  extracted tree (CellEmbedding needs the encoder and a gene order):"
+    find "${MODELS}/SCimilarity" -maxdepth 3 | head -30
     CHECK="scimilarity"
     ;;
   scfoundation)

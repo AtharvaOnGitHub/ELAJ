@@ -51,8 +51,18 @@ case "${MODEL}" in
   geneformer)
     # V1-10M, Genecorpus-30M, June 2021. transformers 4.x because the V1
     # checkpoint is a plain BertModel and 5.x changed the loading path.
-    pip install --quiet "transformers>=4.40,<5" "datasets<4" "pyarrow<17" loompy tdigest
-    pip install --quiet --no-deps "${MODELS}/Geneformer"
+    #
+    # WITH ITS DEPENDENCIES, not --no-deps. The first attempt used --no-deps to
+    # avoid module shadowing, and in a clean venv there is nothing to shadow,
+    # so geneformer's import of matplotlib simply failed. Letting pip resolve
+    # its real dependency list ends that whack-a-mole; only numpy and torch are
+    # held down, because numpy 2 breaks pyarrow and our own corpus code, and a
+    # resolver free to reinstall torch would discard the cu124 build above.
+    printf 'numpy<2\ntorch==%s\npyarrow<17\n' \
+        "$(python -c 'import torch; print(torch.__version__)')" > "${VENV}/constraints.txt"
+    pip install --quiet "transformers>=4.40,<5" "datasets<4" \
+        -c "${VENV}/constraints.txt"
+    pip install --quiet "${MODELS}/Geneformer" -c "${VENV}/constraints.txt"
     CHECK="geneformer transformers datasets"
     ;;
   scgpt)

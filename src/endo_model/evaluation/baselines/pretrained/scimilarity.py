@@ -43,13 +43,49 @@ class ScimilarityEmbedder:
 
     def __init__(self, repo: str | Path, work: str | Path | None = None,
                  batch_size: int = 10000, **_ignored) -> None:
-        self.repo = Path(repo)
         self.batch_size = int(batch_size)
-        if not self.repo.is_dir():
+        self.repo = self.resolve_model_dir(Path(repo))
+
+    #: The file CellEmbedding opens first, and so what identifies the model
+    #: directory. It is the one landmark their loader needs by name.
+    LANDMARK = "gene_order.tsv"
+
+    @classmethod
+    def resolve_model_dir(cls, root: Path) -> Path:
+        """The directory CellEmbedding wants, found rather than assumed.
+
+        Their Zenodo archive extracts into a subdirectory whose name is not
+        documented and differs between records -- the 116 MB encoder archive
+        unpacks to `scimilarity/`. Pointing CellEmbedding at the parent gives
+        `FileNotFoundError: .../gene_order.tsv`, which is what happened on
+        15 October 2026. So the landmark file is searched for, two levels
+        down, and whatever directory holds it is the model directory.
+        """
+        if not root.is_dir():
             raise FileNotFoundError(
-                f"no SCimilarity model directory at {self.repo}; run "
+                f"no SCimilarity directory at {root}; run "
                 f"data_collation/scripts/install_foundation.sh scimilarity"
             )
+        found = sorted(root.glob(cls.LANDMARK)) \
+            or sorted(root.glob(f"*/{cls.LANDMARK}")) \
+            or sorted(root.glob(f"*/*/{cls.LANDMARK}"))
+        if not found:
+            raise FileNotFoundError(
+                f"no {cls.LANDMARK} under {root} (searched two levels). The "
+                f"archive may be the wrong one: the 116 MB encoder archive "
+                f"from Zenodo record 15729925 carries it. Tree:\n  "
+                + "\n  ".join(str(p.relative_to(root))
+                               for p in sorted(root.rglob("*"))[:20])
+            )
+        if len(found) > 1:
+            raise ValueError(
+                f"several {cls.LANDMARK} under {root}, so the model directory "
+                f"is ambiguous: {[str(p.parent) for p in found]}"
+            )
+        model_dir = found[0].parent
+        logger.info("SCimilarity model directory: %s (found by %s)",
+                    model_dir, cls.LANDMARK)
+        return model_dir
 
     @property
     def name(self) -> str:

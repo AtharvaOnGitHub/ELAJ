@@ -14,7 +14,9 @@ rather than my reading of their docs.
 
 PREPROCESSING IS THEIRS, NOT OURS. lognorm_counts does the tp10k log
 normalisation the model was trained with. We hand over raw counts and let it
-decide, which is what a reader following their tutorial gets.
+decide, which is what a reader following their tutorial gets. It reads those
+counts from `layers["counts"]` rather than from `.X`, which is undocumented
+on the function's own page and raises if the layer is missing.
 """
 
 from __future__ import annotations
@@ -143,6 +145,14 @@ class ScimilarityEmbedder:
                     "from our %d", shared, len(order), corpus.n_genes)
 
         adata = align_dataset(self.to_anndata(corpus), order)
+
+        # lognorm_counts READS layers["counts"], NOT .X, and raises if it is
+        # absent. Set after align_dataset rather than before, because align
+        # reorders and pads the gene axis and the layer has to match the
+        # aligned matrix. Copied, not aliased: lognorm writes the normalised
+        # values into .X, and sharing the buffer would overwrite the counts it
+        # is reading from.
+        adata.layers["counts"] = adata.X.copy()
         adata = lognorm_counts(adata)
         latent = np.asarray(model.get_embeddings(adata.X,
                                                  buffer_size=self.batch_size),

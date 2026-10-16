@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH --qos=bbdefault
+#SBATCH --qos=bbgpu
+#SBATCH --gres=gpu:1
 #SBATCH --time=08:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
@@ -14,11 +15,18 @@
 #   sbatch data_collation/scripts/score_external.sh scgpt
 #   sbatch data_collation/scripts/score_external.sh scimilarity
 #
-# NO GPU, WHICH IS THE POINT. The scorer is a kNN search in sklearn, the
-# permutation null, and scIB on jax-CPU. benchmark_baselines.sh asks for an
-# a100_80 only because scVI and scANVI train on one, and --methods none
-# trains nothing. Dropping the card moves this to bbdefault, where several
-# can run at once however many GPUs happen to be free.
+# A GPU IS REQUESTED AND BARELY USED, AND THAT IS NOT A MISTAKE. The scorer
+# is a kNN search in sklearn, the permutation null and scIB on jax-CPU, so
+# nothing here needs a card. But the PyTorch module the elaj venv was built
+# against lives in the GPU nodes' software stack, and loading it on bbdefault
+# fails with "the following module(s) are unknown" -- which is exactly what
+# happened to the scgpt job on 16 October, and exactly what
+# diagnose_bn_mode.sh's header already warned about. The computation does not
+# need a card; the environment does.
+#
+# --gres=gpu:1 rather than gpu:a100_80:1, which is the part that was worth
+# keeping: any card will do when none of them is used, and the pool of any
+# card is far larger than the pool of a100_80s.
 #
 # ONE MODEL PER JOB, DELIBERATELY. On 15 October a single job scored
 # geneformer, then died of OOM partway through scgpt's scIB, and the

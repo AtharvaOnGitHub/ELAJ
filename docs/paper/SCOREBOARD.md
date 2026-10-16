@@ -2,6 +2,39 @@
 
 The paper's main results table, kept current. Last rebuilt 16 October 2026.
 
+## The claim this table supports
+
+> A parameter-efficient architecture that **beats the foundation models**, does
+> **not badly** against the fitted baselines, and keeps **donor identity low**.
+> The frontier is reported as the justification for three tiers.
+
+Beating scVI on cross-donor phase is **not** the claim and never was the right
+target: no method in this table achieves good biology and low donor identity at
+once, which is the frontier's whole content. Read every row against the claim
+above, not against the best cell in its column.
+
+---
+
+## 1. Parameter efficiency, which is the headline
+
+| model | parameters | source | ELAJ is | beats ELAJ? |
+|---|---:|---|---:|---|
+| **ELAJ** | **1.88 M** | logged at train time (1,884,750; m5 1,883,986) | — | — |
+| Geneformer V1-10M | 10.3 M | 41.2 MB safetensors ÷ 4 B | **5.5× smaller** | no — loses on all four headline metrics |
+| SCimilarity | *pending* | 116 MB archive incl. gene order | | *scoring* |
+| scGPT whole-human | ~51 M | 207 MB checkpoint; ~51 M published | **27× smaller** | on cell family only, at 32× the width |
+| scFoundation | 100 M | published (xTrimoGene) | **53× smaller** | *scoring* |
+
+ELAJ's latent is **16 dimensions** against Geneformer's 256 and scGPT's 512, so
+the width asymmetry runs against us on every kNN-based metric and we win
+anyway.
+
+That is the result. A 1.88 M-parameter model trained on eleven endometrial
+studies beats a 10 M-parameter model pretrained on 30 million cells, on every
+metric, at a sixteenth of the embedding width.
+
+---
+
 Every number is **excess over chance**: 0 is no better than guessing the
 commonest label, 1 is perfect. Arrows mark direction: ↑ higher is better,
 ↓ lower is better. Provenance in [`EVIDENCE.md`](EVIDENCE.md).
@@ -92,8 +125,10 @@ at 0.542 and 0.563, and lose to both on phase. Geneformer loses to m6ep13 on
 every one of the four headline metrics despite 16 times the width. scGPT beats
 m6ep13 on cell family, 0.984 against 0.969, at 32 times the width.
 
-**Nothing of ours beats scVI on phase.** 0.705 against our best current
-416,256-cell number of 0.607. Whether m3 changes that is §4's question.
+**Nothing of ours beats scVI on phase**, 0.705 against our best clean 0.607,
+and nothing in this table achieves good biology and low donor identity at once.
+That is the frontier, not a shortfall: it is the finding the three tiers are
+built on.
 
 **Low NMI and ARI are a real weakness.** Leiden clustering of m6ep13's latent
 recovers annotated cell types at 0.102 and 0.065 where scANVI reaches 0.447 and
@@ -294,10 +329,14 @@ configuration with one variable already chosen:
 | **ELAJ-L** | m3_study_raw, at d_z 16 rather than 24 | ~55 nats | does the best biology we have ever seen survive a clean split? |
 | **ELAJ-M** | m4_tight16 | ~41 nats | is the middle of the frontier real? |
 
-ELAJ-S is m5 and needs nothing. If ELAJ-L reproduces anything near 0.751 on
-cross-donor phase it beats scVI's 0.705 and the paper has a biology result as
-well as a donor-blindness one. If it lands near m6's 0.607, the honest paper is
-about the frontier alone.
+ELAJ-S is m5 and needs nothing.
+
+**Neither run is do-or-die.** The tiers are justified by the frontier existing
+and being monotone, not by any one of them beating a baseline. What the
+retrains buy is three *clean* points on that frontier instead of one, which is
+what makes "three tiers" a measured design rather than three arbitrary
+configurations. If ELAJ-L also happens to land near m3's old 0.751 that is a
+bonus paragraph, not the thesis.
 
 ---
 

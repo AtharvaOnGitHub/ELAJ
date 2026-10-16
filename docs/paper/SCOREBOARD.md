@@ -19,11 +19,16 @@ c1 corpus, val+test, over the per-study sampler's order.
 | 382,464 cells | **m3, m4** |
 
 m3 and m4 were scored against the older v1 corpus, and m3 is 24 dimensions
-rather than 16. Their numbers appear in §4 and **must not be read against
-anything in §2**. Re-scoring both on the current corpus is the first
-outstanding job, and it matters more than it sounds: m3 holds the best biology
-of any arm ever trained, and whether that survives the corpus change decides
-whether ELAJ has a row that beats scVI at all.
+rather than 16.
+
+**And there is a worse problem than the corpus, which re-scoring cannot fix.**
+m1 to m4 all trained before `7ed19bd` (5 October 21:48), which resolved
+CELLxGENE's per-dataset donor UUIDs to one id per person. Before it, seven of
+garcia_alonso_2021_b's fifteen donors sat on both sides of the split wall:
+5,026 cells were trained on and scored, and 8,905 more were held out from
+donors the model had partly seen. Those checkpoints learned donors that are now
+in the held-out set, so scoring them against the corrected split measures
+partly what they memorised. **Only retraining repairs it.** See §3a.
 
 One further caveat that applies throughout. The two agreement tests use
 different neighbourhood sizes (k=30 for kNN, k=100 for cross-donor) and
@@ -125,84 +130,98 @@ comparison for us.
 
 ---
 
-## 3a. The m-series: what changed, why, and what it bought
+## 3a. The m-series, arm by arm
 
-One row per arm, in the order they were run. "The one change" is against the
-arm above it.
+### Only m5 and m6 are trustworthy
 
-| arm | date | the one change against the arm above | why it was made | best val_nb | val_nb curve | xdonor family ↑ | xdonor phase ↑ | donor kNN ↓ | study mix ↓ |
-|---|---|---|---|---:|---|---:|---:|---:|---:|
-| **m1_phase_full** | 1 Oct | starting point: d_gauss 24 + 4 circles, `lambda_dab` 0.01, `w_cls` 500 | w-series renamed for the variable it chases: menstrual phase, the one label enough studies carry | 0.4062 @ep4 | flat, noisy; 0.406–0.421 with no trend | — | — | — | — |
-| **m2_cls40** | 2 Oct | `w_cls` 500 → 40, `lambda_dab` 0.01 → 140, gene masking to 12,500 | the phase head measured 2.92× reconstruction's pull: it was the objective, not an auxiliary | 0.3992 @ep3 | oscillating, 0.399–0.409 | — | — | — | — |
-| **m3_study_raw** | 3 Oct | **`d_study` 0 → 16**, `lambda_dab` 140 → 7 | the decoder had no route to study except through the latent, and DAB punished the latent for carrying it. Adversary loss correlated +0.883 with donor kNN: the blinder the adversary, the more identity the latent held | **0.3975 @ep8** | descends to ep8, then flat | *0.983* | *0.751* | *0.617* | *0.725* |
-| **m4_tight16** | 5 Oct | **d_gauss 24 → 8** (d_z 16), `lambda_dab` 7 → 336 | the latent doubled at the v series and donor mixing collapsed with it; r8 was donor-blind at 16 | 0.4069 @ep10 | barely moves: 0.4092 → 0.4069 | *0.976* | *0.676* | *0.443* | *0.631* |
-| **m5_combined** | 6 Oct | four at once: `w_kl_gauss` 1 → 30, ECS at `w_ecs` 50, `lambda_dab` 336 → 168, d_gauss 8 → 16 | the KL weight had been 1.0 in every config ever run, measured at 0.006–0.05× reconstruction's pull on the latent | 0.4043 @ep3 | shallow dip then back up | 0.961 | 0.573 | **0.406** | **0.504** |
-| **m6_drain** | 7 Oct | **drain block, 8 dims**, `w_kl_gauss` 30 → 1, `lambda_dab` 168 → 40 | give the adversary somewhere to pour into, so stripping study need not cost biology | 0.4130 @ep16 | **clean monotone descent** from 0.4603 | 0.969 | 0.607 | 0.492 | 0.736 |
-| m6_hard | 7 Oct | `lambda_dab` 40 → 120, `w_kl_gauss` 1 → 2 | insurance against the leak if the drain let study back in | 0.4091 ‡ | — | 0.928 | 0.494 | 0.451 | 0.708 |
-| m6_circ | 8 Oct | 4 circles back, `w_kl_gauss` → 0.7, drain 8 → 4 | a circle for phase, paid for by narrowing the drain | 0.4091 @ep8 | descends from 0.4376 | 0.932 | 0.493 | 0.446 | 0.735 |
+`7ed19bd`, 5 October 21:48, *One person, one donor id, so the splitter assigns
+them once*. CELLxGENE mints a donor UUID per dataset, so garcia_alonso_2021_b's
+fifteen people carried fifteen ids that none of _a's matched, and the splitter
+assigned the same person twice, independently:
 
-*Italic* rows are the 382,464-cell corpus and are not comparable to the rest
-(§0). ‡ m6_hard's metrics.csv is not in the local copy.
+> Seven of the fifteen landed on opposite sides of the wall: 5,026 cells were
+> trained on and scored, and 8,905 more sat in held-out splits belonging to
+> donors the model had partly seen.
 
-### The loss curves were not the problem, and m6 did not fix them
+m4_tight16 was created 5 October 09:57, twelve hours before that fix.
+m5_combined 6 October 10:51, after it.
 
-This is worth stating precisely, because the impression that m6 trained better
-is right about the shape and wrong about the result.
+| arm | trained | split |
+|---|---|---|
+| m1, m2, m3, m4 | before `7ed19bd` | **contaminated** |
+| m5, every m6 arm | after | clean |
 
-**m1 to m5 did not descend; they wandered.** m1 moved over a range of 0.015 in
-sixteen epochs with no trend, hitting its best at epoch 4 and its worst at
-epoch 9. m2 oscillated between 0.399 and 0.409. m4 moved 0.0023 in nineteen
-epochs. On a reconstruction loss near 0.41 these are movements of three
-percent and less, mostly noise.
+**This cannot be repaired by re-scoring.** Those checkpoints learned donors
+that now sit in the held-out set, so scoring them against the corrected split
+measures partly what they memorised. Only retraining fixes it. Every m1–m4
+number below is struck through for that reason, on top of the separate corpus
+mismatch in §0.
 
-**m6 descended cleanly, from a much worse place.** 0.4603 at epoch 0, a spike
-to 0.5024 at epoch 1, then monotone to 0.4130 by epoch 16. That is a real ten
-percent improvement and it is why the curve looks better than anything before
-it.
+### The progression
 
-**But its floor is the worst in the series.** 0.4130 against m3's 0.3975, and
-worse even than m1's best. m6 had further to fall and still landed higher.
+| arm | split | problem diagnosed against the arm above | fix | expectation | reality |
+|---|---|---|---|---|---|
+| **m1_phase_full** | ✗ | — (series start) | d_gauss 24 + 4 circles, `lambda_dab` 0.01, `w_cls` 500 | phase supervision gives the latent a biology anchor | val_nb wandered 0.406–0.421 with no trend |
+| **m2_cls40** | ✗ | phase head pulled 2.92× reconstruction: it *was* the objective | `w_cls` 500 → 40, `lambda_dab` → 140, mask to 12,500 genes | a real auxiliary, not a second objective | val_nb floor 0.3992; still oscillating |
+| **m3_study_raw** | ✗ | encoder was *hiding* study from the adversary, not discarding it: adversary loss correlated **+0.883** with donor kNN | `d_study` 0 → 16 so the decoder gets study directly; `lambda_dab` → 7 | decoder stops needing study from the latent | **best val_nb of the series, 0.3975**; best biology |
+| **m4_tight16** | ✗ | latent doubled at the v series and donor mixing collapsed with it | d_gauss 24 → 8 (d_z 16); `lambda_dab` → 336 | r8's donor-blindness back at r8's width | donor kNN 0.617 → 0.443; val_nb barely moved (0.0023) |
+| **m5_combined** | ✓ | KL weight had been 1.0 in *every* config ever run, measured at 0.006–0.05× reconstruction's pull | `w_kl_gauss` 1 → 30, ECS at 50, `lambda_dab` → 168, d_gauss → 16 | price the latent properly, mix studies | **best donor-blindness and batch mixing of any clean arm** |
+| **m6_drain** | ✓ | stripping study costs biology because it has nowhere else to go | drain block, 8 dims, rewarded for what the adversary punishes; `w_kl_gauss` → 1, `lambda_dab` → 40 | biology freed from paying the adversary's bill | drain held its targets but **relieved the biology block of nothing** |
+| m6_hard | ✓ | drain might let study leak back in | `lambda_dab` → 120, `w_kl_gauss` → 2 | insurance | strictly worse than m5 on all three axes |
+| m6_circ | ✓ | phase is periodic and the drain is too wide | 4 circles back, drain 8 → 4, `w_kl_gauss` → 0.7 | a cheaper phase representation | strictly worse than m5 on all three axes |
 
-| arm | first val_nb | best val_nb | improvement |
+### The metrics
+
+| arm | split | best val_nb | val_nb curve | xdonor family ↑ | xdonor phase ↑ | donor kNN ↓ | study mix ↓ | NMI ↑ |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| m1_phase_full | ✗ | *0.4062* | flat, no trend | — | — | — | — | — |
+| m2_cls40 | ✗ | *0.3992* | oscillating | — | — | — | — | — |
+| m3_study_raw | ✗ | *0.3975* | descends to ep8, then flat | *0.983* | *0.751* | *0.617* | *0.725* | *0.090* |
+| m4_tight16 | ✗ | *0.4069* | barely moves | *0.976* | *0.676* | *0.443* | *0.631* | *0.325* |
+| **m5_combined** | ✓ | 0.4043 | shallow dip, then back up | 0.961 | 0.573 | **0.406** | **0.504** | 0.315 |
+| **m6_drain ep13** | ✓ | 0.4130 | **clean monotone descent** | **0.969** | 0.607 | 0.492 | 0.736 | 0.102 |
+| m6_drain ep16 | ✓ | 0.4130 | " | 0.970 | **0.624** | 0.500 | 0.757 | 0.097 |
+| m6_hard ep8 | ✓ | 0.4091 | — | 0.928 | 0.494 | 0.451 | 0.708 | 0.314 |
+| m6_circ ep6 | ✓ | 0.4091 | descends from 0.4376 | 0.932 | 0.493 | 0.446 | 0.735 | **0.338** |
+
+*Italic* = contaminated split and the wrong corpus. Not quotable.
+
+### Comments
+
+**The loss curves were not the problem, and m6 did not fix them.** m6 has the
+best curve shape in the series, a clean monotone descent of 0.0473 where m1 to
+m5 wandered inside ranges of 0.002 to 0.014. But it descends from 0.4603 and
+lands at 0.4130, the **worst floor in the series** — worse than m1's best. It
+had further to fall and still ended higher. "Best loss curve" is a statement
+about the optimiser; "worst reconstruction" is the statement about the model,
+and the paper should quote the floor.
+
+| arm | first val_nb | best | improvement |
 |---|---:|---:|---:|
-| m3_study_raw | 0.4112 | **0.3975** | 0.0137 |
+| m3_study_raw | 0.4112 | 0.3975 | 0.0137 |
 | m2_cls40 | 0.4098 | 0.3992 | 0.0106 |
 | m5_combined | 0.4092 | 0.4043 | 0.0049 |
-| m1_phase_full | 0.4163 | 0.4062 | 0.0101 |
 | m4_edge_starved | 0.4092 | 0.4069 | 0.0023 |
-| m6_drain | 0.4603 | 0.4130 | **0.0473** |
+| m6_drain | 0.4603 | **0.4130** | **0.0473** |
 
-So "m6 has the best loss curve" and "m6 reconstructs worst" are both true, and
-the first is a statement about the optimiser while the second is a statement
-about the model. The paper should quote the floor.
+**Why m6 starts and ends higher is unsettled.** It has more capacity than m5
+(16 Gaussian plus 8 drain against 16) and a thirtieth of the KL weight, both of
+which should help reconstruction. Three unmeasured candidates: the drain's own
+loss competing for the encoder; `blank_covariates_p` 0.25 forcing the decoder
+to work without 48 dimensions of free conditioning on a quarter of steps; or
+the drain taking capacity the biology block previously used. One ablation, in
+the queue, not in the paper.
 
-**Why m6 starts and ends higher is not settled.** It has more total capacity
-than m5 (16 Gaussian plus 8 drain against 16) and a twentieth of the KL weight,
-both of which should help reconstruction. Three candidates, none measured:
-the drain's own loss competing for the encoder; `blank_covariates_p` 0.25
-forcing the decoder to work without 48 dimensions of free conditioning on a
-quarter of steps; or the drain taking encoder capacity that the biology block
-previously used. Worth one ablation, and it belongs in the queue rather than in
-the paper as speculation.
-
-### What each change actually bought
-
-**m3's `d_study` is the single best change the project has made.** Best
-reconstruction of any arm, and the reasoning behind it was diagnostic rather
-than a sweep: the adversary's loss correlated +0.883 with donor kNN, meaning
-the encoder was hiding study from the classifier rather than discarding it, and
-the decoder had no other route to study-specific expression. Giving the decoder
-the study removed the contradiction.
-
-**m4's narrowing bought donor-blindness at a measured price.** 0.617 → 0.443
-on donor identity for 0.075 of cross-donor phase. That is the exchange rate the
-whole frontier is made of.
-
-**m5's KL weight bought more of the same**, at an accelerating cost: another
-0.037 of donor identity for 0.103 of phase. Diminishing returns, visible.
+**m3's `d_study` was the best change the project made, and we cannot use it.**
+Best reconstruction of any arm, reasoned from a diagnostic rather than a sweep.
+It is also on the contaminated split. The *mechanism* carries forward — every
+arm since sets `d_study` 16 — but the numbers do not.
 
 **m6's drain bought nothing.** It is the only change in the series that moved
-the arm *off* the frontier rather than along it (§4).
+an arm off the frontier rather than along it (§4). Its own diagnostics said so:
+it held its targets (log depth 0.821, log genes 0.801, study 0.664) without
+relieving the biology block of them (log genes 0.547, study 0.462). It absorbed
+signal; it did not displace any.
 
 ---
 
@@ -262,11 +281,23 @@ Each dominates the others on its own axis and the ordering is monotone in all
 four headline metrics, which is exactly what a frontier should look like and is
 far more defensible than nominating one arm.
 
-**It cannot be published as it stands.** Two of the three are scored on the
-wrong corpus, and ELAJ-L is 24 dimensions where the others are 16. Both are
-fixed by one job each: re-score the m3 and m4 checkpoints on the 416,256-cell
-corpus against the fixed inductive baselines. Until then §5 is a plan, not a
-result.
+**It cannot be published as it stands, and the fix is not cheap.** m3 and m4
+trained on a contaminated split (§3a), so neither checkpoint is usable at any
+price: re-scoring would measure memorised donors. ELAJ-L and ELAJ-M have to be
+**retrained** on the corrected split, not re-scored.
+
+That is the whole content of the last training phase. Two runs, each a known
+configuration with one variable already chosen:
+
+| | retrain from | budget | the question it answers |
+|---|---|---|---|
+| **ELAJ-L** | m3_study_raw, at d_z 16 rather than 24 | ~55 nats | does the best biology we have ever seen survive a clean split? |
+| **ELAJ-M** | m4_tight16 | ~41 nats | is the middle of the frontier real? |
+
+ELAJ-S is m5 and needs nothing. If ELAJ-L reproduces anything near 0.751 on
+cross-donor phase it beats scVI's 0.705 and the paper has a biology result as
+well as a donor-blindness one. If it lands near m6's 0.607, the honest paper is
+about the frontier alone.
 
 ---
 

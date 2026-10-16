@@ -125,6 +125,87 @@ comparison for us.
 
 ---
 
+## 3a. The m-series: what changed, why, and what it bought
+
+One row per arm, in the order they were run. "The one change" is against the
+arm above it.
+
+| arm | date | the one change against the arm above | why it was made | best val_nb | val_nb curve | xdonor family ↑ | xdonor phase ↑ | donor kNN ↓ | study mix ↓ |
+|---|---|---|---|---:|---|---:|---:|---:|---:|
+| **m1_phase_full** | 1 Oct | starting point: d_gauss 24 + 4 circles, `lambda_dab` 0.01, `w_cls` 500 | w-series renamed for the variable it chases: menstrual phase, the one label enough studies carry | 0.4062 @ep4 | flat, noisy; 0.406–0.421 with no trend | — | — | — | — |
+| **m2_cls40** | 2 Oct | `w_cls` 500 → 40, `lambda_dab` 0.01 → 140, gene masking to 12,500 | the phase head measured 2.92× reconstruction's pull: it was the objective, not an auxiliary | 0.3992 @ep3 | oscillating, 0.399–0.409 | — | — | — | — |
+| **m3_study_raw** | 3 Oct | **`d_study` 0 → 16**, `lambda_dab` 140 → 7 | the decoder had no route to study except through the latent, and DAB punished the latent for carrying it. Adversary loss correlated +0.883 with donor kNN: the blinder the adversary, the more identity the latent held | **0.3975 @ep8** | descends to ep8, then flat | *0.983* | *0.751* | *0.617* | *0.725* |
+| **m4_tight16** | 5 Oct | **d_gauss 24 → 8** (d_z 16), `lambda_dab` 7 → 336 | the latent doubled at the v series and donor mixing collapsed with it; r8 was donor-blind at 16 | 0.4069 @ep10 | barely moves: 0.4092 → 0.4069 | *0.976* | *0.676* | *0.443* | *0.631* |
+| **m5_combined** | 6 Oct | four at once: `w_kl_gauss` 1 → 30, ECS at `w_ecs` 50, `lambda_dab` 336 → 168, d_gauss 8 → 16 | the KL weight had been 1.0 in every config ever run, measured at 0.006–0.05× reconstruction's pull on the latent | 0.4043 @ep3 | shallow dip then back up | 0.961 | 0.573 | **0.406** | **0.504** |
+| **m6_drain** | 7 Oct | **drain block, 8 dims**, `w_kl_gauss` 30 → 1, `lambda_dab` 168 → 40 | give the adversary somewhere to pour into, so stripping study need not cost biology | 0.4130 @ep16 | **clean monotone descent** from 0.4603 | 0.969 | 0.607 | 0.492 | 0.736 |
+| m6_hard | 7 Oct | `lambda_dab` 40 → 120, `w_kl_gauss` 1 → 2 | insurance against the leak if the drain let study back in | 0.4091 ‡ | — | 0.928 | 0.494 | 0.451 | 0.708 |
+| m6_circ | 8 Oct | 4 circles back, `w_kl_gauss` → 0.7, drain 8 → 4 | a circle for phase, paid for by narrowing the drain | 0.4091 @ep8 | descends from 0.4376 | 0.932 | 0.493 | 0.446 | 0.735 |
+
+*Italic* rows are the 382,464-cell corpus and are not comparable to the rest
+(§0). ‡ m6_hard's metrics.csv is not in the local copy.
+
+### The loss curves were not the problem, and m6 did not fix them
+
+This is worth stating precisely, because the impression that m6 trained better
+is right about the shape and wrong about the result.
+
+**m1 to m5 did not descend; they wandered.** m1 moved over a range of 0.015 in
+sixteen epochs with no trend, hitting its best at epoch 4 and its worst at
+epoch 9. m2 oscillated between 0.399 and 0.409. m4 moved 0.0023 in nineteen
+epochs. On a reconstruction loss near 0.41 these are movements of three
+percent and less, mostly noise.
+
+**m6 descended cleanly, from a much worse place.** 0.4603 at epoch 0, a spike
+to 0.5024 at epoch 1, then monotone to 0.4130 by epoch 16. That is a real ten
+percent improvement and it is why the curve looks better than anything before
+it.
+
+**But its floor is the worst in the series.** 0.4130 against m3's 0.3975, and
+worse even than m1's best. m6 had further to fall and still landed higher.
+
+| arm | first val_nb | best val_nb | improvement |
+|---|---:|---:|---:|
+| m3_study_raw | 0.4112 | **0.3975** | 0.0137 |
+| m2_cls40 | 0.4098 | 0.3992 | 0.0106 |
+| m5_combined | 0.4092 | 0.4043 | 0.0049 |
+| m1_phase_full | 0.4163 | 0.4062 | 0.0101 |
+| m4_edge_starved | 0.4092 | 0.4069 | 0.0023 |
+| m6_drain | 0.4603 | 0.4130 | **0.0473** |
+
+So "m6 has the best loss curve" and "m6 reconstructs worst" are both true, and
+the first is a statement about the optimiser while the second is a statement
+about the model. The paper should quote the floor.
+
+**Why m6 starts and ends higher is not settled.** It has more total capacity
+than m5 (16 Gaussian plus 8 drain against 16) and a twentieth of the KL weight,
+both of which should help reconstruction. Three candidates, none measured:
+the drain's own loss competing for the encoder; `blank_covariates_p` 0.25
+forcing the decoder to work without 48 dimensions of free conditioning on a
+quarter of steps; or the drain taking encoder capacity that the biology block
+previously used. Worth one ablation, and it belongs in the queue rather than in
+the paper as speculation.
+
+### What each change actually bought
+
+**m3's `d_study` is the single best change the project has made.** Best
+reconstruction of any arm, and the reasoning behind it was diagnostic rather
+than a sweep: the adversary's loss correlated +0.883 with donor kNN, meaning
+the encoder was hiding study from the classifier rather than discarding it, and
+the decoder had no other route to study-specific expression. Giving the decoder
+the study removed the contradiction.
+
+**m4's narrowing bought donor-blindness at a measured price.** 0.617 → 0.443
+on donor identity for 0.075 of cross-donor phase. That is the exchange rate the
+whole frontier is made of.
+
+**m5's KL weight bought more of the same**, at an accelerating cost: another
+0.037 of donor identity for 0.103 of phase. Diminishing returns, visible.
+
+**m6's drain bought nothing.** It is the only change in the series that moved
+the arm *off* the frontier rather than along it (§4).
+
+---
+
 ## 4. The m-series frontier, and why m6 is off it
 
 **m5 and the m6 arms are on 416,256 cells. m3 and m4 are on 382,464 and cannot

@@ -11,11 +11,10 @@ several times over and an automatic sweep would plot scVI five times. Each
 entry names the directory, the method prefix within it, the label on the
 figure, and which family it is drawn as.
 
-THE CONTAMINATION FLAG IS PART OF THE DATA. Arms trained before `7ed19bd`
-ran with donors on both sides of the split wall, so they are marked
-`elaj_contaminated`, drawn hollow, and excluded from every Pareto front.
-Removing them entirely would lose the shape of the trade-off they trace;
-quoting them would be wrong. Hollow is the honest middle.
+m1 TO m4 ARE ABSENT, DELIBERATELY. They trained before `7ed19bd` with donors
+on both sides of the split wall, and were scored on the 382,464-cell v1 corpus
+rather than the current 416,256. Two independent reasons their numbers are not
+comparable, and a plotted point invites a comparison there is none to make.
 """
 
 from __future__ import annotations
@@ -32,17 +31,18 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("elaj.frontier")
 
 #: (directory, method prefix, label, family, val_nb, width)
+#:
+#: Marker order within a family follows this list, so keep related arms
+#: adjacent: the m6 family reads better as four consecutive shapes.
 SOURCES = [
-    ("m3_study_v2",          "elaj",   "m3",         "elaj_contaminated", 0.3975, 24),
-    ("m4_tight16_study_v2",  "elaj",   "m4",         "elaj_contaminated", 0.4069, 16),
-    ("m5_study_v2",          "elaj",   "m5 (ELAJ-S)", "elaj",             0.4043, 16),
-    ("ind_m6_drain_ep13",    "elaj",   "m6 ep13",    "elaj",              0.4130, 16),
-    ("ind_m6_drain",         "elaj",   "m6 ep16",    "elaj",              0.4130, 16),
-    ("ind_m6_drain_hard",    "elaj",   "m6 hard",    "elaj",              0.4091, 16),
-    ("ind_m6_drain_circ",    "elaj",   "m6 circ",    "elaj",              0.4091, 20),
-    ("axis_m6_drain",        "pca",    "PCA",        "baseline",          None,   16),
-    ("axis_m6_drain",        "scvi",   "scVI",       "baseline",          None,   16),
-    ("axis_m6_drain",        "scanvi", "scANVI",     "baseline",          None,   16),
+    ("m5_study_v2",          "elaj",   "m5",         "elaj",     0.4043, 16),
+    ("ind_m6_drain_ep13",    "elaj",   "m6 ep13",    "elaj",     0.4130, 16),
+    ("ind_m6_drain",         "elaj",   "m6 ep16",    "elaj",     0.4130, 16),
+    ("ind_m6_drain_hard",    "elaj",   "m6 hard",    "elaj",     0.4091, 16),
+    ("ind_m6_drain_circ",    "elaj",   "m6 circ",    "elaj",     0.4091, 20),
+    ("axis_m6_drain",        "pca",    "PCA",        "baseline", None,   16),
+    ("axis_m6_drain",        "scvi",   "scVI",       "baseline", None,   16),
+    ("axis_m6_drain",        "scanvi", "scANVI",     "baseline", None,   16),
 ]
 
 #: Foundation-model rows, which live in their own per-model directories.
@@ -139,8 +139,7 @@ def main() -> None:
 
     from endo_model.viz import apply_theme, save_figure
     from endo_model.viz.frontier_panels import (
-        BIOLOGY_AXES, DONOR_AXES, frontier_grid, pareto_front,
-        reconstruction_panel,
+        DONOR_AXES, frontier_figure, pareto_front, reconstruction_panel,
     )
 
     apply_theme()
@@ -151,31 +150,38 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    # 1. The headline: the two axes the paper argues over.
-    fig = frontier_grid(points, ["donor_knn"],
-                        ["xdonor_family", "xdonor_phase"],
-                        title="The frontier: donor identity against biology")
+    from endo_model.viz.frontier_panels import assign_styles
+
+    styles = assign_styles(points)
+
+    # 1. The headline: the two axes the paper argues over, side by side.
+    fig = frontier_figure(points, "donor_knn", styles,
+                          biology_axes=["xdonor_family", "xdonor_phase"],
+                          ncols=2)
     save_figure(fig, out / "frontier_headline")
 
-    # 2. The full cross product, so a claim can be checked against every
-    #    pairing rather than the flattering one.
-    fig = frontier_grid(points, ["donor_knn", "study_mixing", "neighbours_kept"],
-                        list(BIOLOGY_AXES),
-                        title="Donor identity against biology, every pairing")
-    save_figure(fig, out / "frontier_grid")
+    # 2. One figure per donor axis, four by two. Splitting by donor axis is
+    #    what makes these readable: every panel in a figure asks the same
+    #    question of x, so the horizontal meaning is fixed once.
+    for donor_axis in DONOR_AXES:
+        fig = frontier_figure(points, donor_axis, styles, ncols=4)
+        save_figure(fig, out / f"frontier_{donor_axis}")
 
     # 3. Reconstruction, separately, because only ELAJ arms have a val_nb.
     import matplotlib.pyplot as plt
 
+    from endo_model.viz.frontier_panels import legend as frontier_legend
+
     axes_to_plot = ["donor_knn", "xdonor_family", "xdonor_phase", "nmi"]
     fig, axs = plt.subplots(1, len(axes_to_plot),
-                            figsize=(3.5 * len(axes_to_plot), 3.3),
+                            figsize=(3.5 * len(axes_to_plot), 3.4),
                             squeeze=False)
     for ax, axis in zip(axs[0], axes_to_plot):
-        reconstruction_panel(ax, points, axis)
+        reconstruction_panel(ax, points, axis, styles)
     fig.suptitle("Reconstruction against the frontier (ELAJ arms only)",
-                 fontsize=11)
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+                 fontsize=12)
+    frontier_legend(fig, [p for p in points if p.val_nb is not None], styles)
+    fig.tight_layout(rect=(0, 0.12, 1, 0.93))
     save_figure(fig, out / "frontier_val_nb")
 
     # The fronts in text, because a figure is not a citable number.

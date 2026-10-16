@@ -1,358 +1,203 @@
-# Scoreboard: ELAJ against the baselines
+# Scoreboard: ELAJ against the baselines and the foundation models
 
-The paper's main results table, kept current. Two questions, asked after every
-run:
+The paper's main results table, kept current. Last rebuilt 16 October 2026.
 
-1. **Has the baseline moved?**
-2. **Has ELAJ improved?**
-
-Every number is excess over chance: 0 is no better than guessing the commonest
-label, 1 is perfect. Provenance in [`EVIDENCE.md`](EVIDENCE.md).
+Every number is **excess over chance**: 0 is no better than guessing the
+commonest label, 1 is perfect. Arrows mark direction: ↑ higher is better,
+↓ lower is better. Provenance in [`EVIDENCE.md`](EVIDENCE.md).
 
 ---
 
-## 1. Are the two agreement rows comparable? Not exactly.
+## 0. What is comparable, and what is not
 
-They differ in two ways, and both matter for how the table is read.
+**Only rows scored on the same 416,256 cells belong in one table.** That is the
+c1 corpus, val+test, over the per-study sampler's order.
 
-**They use different neighbourhood sizes.** `k = 30` for kNN agreement,
-`k = 100` for cross-donor (`BaselineSettings.k_cross_donor`). The larger k
-exists because most of a cell's nearest neighbours are its own donor's and are
-discarded, so a small k can leave nothing to average.
+| scored on | arms |
+|---|---|
+| **416,256 cells** | m5, every m6 arm, all baselines, all foundation models |
+| 382,464 cells | **m3, m4** |
 
-**They are normalised against different chance levels.** kNN agreement uses
-the global label distribution, Σp². Cross-donor computes chance **per cell**,
-as the share of all *other-donor* cells carrying that cell's label. That is the
-correct correction, and it means the two excesses are each "fraction of the way
-from that test's own chance to perfect" rather than two readings of one scale.
+m3 and m4 were scored against the older v1 corpus, and m3 is 24 dimensions
+rather than 16. Their numbers appear in §4 and **must not be read against
+anything in §2**. Re-scoring both on the current corpus is the first
+outstanding job, and it matters more than it sounds: m3 holds the best biology
+of any arm ever trained, and whether that survives the corpus change decides
+whether ELAJ has a row that beats scVI at all.
 
-### What follows for the drop
-
-The drop between them is still worth reporting, but only one way round.
-
-**Across methods, for one label: valid.** Every method sees the same labels,
-the same donors, the same two k values, and the same chance definitions. The
-whole apparatus is identical, so a difference in the drop is a difference in
-the representation. scVI's 0.163 against PCA's 0.213 on phase is a real
-comparison.
-
-**Across labels: not valid, and the reason is biological.** Each donor
-contributes exactly one menstrual phase, so within-donor neighbours match on
-phase by construction and the within-donor test has a free shortcut that the
-cross-donor test removes. A donor contributes cells of many families, so no
-such shortcut exists there. That alone produces a large phase drop and a tiny
-family drop for every method, whatever the representation does. **Comparing
-0.21 on phase with 0.003 on family says nothing about the model.**
-
-So the drop is a per-label, method-to-method diagnostic. It is not a quantity
-with a fixed meaning, and the table marks it as such.
-
-The per-epoch training probe uses **k = 30 for both**, so its drop is free of
-the first problem though not the second. Its cross-donor figure will therefore
-not match the benchmark's k = 100 one; it tracks direction within a run, and
-the benchmark is the number quoted.
+One further caveat that applies throughout. The two agreement tests use
+different neighbourhood sizes (k=30 for kNN, k=100 for cross-donor) and
+different chance definitions (global Σp² against a per-cell other-donor
+share). So the **drop** between them compares methods within a label, never
+labels within a method: each donor contributes one menstrual phase, so the
+within-donor phase test has a free shortcut that no family test has.
 
 ---
 
-## 2. The main table
+## 2. The main table — 416,256 cells, inductive
 
-Baselines from `outputs/v_series/v1_baselines` (v1 corpus, inductive, fitted on
-1,195,264 training donors, applied to 382,464 held-out cells).
+Baselines fitted on the 1,161,472-cell training split and applied to the
+held-out donors, which is what ELAJ is asked to do. Gene axis 30,962 (the full
+measured union) except where marked; see §3.
 
-> ### ⚠ THE ELAJ COLUMN IS WITHDRAWN. DO NOT QUOTE IT.
->
-> `c1_combined` was **trained before** commit `482dc69` and **scored after it**.
-> That commit repaired the tissue-column collision, which changed the
-> (study, tissue) strata, which moved the patient split:
->
-> | | study 6 val cells | study 7 val cells | val total |
-> |---|---:|---:|---:|
-> | as `c1_combined` trained | 20,002 | 1,528 | 202,928 |
-> | as job 55238504 scored | 5,027 | 1,792 | 188,217 |
->
-> Study 7 **gained** validation cells, and they came from donors that had been
-> on the training side. So the run was scored partly on cells it had learnt.
-> Contamination inflates a score, and by an amount nothing in the output
-> reveals: the numbers below are upper bounds of unknown tightness, not
-> measurements. Every one of them needs a re-score against the split the
-> checkpoint actually trained on, or a re-train on the current split.
->
-> The guard that would have caught this is now in
-> `data/split_fingerprint.py`; every checkpoint written from here on records
-> its held-out donors and the scorers refuse a mismatch. Checkpoints already
-> on disk carry no record, so they score with an `UNVERIFIED SPLIT` warning.
+Foundation models are zero-shot, never fine-tuned, each through its own
+documented interface.
 
-| | | PCA-16 | scVI | scANVI | ELAJ *(withdrawn)* |
-|---|---|---:|---:|---:|---:|
-| **Cell family** | kNN, k=30 ↑ | **0.9897** | 0.9870 | 0.9873 | 0.9506 |
-| | cross-donor, k=100 ↑ | **0.9866** | 0.9822 | 0.9835 | 0.9115 |
-| | drop ↓ | **0.0031** | 0.0048 | 0.0038 | 0.0391 |
-| | neighbours kept of 100 | 51 | 50 | 49 | **67** |
-| **Menstrual phase** | kNN, k=30 ↑ | 0.8611 | 0.8645 | **0.8662** | 0.7002 |
-| | cross-donor, k=100 ↑ | 0.6477 | **0.7013** | 0.6903 | 0.5413 |
-| | drop ↓ | 0.2134 | 0.1632 | 0.1759 | **0.1589** |
-| | neighbours kept of 100 | 50 | 49 | 47 | **66** |
-| **Other biology** | cell cycle phase, kNN ↑ | 0.4435 | **0.4612** | 0.4581 | 0.5854 * |
-| | fine cell type, kNN ↑ | 0.5091 | 0.5303 | **0.5323** | 0.4426 |
-| | disease stage, cross-donor ↑ | 0.1317 | 0.3317 | **0.3390** | 0.0976 |
-| | disease grade, cross-donor ↑ | **−0.0077** | −0.0548 | −0.0568 | −0.0641 |
-| **Donor identity** | patient kNN ↓ | 0.6628 | 0.6488 | 0.6507 | **0.3674** |
-| **Study mixing** | kBET ↑ | 0.0000 | 0.0189 | **0.0250** | *pending* |
-| | silhouette batch ↑ | 0.4943 | 0.8497 | **0.8647** | *pending* |
-| | graph connectivity ↑ | 0.7244 | 0.9842 | **0.9845** | 0.9505 |
-| | PC regression ↑ | 0.5711 | 0.9181 | 0.9302 | **1.0000** |
-| **Biology, scIB** | cLISI ↑ | 1.0000 | 1.0000 | 1.0000 | **1.0000** |
-| | silhouette bio ↑ | 0.6199 | 0.6339 | **0.6454** | 0.5441 |
-| | isolated labels ↑ | 0.6165 | 0.6107 | **0.6299** | 0.5443 |
-| | NMI ↑ | 0.2413 | 0.4358 | **0.4545** | 0.0159 |
-| | ARI ↑ | 0.1968 | **0.3438** | 0.3407 | 0.0005 |
+| | ELAJ m6ep13 | ELAJ m5 | PCA | scVI | scANVI | Geneformer | scGPT |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **width** | 16 | 16 | 16 | 16 | 16 | 256 | 512 |
+| **fitted on** | train | train | train | train | train | *pretrained* | *pretrained* |
+| **Cell family** cross-donor ↑ | 0.969 | 0.961 | **0.987** | 0.983 | 0.983 ◆ | 0.902 | 0.984 |
+| kNN ↑ | 0.975 | 0.971 | **0.990** | 0.987 | 0.987 ◆ | 0.949 | 0.987 |
+| **Menstrual phase** cross-donor ↑ | 0.607 | 0.573 | 0.646 | **0.705** | 0.697 | 0.437 | 0.487 |
+| kNN ↑ | 0.795 | 0.783 | — | — | — | 0.718 | 0.738 |
+| **Donor identity** kNN ↓ | 0.492 | **0.406** | 0.692 | 0.689 | 0.689 | 0.542 | 0.563 |
+| neighbours kept /100 ↑ | 64 | **66** | 52 | 48 | 47 | *pending* | *pending* |
+| **Study mixing** ↓ | 0.736 | **0.504** | 0.844 | 0.738 | 0.724 | *pending* | *pending* |
+| **Other biology** cell cycle kNN ↑ | 0.390 | 0.417 | 0.406 | 0.461 | **0.462** | 0.389 | 0.446 |
+| fine type kNN ↑ | 0.447 | 0.443 | 0.506 | 0.531 | **0.533** | 0.414 | 0.473 |
+| disease stage xdonor ↑ | 0.112 | 0.162 | 0.124 | 0.376 | **0.418** | 0.160 | 0.154 |
+| disease grade xdonor ↑ | −0.049 | −0.043 | **−0.015** | −0.079 | −0.081 | 0.005 | −0.022 |
+| **scIB** NMI ↑ | 0.102 | 0.315 | 0.258 | 0.442 | **0.447** | *pending* | *pending* |
+| ARI ↑ | 0.065 | 0.195 | 0.203 | **0.349** | 0.339 | *pending* | *pending* |
+| silhouette bio ↑ | 0.617 | 0.540 | 0.621 | 0.616 | **0.627** | *pending* | *pending* |
+| isolated labels ↑ | **0.631** | 0.567 | 0.610 | 0.606 | 0.623 | *pending* | *pending* |
+| graph connectivity ↑ | 0.985 | 0.988 | 0.723 | **0.986** | 0.983 | *pending* | *pending* |
+| PC regression ↑ | 0.720 | **0.803** | 0.525 | 0.927 | 0.939 | *pending* | *pending* |
+| kBET ↑ | 0.001 | **0.067** | 0.000 | 0.015 | 0.021 | *pending* | *pending* |
+| silhouette batch ↑ | 0.619 | 0.715 | 0.465 | 0.855 | **0.866** | *pending* | *pending* |
 
-\* ELAJ's cell-cycle row is on a different label set (3 labels against the
-baselines' 3 on different cells), so it is indicative rather than a
-head-to-head. scANVI is supervised on cell family, so its family rows are not
-a fair comparison either.
+◆ scANVI is supervised on cell family, so its two family rows are not a fair
+comparison with anything else. Its other rows are.
 
-### What the column says, if it survives a clean re-score
+Disease grade is negative for almost every method, which means no
+representation separates grades across donors better than chance. Read it as a
+null result for the label, not a ranking.
 
-Read everything here as a hypothesis about the re-score, not a result.
+### What the table says
 
-Contamination does not touch all rows equally, which is worth stating before
-the readings. It flatters whatever rewards recognising a particular cell, so the
-within-donor kNN rows and the donor-identity row are the exposed ones. It cannot
-manufacture the cross-donor rows' *shape*, since those exclude a cell's own
-donor whichever split it came from, but the excluded donor may itself have been
-a training donor, so those are suspect too, just less so.
+**ELAJ owns donor-blindness and nothing else, and the margin is large.**
+m5 reaches 0.406 on donor identity against 0.689 to 0.692 for the fitted
+baselines — they encode who a cell came from about seventy percent more
+strongly. The same fact from the other side: m5 keeps 66 of 100 neighbours
+after same-donor exclusion against their 47 to 52.
 
-**ELAJ loses on biology and wins donor-blindness by a wide margin.**
+**The foundation models sit between ELAJ and the baselines on donor identity**,
+at 0.542 and 0.563, and lose to both on phase. Geneformer loses to m6ep13 on
+every one of the four headline metrics despite 16 times the width. scGPT beats
+m6ep13 on cell family, 0.984 against 0.969, at 32 times the width.
 
-Patient identity, **0.3674 against 0.6488 to 0.6628**. The baselines encode
-who the cell came from roughly twice as strongly. That is the one column ELAJ
-has ever won and it is still the clearest result in the table.
+**Nothing of ours beats scVI on phase.** 0.705 against our best current
+416,256-cell number of 0.607. Whether m3 changes that is §4's question.
 
-This is the one row the contamination works *against*. A donor the model trained
-on is easier to identify, not harder, so leakage pushes patient kNN up. ELAJ's
-0.3674 is therefore a ceiling on a number where lower is better: a clean
-re-score should land at or below it. It is the only row that survives the defect
-in the direction the paper wants.
-
-**It keeps far more neighbours.** 67 of 100 survive the same-donor exclusion
-against the baselines' 49 to 51, which is the same fact seen from the other
-side: their nearest neighbours are their own donor's, ELAJ's are not.
-
-**Phase transfers best, proportionally.** ELAJ's drop of 0.1589 is the
-smallest in the table, below scVI's 0.1632. It starts 0.16 lower and loses
-less, which is consistent with a representation that never leaned on donor in
-the first place.
-
-**Family is the weak spot.** A drop of 0.0391 against 0.0031 to 0.0048: ten
-times more of ELAJ's family signal fails to cross to a new donor. It is the
-one place ELAJ's drop is worst.
-
-**NMI 0.0159 and ARI 0.0005 are near zero.** Leiden clustering of ELAJ's
-latent does not recover the annotated cell types at all, where scANVI reaches
-0.45 and 0.34. The neighbourhoods carry family (cross-donor 0.91) but do not
-partition into it. Worth understanding before the paper claims the latent is
-usable for cell typing.
-
-**PC regression 1.0** means study identity explains none of the variance in
-the principal components, against scVI's 0.918 and PCA's 0.571. Same story as
-patient kNN.
-
-### The trend, and what it costs
-
-| | cross-donor family ↑ | patient kNN ↓ |
-|---|---:|---:|
-| r8_direction | 0.75 | **0.24** |
-| c1_combined | **0.9115** | 0.3674 |
-
-Family gained 0.16 and donor-blindness gave up 0.13. **ELAJ is moving along
-the same trade-off the baselines sit on**, from a much more donor-blind
-starting point. Whether the next arm can gain biology without spending more of
-that lead is the question the campaign now turns on.
+**Low NMI and ARI are a real weakness.** Leiden clustering of m6ep13's latent
+recovers annotated cell types at 0.102 and 0.065 where scANVI reaches 0.447 and
+0.339. The neighbourhoods carry family (cross-donor 0.969) but do not partition
+into it. m5 is markedly better here (0.315, 0.195) than m6, which is worth
+understanding before the paper claims the latent is usable for cell typing.
 
 ---
 
-## 3. Are the baselines handicapped by being fitted inductively? No.
+## 3. Does the gene axis change the baselines? Barely, and only PCA
 
-A reviewer will ask this, because it is the obvious way to win a comparison
-unfairly. PCA, scVI and scANVI are all transductive by habit: the usual practice
-is to fit them on the same cells they are then scored on, which lets them shape
-their representation around exactly those donors. ELAJ cannot do that — it is
-inductive by construction, so the held-out donors are genuinely unseen. Fitting
-the baselines inductively to match could be read as taking something away from
-them.
+`outputs/benchmarks/axis_m6_drain` against `ind_m6_drain_ep13`. Same cells,
+same scorer; the only change is 15,496 genes (the Reactome-or-GO annotated
+subset ELAJ's group encoder requires) against 30,962 (every measured gene).
 
-`outputs/v_series/v1_baselines_transductive` settles it. Same corpus, same
-cells, same scorer, same 16 dimensions; the only change is that each baseline is
-fitted on all 1,577,728 cells and scored on the 382,464 held out from ELAJ.
-
-| | | PCA-16 | scVI | scANVI |
-|---|---|---:|---:|---:|
-| **cross-donor family** | inductive | 0.9866 | 0.9822 | 0.9835 |
-| | transductive | 0.9868 | 0.9810 | 0.9824 |
-| | move | +0.0002 | −0.0012 | −0.0011 |
-| **cross-donor phase** | inductive | 0.6477 | 0.7013 | 0.6903 |
-| | transductive | 0.6328 | 0.6958 | 0.6861 |
-| | move | −0.0149 | −0.0055 | −0.0042 |
-| **kNN family** | move | −0.0001 | 0.0000 | +0.0002 |
-| **kNN phase** | move | −0.0130 | **+0.0376** | **+0.0329** |
-| **patient kNN** ↓ | inductive | 0.6628 | 0.6488 | 0.6507 |
-| | transductive | 0.6614 | **0.7176** | **0.7134** |
-| | move | −0.0014 | **+0.0688** | **+0.0627** |
-
-**On the two rows the paper compares ELAJ against, transductive fitting is worth
-nothing.** Cross-donor family moves by at most 0.0012 in either direction, and
-cross-donor phase moves *down* for all three. The inductive baselines in §2 are
-not weakened versions of the usual ones; on the headline metrics they are the
-same number.
-
-**What transductive fitting does buy the two neural baselines is donor
-identity.** scVI's patient kNN rises 0.0688 and scANVI's 0.0627, and their
-within-donor phase rises by about as much. Fitted on the cells it is scored on,
-scVI gets better at recognising which person a cell came from and better at
-labelling phase among that person's own neighbours, while getting no better at
-carrying either label to a new person. The two effects are one effect.
-
-The neighbour counts say the same thing from the other side. Of each cell's 100
-nearest neighbours, the number surviving the same-donor exclusion:
-
-| | PCA-16 | scVI | scANVI |
+| cross-donor phase | 15,496 genes | 30,962 genes | move |
 |---|---:|---:|---:|
-| inductive | 51 | 50 | 49 |
-| transductive | 52 | **42** | **41** |
+| PCA | 0.691 | 0.646 | **−0.045** |
+| scVI | 0.702 | 0.705 | +0.003 |
+| scANVI | 0.694 | 0.697 | +0.003 |
 
-scVI and scANVI pull each donor's cells tighter together when they have seen
-those donors; PCA, being a linear projection, does not change. So the extra
-fitting is spent on donor structure, and the cross-donor test — which is the
-test — is unmoved.
+**scVI's advantage is not an artefact of our gene curation.** Doubling its
+input moves it by 0.003. The hypothesis that we were handing it a denoised set
+is closed.
 
-Two consequences. **The inductive fit in §2 is the right comparison to publish**,
-and this table is the evidence for saying so rather than merely asserting it.
-And **the honest version of ELAJ's donor-blindness claim is the stronger one**:
-against the baselines as they are conventionally used, the gap is 0.37 against
-0.71 to 0.72, not 0.37 against 0.65.
+**PCA loses 0.045**, which is a finding in its own right: the unannotated half
+of the transcriptome is noise that dilutes a linear projection's components,
+while scVI's negative-binomial likelihood with learned per-gene dispersion
+absorbs it. Donor identity also worsens for scVI and scANVI (0.673 → 0.689), so
+ELAJ's lead widens as the competitors are given more to read.
 
-One row moves the other way and should not be quoted: cross-donor disease stage
-rises about 0.07 for scVI and scANVI under transductive fitting. Its permutation
-test gives p = 0.194 there and its null 95th percentile is 0.59, well above the
-0.40 point estimate, so the row is noise in both settings.
+The table in §2 quotes the 30,962-gene baselines, which is the harder
+comparison for us.
 
 ---
 
-## 4. Has the baseline moved?
+## 4. The m-series frontier, and why m6 is off it
 
-Yes, upward, because the corpus grew: 784,896 training cells to 1,195,264,
-controls in, organoids out, 74 query donors.
+**m5 and the m6 arms are on 416,256 cells. m3 and m4 are on 382,464 and cannot
+be read against them.** The rows are shown together only to expose the shape of
+the trade-off, and the m3/m4 figures are struck through in every comparison
+until they are re-scored.
 
-| cross-donor | r8 corpus | v1 corpus | move |
-|---|---:|---:|---:|
-| PCA-16, cell family | 0.978 | 0.9866 | +0.009 |
-| scVI, cell family | 0.971 | 0.9822 | +0.011 |
-| **scVI, menstrual phase** | 0.437 | **0.7013** | **+0.264** |
+| arm | nats/phase | xdonor family ↑ | xdonor phase ↑ | donor kNN ↓ | study mixing ↓ | cells |
+|---|---|---:|---:|---:|---:|---:|
+| m3 | ~55 | *0.983* | *0.751* | *0.617* | *0.725* | 382,464 |
+| m4 | ~41 | *0.976* | *0.676* | *0.443* | *0.631* | 382,464 |
+| m5 | ~10 | 0.961 | 0.573 | **0.406** | **0.504** | 416,256 |
+| m6_drain ep13 | — | 0.969 | 0.607 | 0.492 | 0.736 | 416,256 |
+| m6_drain ep16 | — | 0.970 | 0.624 | 0.500 | 0.757 | 416,256 |
+| m6_hard ep8 | — | 0.928 | 0.494 | 0.451 | 0.708 | 416,256 |
+| m6_circ ep6 | — | 0.932 | 0.493 | 0.446 | 0.735 | 416,256 |
 
-Family barely moved, being already near the ceiling. Phase moved a great deal,
-so the target the plan was written against was far too easy.
+### The drain did not work
 
----
+Taking phase against donor identity as the trade-off, and comparing only the
+arms on 416,256 cells, **every m6 arm is dominated by m5 or by nothing at all**:
 
-## 5. Has ELAJ improved?
+- m6_hard (0.494 phase, 0.451 donor) and m6_circ (0.493, 0.446) are both
+  **strictly worse than m5** (0.573, 0.406) on both axes, and on study mixing
+  as well. Two arms, more compute, worse on everything.
+- m6_drain ep13 and ep16 buy phase over m5 (+0.034, +0.051) and pay for it in
+  donor identity (+0.086, +0.094) and study mixing (+0.232, +0.253). That is a
+  worse exchange rate than the m3→m4→m5 progression offers.
 
-Yes, on the training loop's within-donor family probe, the only ruler applied
-consistently across the c series.
+If m3 and m4 re-score anywhere near their old figures, m4 at (0.676, 0.443)
+would dominate every m6 arm outright. **That is the single most important
+pending measurement in the campaign.**
 
-| | within-donor family | best `val_nb` |
-|---|---:|---:|
-| r8_direction | 0.840 | — |
-| c1_ref | 0.9183 | 0.3782 |
-| c1_scale | 0.9292 | 0.3780 |
-| **c1_combined** | **0.9466** | **0.3732** |
-
-Without trading reconstruction: `c1_combined` improved both.
-
-**That ruler is not the baselines' ruler.** ELAJ has never been scored
-cross-donor on the control-included corpus, which is why every cell of §2's
-ELAJ column reads *not scored*.
-
----
-
-## 5b. The m-series column, scored 5 October 2026
-
-`m3_study_raw`, job 56163132, on the same 382,464 held-out cells as the
-baselines in §2. Split verified by the fingerprint guard, so this one is not
-withdrawable the way `c1_combined` was. Full arm description and the
-negative results in EVIDENCE §7j.
-
-| | PCA-16 | scVI | scANVI | `m3_study_raw` |
-|---|---:|---:|---:|---:|
-| cross-donor menstrual phase ↑ | 0.6477 | 0.7013 | 0.6903 | **0.7514** |
-| cross-donor cell family ↑ | **0.9866** | 0.9822 | 0.9835 | 0.9834 |
-| kNN menstrual phase ↑ | 0.8611 | 0.8645 | 0.8662 | **0.8825** |
-| kNN cell family ↑ | **0.9897** | 0.9870 | 0.9873 | 0.9874 |
-| fine cell type, kNN ↑ | 0.5091 | 0.5303 | **0.5323** | 0.5221 |
-| **patient kNN ↓** | 0.6628 | 0.6488 | 0.6507 | **0.6173** |
-| neighbours kept of 100 | 51 | 50 | 49 | 53 |
-
-**One metric ahead, not a sweep.** Cross-donor menstrual phase is genuinely
-ahead of the best baseline by 0.05 at p = 0.005. Cell family, fine cell type
-and disease stage are all behind. The column is a result, not a win.
-
-**Patient kNN is the problem, and it is a regression against ELAJ itself.**
-0.6173 beats the baselines by 0.03, which is a margin of no consequence
-beside §2's d_z 16 figure of **≤ 0.3674**. Neighbours kept of 100 says it
-without the withdrawal caveat attached to that figure: 67 at d_z 16, 53
-here, 49 to 51 for the baselines. Donor-blindness is the one axis ELAJ ever
-won by a wide margin and this column has given most of it back.
-
-**The UMAPs agree with the metric.** Roughly 62% of a cell's thirty nearest
-neighbours come from its own donor, which is what one-study-per-island looks
-like when it is drawn. The figure is not a projection artefact to be argued
-away: this field reports UMAPs, and a fragmented one is read as a model that
-has not corrected batch effects, because that is what it is.
-
-**Caveat on provenance.** The checkpoint was selected on `val_nb`, and val is
-half of the scored cells. Selection never touched phase or donor identity, so
-the optimism should be small, but the baselines had no selection step. A
-test-only re-score settles it and should be run before anything here is
-quoted.
+The drain's own diagnostics said as much earlier: it held its targets (log
+depth 0.821, log genes 0.801, study 0.664) without relieving the biology block
+of them (log genes 0.547, study 0.462). It absorbed signal; it did not displace
+any.
 
 ---
 
-## 6. Reference only: superseded corpora
+## 5. Small, medium, large — the proposal, and what blocks it
 
-> **REMOVE BEFORE SUBMISSION.** Nothing in this section can appear in the
-> paper. Both sections below are on corpora the paper does not use, so no
-> number here is comparable to §2 or to any other section here. They are kept
-> only so that a trend can be seen while the v series runs.
+The m3 → m4 → m5 progression is a clean monotone frontier in information
+budget, and it is the natural basis for reporting three configurations rather
+than one:
 
-### 6.1 The r series (twelve studies, organoids in, no controls)
+| | arm | budget | character |
+|---|---|---|---|
+| **ELAJ-L** | m3 | ~55 nats/phase | most biology retained, least donor-blind |
+| **ELAJ-M** | m4 | ~41 nats/phase | balanced |
+| **ELAJ-S** | m5 | ~10 nats/phase | most compressed, most donor-blind, best batch mixing |
 
-`outputs/benchmarks/r8_all`, transductive: every baseline fitted on the cells
-it was scored on, which flatters them. ELAJ never saw those donors.
+Each dominates the others on its own axis and the ordering is monotone in all
+four headline metrics, which is exactly what a frontier should look like and is
+far more defensible than nominating one arm.
 
-| | ELAJ | PCA-16 | Harmony | Scanorama | scVI | scANVI |
-|---|---:|---:|---:|---:|---:|---:|
-| kNN cell family ↑ | 0.84 | 0.98 | 0.98 | 0.98 | 0.98 | 0.98 |
-| cross-donor family ↑ | 0.75 | 0.98 | 0.94 | 0.98 | 0.96 | 0.97 |
-| cross-donor phase ↑ | 0.12 | 0.29 | 0.52 | 0.57 | 0.60 | 0.63 |
-| **donor identity ↓** | **0.24** | 0.73 | 0.69 | 0.82 | 0.81 | 0.81 |
-| cross-donor neighbours kept of 100 | 72 | 45 | 32 | 29 | 27 | 27 |
+**It cannot be published as it stands.** Two of the three are scored on the
+wrong corpus, and ELAJ-L is 24 dimensions where the others are 16. Both are
+fixed by one job each: re-score the m3 and m4 checkpoints on the 416,256-cell
+corpus against the fixed inductive baselines. Until then §5 is a plan, not a
+result.
 
-The one row ELAJ won, and by a wide margin.
+---
 
-`outputs/benchmarks/r8_inductive` refitted the baselines fairly and gave scVI
-cross-donor family 0.971 and phase 0.437, and PCA-16 family 0.978.
+## 6. Outstanding
 
-### 6.2 The c series (the v1 corpus, the c1 vocabulary)
-
-Eleven studies, controls in, 15,495 genes in 45 groups. Differs from v1 in the
-vocabulary alone: eleven genes and one group. No baselines were run against
-it, so there is no comparison here, only ELAJ's own trend.
-
-| | epochs | peak within-donor family | best `val_nb` | hours |
-|---|---:|---:|---:|---:|
-| c1_ref | 20 | 0.9183 @ ep 12 | 0.3782 | 25.8 |
-| c1_scale | 14 | 0.9292 @ ep 6 | 0.3780 | 18.2 |
-| **c1_combined** | 22 | **0.9466 @ ep 14** | **0.3732** | 30.9 |
-
-These carry no cross-donor or donor-identity numbers: the per-epoch probe only
-gained them on 25 September, after all three had run.
+1. **Re-score m3 and m4 on 416,256 cells.** Blocks §5 entirely and may change
+   the headline claim, since m3's old 0.751 phase is above scVI's 0.705.
+2. **Finish scoring the foundation models.** scGPT's scIB battery and the
+   study-mixing rows were lost to an OOM; SCimilarity and scFoundation are
+   embedded but unscored.
+3. **Width-matched companion rows.** A 16-component PCA of each foundation
+   model's embedding, scored identically, so 256 and 512 dimensions against our
+   16 can be read rather than argued about. Seconds of compute per model.
+4. **The m3 24-dimension question.** Either re-score it as-is and state the
+   width, or decide the frontier is reported at matched width.

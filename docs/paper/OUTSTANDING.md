@@ -1,202 +1,175 @@
 # What is left
 
-**6 October 2026. 10 October is the gate: by then we know whether the best
-model is reached, or reachable in one training run. 11-12 October is
-writing, figures and ablations.**
+**17 October 2026. First draft by 18 October.**
 
-A checklist, and only that. Nothing finished goes here: provenance to
-[`PROGRESS.md`](PROGRESS.md), findings to [`EVIDENCE.md`](EVIDENCE.md),
-claims and schedule to [`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md).
+Ordered by the agreed sequence, not by topic:
 
----
+> 1. Scoreboard. 2. Discuss the current state of models. 3. Plan the last
+> phase of training. 4. Ablations and paper writing, in parallel.
 
-## Critical path
-
-```
-m4_edge_starved ──┐
-  (~5 Oct +14 h)  │
-                  ├──► score, 3 h each ──► THE FORK ──┬──► ablation queue, 8-12 Oct
-m4_tight16 ───────┘                        (7 Oct)    ├──► Fig 4 and Fig 5
-  (~7 Oct)             ▲                              └──► PUBLICATION_PLAN §0,
-                       │                                    then the introduction
-       SCORING RULE ───┘
-       for pre-fix arms
-       (decide first)
-
-m5_adversary ──► score ──► does a competent adversary change the fork?
-  (queue after m4_tight16, ~28 h)
-```
-
-Two cards are committed to the two runs, so nothing on this chain can start
-earlier. Scoring an arm needs the arm; the fork needs both scores; the queue
-and the figures need the fork.
-
-Everything under **Start now** is off this chain and gates the writing
-instead:
-
-| item | gates | gated by |
-|---|---|---|
-| scoring rule for pre-fix arms | **every score, so the fork** | nothing |
-| `PUBLICATION_PLAN` §0 | the introduction | nothing |
-| figure list | the figure day | nothing |
-| Methods draft | — | nothing; model subsection moves at the fork |
-| Methods selection sentence | nothing; it closes an objection | nothing |
-| HPC test run | queueing `m5_adversary` | nothing |
-| intersection vocabulary | nothing this round | nothing |
-
-**The single point of failure is `m4_tight16` landing on 7 October.** If it
-slips or dies, the fork resolves on `m3_study_raw` plus `m4_edge_starved`
-alone, which is the third row of the fork table.
-
-**The second is the scoring rule.** Donor aliasing moved the patient wall
-from 269 ids to 254 people, so every arm trained before it sits on a
-different split from the one the current code builds. That decision is below
-and it comes before any scoring pass.
+A checklist, and only that. Provenance to [`PROGRESS.md`](PROGRESS.md),
+findings to [`EVIDENCE.md`](EVIDENCE.md), claims and schedule to
+[`PUBLICATION_PLAN.md`](PUBLICATION_PLAN.md).
 
 ---
 
-## Decide before anything is scored
+## The claim, so every item below can be judged against it
 
-- [ ] **How are pre-fix arms scored?** Donor aliasing resolves 30 ids to 15
-      people, so `assign_splits` now builds a 254-donor wall where every arm
-      up to and including `m4_tight16` trained against a 269-id one. Three
-      options, and the choice is a protocol statement in Methods either way:
-      - score them on the **old** wall, at the pre-fix commit: comparable
-        with each other, and the 0.7% leakage stands as §10.4's limitation
-      - score them on the **new** wall: cleaner held-out set, but a person
-        the old run had in train can land in the new test, which is the
-        leakage back by another route
-      - score them on the new wall **excluding the 15 aliased people**:
-        clean, costs a `--exclude-donors` flag, and loses 3.6% of cells
-      `m5_adversary` onward is on the new wall whatever is decided.
-      **Recommendation: the third.** It is the only one that answers "was
-      this donor in train" with no, and the flag is an hour's work against a
-      caveat that would otherwise sit in the Methods.
+> A parameter-efficient architecture that **beats the foundation models**,
+> does **not badly** against the fitted baselines, and keeps **donor identity
+> low**. The frontier is reported as the reasoning for three ELAJ tiers.
 
-## Start now, no GPU
+Primary contribution: **the architecture** — gene grouping, the DNS token,
+the drain, the circular latent, the heads, and the attention statistics sent
+alongside the CLS token. Secondary: the evaluation framework, what the
+circular latent can and cannot do, the corpus, and the code.
 
-- [ ] **Re-run the torch test suite on the HPC**, from `src` and not from the
-      repo root, or eight tissue-hierarchy fixtures fail on a relative path:
+---
 
-          cd /rds/homes/a/axw1008/axw1008/src && python -m pytest tests -q
+## Stage 1 — Scoreboard ✅ done
 
-      First run found 16 failures and 31 errors, one of them from this
-      wave and the rest three weeks of rot in tests that only execute where
-      torch exists. All fixed; the point of the re-run is the 58 that skip on
-      the laptop, which is where ECS's sign, the latent buffer, the
-      adversary's shape and `loss_state` all live. **Nothing is queued before
-      this is green.**
+- [x] `SCOREBOARD.md` rebuilt on the 416,256-cell corpus
+- [x] m-series progression: problem, fix, expectation, reality, metrics
+- [x] Frontier plot suite, one figure per donor axis, reproducible from
+      `plot_frontier.sh`
+- [x] Parameter efficiency measured: **1,884,750** against Geneformer's
+      10.3 M, scGPT's ~51 M, scFoundation's 100 M
+
+## Stage 2 — The current state of models ◀ here
+
+**Blocked only by two scoring jobs.** Everything else needed for this
+discussion is in hand.
+
+- [ ] **scGPT scoring** — re-run at 20 h; the 8 h job completed scIB and was
+      killed minutes short
+- [ ] **scFoundation scoring** — re-run at 20 h; timed out inside kNN after 4 h
+- [x] Geneformer, SCimilarity scored
+- [ ] **Mark SCimilarity supervised on the cluster copy** (one command; the
+      local copy is done). Its triplet loss uses Cell Ontology cell type, so
+      its family scores are in scANVI's category
+- [ ] **Width-matched companion rows.** A 16-component PCA of each foundation
+      model's embedding, scored identically, so 128/256/512 against our 16 is
+      readable rather than arguable. Seconds of compute, needs a scoring pass
+
+Then the discussion itself: **which ELAJ arm is reported, and on which axis
+the paper leads.** The three donor axes rank methods differently and support
+different sentences — donor identity is our strongest, study separation much
+weaker.
+
+## Stage 3 — The last phase of training
+
+**Two retrains, forced by contamination rather than chosen.** m1–m4 trained
+before `7ed19bd` with donors on both sides of the split wall, so no amount of
+re-scoring repairs them.
+
+- [ ] **ELAJ-L** — retrain the `m3_study_raw` configuration on the clean
+      split, at d_z 16 rather than 24. The arm most likely to produce an
+      outright win: m3 reached cross-donor phase 0.751 against scVI's 0.705
+      and SCimilarity's 0.626, and phase is a *fair* axis against SCimilarity
+- [ ] **ELAJ-M** — retrain `m4_tight16` on the clean split
+- [x] ELAJ-S candidate exists: m5, clean split, best donor-blindness (0.406)
+      and best study mixing (0.504) of any arm
+- [ ] **Decide the tier names and which arm fills each** after the retrains.
+      m5 is not yet ELAJ-S
+
+Note for the plan: **m6 ep16 already ties SCimilarity on cross-donor phase**
+(0.624 against 0.626) with 0.152 better donor identity, at 1.88 M parameters.
+An arm that spends less on study separation is the direction, and m3's
+`lambda_dab` 7 is that direction.
+
+## Stage 4a — Ablations
+
+The architecture is the contribution, so the queue is ordered by which
+components the paper claims credit for.
+
+- [ ] **C-1 random gene grouping** — the grouping carries biology (claim C2)
+- [ ] **C-2 DNS sentinel removed** — (claim C3)
+- [ ] **C-3 Gaussian-only**, no circular latent — what the circle can and
+      cannot do
+- [ ] **C-4 attention statistics removed**, CLS only. One config change: the
+      readout currently hands on 288 numbers per group instead of 32
+- [ ] **C-5 drain removed.** It did not help the frontier, and reporting that
+      honestly is a contribution. Also answers why m6 reconstructs worst:
+      the drain's loss competing, the 25% covariate blanking, or the drain
+      taking encoder capacity
+- [ ] **No-phase-head reference**
+
+## Stage 4b — Paper
+
+### Blocks the writing
+
+- [ ] **`PUBLICATION_PLAN` §0 reframing** to the claim above. Blocks the
+      introduction
+- [ ] **Figure list: which arm each figure needs**
+- [ ] **Draft Methods**: corpus, vocabulary, model, protocol
+
+### Factual corrections, must not ship wrong
+
+- [ ] **Donor count is 254, not 269.** `garcia_alonso_2021_b` is the
+      epithelial subset of `_a` and shares all 15 sample ids
 - [ ] **GSE213216's citation is wrong.** The downloaded PDF is Pei et al.
-      2023, Front. Mol. Biosci., a re-analysis that used the accession. The
-      original submission's paper is what the citation and the licence must
-      come from.
-- [ ] **`PUBLICATION_PLAN` §0 reframing.** Blocks the introduction.
-- [ ] **Figure list: which arm each figure needs.** Blocks the figure day.
-- [ ] **Draft Methods.** Corpus, vocabulary, model, protocol. The model
-      subsection moves if `m4_tight16` wins.
-- [ ] **One Methods sentence on selection.** "The reported checkpoint was
-      selected by reconstruction loss on the validation donors; all reported
-      metrics are label-based and played no part in selection." Closes the
-      only protocol objection a reviewer can raise about val+test scoring.
-- [ ] **Correct the donor count to 254 everywhere.** `garcia_alonso_2021_b`
-      is the epithelial subset of `_a` and shares all 15 sample IDs, so
-      fifteen donors are counted twice. EVIDENCE §10.4. **Factual error in
-      Methods if left.**
-- [ ] **Write §10.4 as a limitation**, with the 0.7% figure and why it was
-      not fixed.
-- [ ] **Cost the intersection vocabulary.** Genes common to all 11 studies,
-      and surviving group sizes. CPU. For the revision round, not this one.
+      2023, a re-analysis that used the accession, not the original
+      submission
 
-## On the cards
+### Statements the paper must carry
 
-- [ ] `m4_edge_starved` finishes (~5 Oct +14 h)
-- [ ] `m4_tight16` finishes (~7 Oct)
-- [ ] Score each: `--baselines outputs/v_series/v1_baselines/benchmark.csv
-      --skip-probe`, 3 h, **not** the 12 h default
-**THE 10 OCTOBER GATE: is the best model reached, or reachable in one run?**
-62.5 min/epoch measured. `max_epochs` 12 with `warmup_fraction` 0.02, so the
-beta ramp no longer depends on the horizon and the earlier objection to a
-short run does not apply. 8 epochs is 8.3 h, 12 is 13.5 h.
+- [ ] **Selection sentence.** "The reported checkpoint was selected by
+      reconstruction loss on the validation donors; all reported metrics are
+      label-based and played no part in selection"
+- [ ] **Gene set.** The 15,496-gene vocabulary is the Reactome-or-GO
+      annotated half of 30,962 measured genes; baselines and foundation
+      models were given all 30,962
+- [ ] **Weights provenance.** scGPT and scFoundation checkpoints came from
+      third-party HuggingFace mirrors because the canonical links are Google
+      Drive and SharePoint. sha256 recorded for both
+- [ ] **Supervision.** scANVI and SCimilarity are supervised on cell type
+- [ ] **Width.** The kNN metrics are not width-matched: 16 against 128, 256
+      and 512
+- [ ] **§10.4 limitation** with the 0.7% aliasing figure
+- [ ] **Foundation-model leakage audit.** Per-study deposition dates against
+      each pretraining snapshot. Reported, not acted on, as agreed.
+      PanglaoDB closed 2019 so scBERT could not have seen us; Geneformer V1
+      is June 2021 against our mid-2021 earliest; scGPT's CELLxGENE corpus
+      very likely includes some of ours
 
-- [ ] **NOT scoring the m4 arms.** Neither is paper-worthy and the 3 h each
-      buys a column we would not print. Calibrating off `m3_study_raw`, the
-      only arm with both numbers, the val probe runs about 0.04 below the
-      scored figure (probe 0.5743 against scored 0.6173), so
-      `m4_edge_starved` would score near 0.51 and `m4_tight16` near 0.48
-      against baselines at 0.6488–0.6628. Better, but both sit at
-      `study_knn` 0.71–0.76 against `m3`'s 0.83, which is still one island
-      per study, and both reconstruct WORSE than `m3` (0.4069 and 0.4044
-      against 0.3975). `m3_study_raw` stays the scored fallback.
-- [ ] **The axis is the problem, not the tuning.** corr(patient kNN, phase
-      xdonor) over epochs is +0.924, +0.855, +0.944 across the three arms.
-      Phase and donor identity are the same learned structure, so no
-      stopping rule, width, allowance or selector separates them. EVIDENCE
-      §7k.
-- [ ] **The one untried mechanism: adversary on DONOR, not study.**
-      `DABClassifier` predicts `study_id`, eleven classes, while
-      `patient_knn` is donor identifiability over 254 donors and is mostly a
-      within-study quantity. `patient_id` does not reach the Batch at all;
-      `collate_fn` drops it. Needs a train-donor index through
-      dataset → collate → a second gradient-reversed head, reusing
-      `MaskedCrossEntropy` for held-out donors. About 3 h with tests.
-      **This is the run that answers the 10 October gate.**
-- [ ] `m5_priced` is built and is the fallback run if the donor adversary is
-      judged too much change this late: `warmup_fraction` 0.02 and
-      `w_kl_gauss` 20, aimed at the latent filling to 43.9 nats inside
-      epoch 0. It does not address the +0.92 axis, which is its weakness.
-- [ ] Write the ablation queue before 8 Oct: C-1 random grouping, C-2 DNS
-      removed, C-3 Gaussian-only, no-phase-head reference
-- [ ] Fire the queue 8 Oct, both cards, unattended through the writing days
-
-## If there is spare time
-
-- [ ] **Split the score by val and test.** Not for fairness: the protocol is
-      symmetric and the baselines sit on the same cells. For curiosity with
-      a real question behind it. Phase chance is 0.664 on val against 0.380
-      on val+test, so val's phase labels are lopsided and the two halves are
-      different difficulties. We do not know which half 0.7514 comes from.
-      About 45 extra minutes on a scoring pass.
-
-## The fork, 7 October
-
-Which paper this is. Resolve on the 7th, not the 9th.
-
-| `m4_tight16` lands at | the paper is |
-|---|---|
-| patient kNN ~0.40, family 0.97+ | corrects batch effects without losing biology |
-| ~0.40, family ~0.91 | the frontier between donor-blindness and fidelity |
-| near `m3_study_raw` | one metric ahead of scVI, stated plainly |
-
-## Figures
+### Figures
 
 | | content | status |
 |---|---|---|
 | 1 | architecture | not started |
-| 2 | diagnosis chain: stage table, `n_cls`, token sweep | evidence complete |
+| 2 | diagnosis chain | evidence complete |
 | 3 | width curve | evidence complete |
-| 4 | benchmark table against PCA, scVI, scANVI | waits on the fork |
-| 5 | ablations | waits on the queue |
+| 4 | benchmark table + **frontier plots** | plots done; table waits on stage 2 |
+| 5 | ablations | waits on stage 4a |
 | 6 | the demonstration | not chosen |
 
-## Claims with no evidence
-
-| claim | needs |
-|---|---|
-| C4 beats scVI on cross-donor biology | the fork. **Cannot submit without it.** |
-| C2 the grouping carries biology | random-grouping ablation, config not written |
-| C3 DNS sentinel | DNS-removed ablation |
-| C7 the latent is usable | one demonstration, not chosen |
-
-## Reproducibility
+### Reproducibility
 
 - [ ] R1 seeds and environment pinned per reported run
 - [ ] R2 weights deposited, licence decided
 - [x] R3 licence audit — clear
 - [ ] R4 pipeline runnable from the accession list
-- [ ] R5 every figure regenerable from a committed script
+- [ ] R5 every figure regenerable from a committed script —
+      `plot_frontier.sh` is; the rest are not
 
-## Out of scope for this submission
+## Loose ends, cheap, not blocking
 
-Frozen-encoder ladder, transferability gate, six-knob latent sweep. scGPT
-and Geneformer environments: two days of install alone. Scoring `c1_ref`
-for its own sake. Everything in PROGRESS.md under "Settled, do not reopen".
+- [ ] **bn_mode re-run.** Never run since the selector fix and
+      `retained_rows`. Would say whether eval-mode embedding costs biology as
+      well as the 0.120 of study purity it costs. 15 min
+- [ ] **Split the score by val and test.** Phase chance is 0.664 on val
+      against 0.380 on val+test, so the halves are different difficulties
+- [ ] **Intersection vocabulary.** Revision round, not this one
+- [ ] **CUDA jaxlib.** scIB runs on CPU jax, costing ~25 min per method.
+      Deliberately pinned; revisit after submission
+
+## Resolved since the last revision of this file
+
+- The fork: it is the frontier paper, refined to the claim at the top
+- Pre-fix arms: **retrain, do not re-score**. Contamination is in the
+  training, not the scoring
+- Foundation-model environments: four built, all four embedded. The previous
+  revision listed these as out of scope at "two days of install alone"
+- Baselines: fitted inductively, on both gene axes. The gene set does not
+  explain scVI's advantage (+0.003 on 30,962 genes)
+- Test suite green on the HPC

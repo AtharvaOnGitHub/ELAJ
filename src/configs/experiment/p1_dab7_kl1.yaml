@@ -41,7 +41,7 @@ training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
 output_dir: outputs/p_series/p1_dab7_kl1/
-# 24, m5_combined's seed, on all four arms. The factorial measures two knobs
+# 24, m5_combined's seed, on all five arms. The factorial measures two knobs
 # and a seed difference would be a third.
 seed: 24
 
@@ -50,18 +50,28 @@ overrides:
   model.dab.lambda_dab: 7.0
   model.loss.w_kl_gauss: 1.0
 
-  # ── THE HORIZON, AND WHY IT IS NOT NEGOTIABLE PER ARM ──────────────────
-  # 12 epochs, exactly m5_combined's, on all four arms. max_epochs is not
-  # just a stopping point: build_scheduler sets T_max = max_epochs on
-  # CosineAnnealingLR, and kl_annealing.warmup_fraction and the DAB ramp are
-  # both fractions of total_steps. Raising it for the arms at w_kl_gauss 1 --
-  # which m6_drain showed were still descending at epoch 14 -- would give
-  # those arms a different learning-rate curve and a different beta ramp from
-  # m5's, and the square would no longer be a square.
+  # ── THE HORIZON: ONE VALUE FOR THE WAVE, AND IT IS A SHAPE NOT A LENGTH ─
+  # max_epochs is not a stopping point. build_scheduler sets
+  # T_max = max_epochs on CosineAnnealingLR stepped once per epoch, and
+  # kl_annealing.warmup_fraction and the DAB ramp are both fractions of
+  # total_steps = len(train_loader) * max_epochs. It is an optimisation
+  # variable, so it is one value across the wave or the arms are not
+  # comparable.
   #
-  # SO AN ARM AT w_kl_gauss 1 MAY REPORT AN UNCONVERGED POINT. That is
-  # accepted before the run. An unconverged point on a matched schedule is
-  # comparable; a converged point on a different schedule is not.
+  # WHAT ACTUALLY ENDS A RUN HERE IS EARLY STOPPING, and that is measured:
+  # m3_study_raw ran 17 of 26, m4_tight16 19 of 26, m4_edge_starved 19 of 26,
+  # m5_combined 9 of 12. NO ARM IN THIS PROJECT HAS EVER REACHED max_epochs.
+  # So the horizon has only ever set the shape of the cosine, which is also
+  # the reading m6_drain_circ wrote down: "20, and chosen for the SHAPE of
+  # the schedule rather than the length".
+  #
+  # THE SHAPE MATTERS BECAUSE THE TAIL GOES TO ZERO. At T_max 12 and base lr
+  # 1e-3, epoch 10 runs at 6.7% of base and epoch 11 at 1.7%: the last two
+  # epochs of a 12-epoch horizon are nearly learning-rate-free. At T_max 20
+  # the same epochs run at 50.0% and 42.2%. An arm still descending late --
+  # m6_drain reached its minimum val_nb at its FINAL epoch, and all six R7
+  # and R8 arms had their best epoch last -- is capped by the shape rather
+  # than by its configuration.
   training.max_epochs: 12
   training.early_stop_patience: 5
   training.early_stop_warmup_epochs: 2
@@ -72,27 +82,51 @@ overrides:
   training.block_probe_every: 2
   training.keep_every_epochs: 1
 
-  # ── NO GUARD, AND THIS IS A CHANGE FROM m5 ─────────────────────────────
-  # m5 ran with guard_metric study_knn and guard_max 0.65. Dropping it is
-  # deliberate and has one decisive reason: study_knn is one of the two axes
-  # the frontier is PLOTTED on. Selecting each arm's reported checkpoint by
-  # its study_knn would choose the points by their position on the axis we
-  # then present as a result, which is circular. The guard also interacts
-  # with the arm: an arm that never dips under the ceiling takes a constant
-  # penalty and therefore ranks exactly on nb, while an arm that dips and
-  # rises -- m5, whose val_study_knn went 0.554 -> 0.720 -- takes the penalty
-  # partway through, which is what stopped m5 at nine of its twelve epochs.
-  # The same written rule was behaving differently per arm.
+  # ── NO CHECKPOINT GUARD ────────────────────────────────────────────────
+  # WHERE THE GUARD CAME FROM, because it was not built as a study_knn
+  # ceiling. effa916, 1 October, created CheckpointRanking for m1 as
+  # stop_metric phase_knn_xdonor guarded on nb <= 0.4332, to protect the axis
+  # NOT being selected on: "v1_bottleneck reached its best phase numbers in
+  # epochs whose reconstruction had already gone past baseline, and a
+  # selector without a guard would have called one of those the model."
   #
-  # So selection here is nb alone, identically on all four, and
-  # early_stopping sees nb alone. Leaving guard_metric unset gives
-  # CheckpointRanking guard=None; trainer.py logs "no guard" at construction,
-  # so the record says so before the run saw any data.
+  # It inverted the next day, 2205ff9, for a reason that still holds: "Phase
+  # cannot select here: on the validation split its chance is 0.664 against
+  # 0.380 on val+test, so val is phase-degenerate, and m1's selector moved
+  # 0.030 across sixteen epochs inside a documented noise band of +/-0.04."
+  # So nb is the selector NOT because reconstruction is the objective but
+  # because it is the only non-degenerate selector val offers, and the guard
+  # moved to study_knn to keep the structure: select on one axis, constrain
+  # the other.
   #
-  # THE COST, STATED: m5's own cell of the square carries one difference the
-  # other four do not -- it stopped at epoch 9 under a guard. Check where
-  # m5's best val_nb epoch actually sits before reading the square; if it is
-  # inside the first nine, the difference is immaterial and we say that.
+  # WHAT IT ACTUALLY DID. At guard_max 0.5, m2/m3/m4: never bit -- the lowest
+  # study_knn any arm has recorded is 0.6505, so every epoch breached, every
+  # rank took the same constant penalty, and selection fell back to pure nb.
+  # At 0.65, m5: bit, val_study_knn 0.554 -> 0.720. At 0.80, m6: raised
+  # explicitly because at w_kl_gauss 1 no epoch would qualify and the
+  # selection would be vacuous.
+  #
+  # WHY IT GOES. CheckpointRanking.breached is `value > guard_max`, so a
+  # guard can only be an UPPER bound. That leaves two content-bearing
+  # choices: nb, which is near-vacuous when nb is also the selector, or a
+  # donor axis, which is one of the frontier's own coordinates and whose
+  # ceiling m6 already had to retune per arm to stay non-vacuous. This wave
+  # varies w_kl_gauss BY DESIGN, so one ceiling would be active on half the
+  # square and vacuous on the other half. There is no third option.
+  #
+  # WHAT IS GIVEN UP: protection against an arm whose lowest-nb epoch has
+  # catastrophic study mixing. That is m1's original lesson pointed the other
+  # way and it is a real risk.
+  #
+  # WHAT REPLACES IT AT NO COST: keep_every_epochs 1, so every epoch is on
+  # disk; the reporting rule is declared in RETRAIN_EXPECTATIONS as the epoch
+  # with the lowest val_nb; and each arm's table row carries its
+  # val_study_knn at that epoch, so anything passed over is visible rather
+  # than silently rejected.
+  #
+  # Leaving guard_metric unset gives CheckpointRanking guard=None, and
+  # trainer.py logs "no guard" at construction, so the record says so before
+  # the run saw any data.
   training.stop_metric: nb
 
   # Just under the smallest panel of 13,144. m5's value.
@@ -141,7 +175,7 @@ overrides:
   model.classifier.label_smoothing: 0.05
   model.loss.w_cls: 40.0
 
-  # d_z = d_gauss alone. 16, m5's width, on all four.
+  # d_z = d_gauss alone. 16, m5's width, on all five.
   model.d_gauss: 16
   model.n_circular: 0
   model.circular_parameterisation: direction

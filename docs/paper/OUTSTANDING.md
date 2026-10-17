@@ -95,41 +95,50 @@ prior.
 | | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
 |---|---|---|
 | **`lambda_dab` 7** | `p1_dab7_kl1` — most biology expected | `p2_dab7_kl30` |
-| **`lambda_dab` 168** | `p3_dab168_kl1` | **= m5, already have it** |
+| **`lambda_dab` 168** | `p3_dab168_kl1` | `p5_dab168_kl30` — m5's cell, run not assumed |
 | **`lambda_dab` 336** | — | `p4_dab336_kl30` — the donor-blind end |
 
-Four runs, four new frontier points, and main effects plus an interaction for
-both knobs. If the frontier does turn out to be traced by one knob, the
-factorial shows that and we say so; constraining to one before looking would
-be assuming the answer.
+**Five arms, and `m5_combined` is not one of them.** m5 trained under a
+`study_knn` checkpoint guard this wave does not have, so carrying it into the
+square would mean reading four arms selected one way against a fifth selected
+another — and it would treat m5 as a final model before it had earned that.
+`p5` runs that cell on this wave's protocol and doubles as the reproduction
+check on whether the guard was load-bearing for m5's reported point.
 
 **The expectations are pre-registered** in
 [`RETRAIN_EXPECTATIONS.md`](RETRAIN_EXPECTATIONS.md): a predicted band per arm
 per metric, the three questions the square answers, the separation thresholds
 that make three tiers real rather than three indistinguishable points, and the
-collapse signature for `n4`. Written before any run started, and **no arm gets
+collapse signature for `p4`. Written before any run started, and **no arm gets
 adjusted to meet it** — the frontier is an outcome.
 
-Three deliberate differences from m5, all fixed before the runs: `max_epochs`
-12 everywhere (it sets `T_max` on the cosine and the β-ramp denominator, so it
-cannot vary per arm — the cheap-latent arms may therefore report unconverged
-points, and that is accepted); **no checkpoint guard**, because `study_knn` is
-one of the two axes the frontier is plotted on and selecting points by it would
-be circular; and `model.drain.enabled: false` written out explicitly.
+**The guard is gone, and the reason is the mechanism rather than one
+observation.** `CheckpointRanking.breached` is `value > guard_max`, so a guard
+can only be an upper bound; that leaves `nb`, near-vacuous when `nb` is also
+the selector, or a donor axis, which is one of the frontier's own coordinates
+and whose ceiling m6 already had to retune per arm to stay non-vacuous. This
+wave varies `w_kl_gauss` by design, so one ceiling is active on half the square
+and vacuous on the other half. What replaces it: `keep_every_epochs: 1`, a
+declared reporting rule (lowest `val_nb`), and each arm's `val_study_knn`
+printed at its selected epoch.
 
-- [x] Write the four configs on the m5 base — generated from one shared body
-      so the 44 non-knob override keys are byte-identical; all four load
-      through `load_experiment` and the repo-wide config test passes
+- [x] Write the configs on the m5 base — one shared body, 44 non-knob override
+      keys byte-identical, enforced by a test that names any divergence
 - [x] Pre-register the expectations
-- [ ] Run them. Two cards, ~11.6 h each at the measured 58 min/epoch, so two
-      waves — **submit `n1` and `n4` first**, since the ends are what the
-      tiers need if only one wave lands in time
-- [ ] Check where m5's best `val_nb` epoch sits. Its guard stopped it at epoch
-      9 of 12; if its best epoch is inside the first nine, the one difference
-      its cell carries is immaterial and Methods says so
+- [x] Adjudicate the guard: removed, with its 1 October origin and its
+      six-wave record written down
+- [ ] **Settle the horizon.** `max_epochs` is 12 in all five and the value is
+      inherited, not argued. No arm in this project has ever reached
+      `max_epochs` (m3 17/26, m4 19/26 twice, m5 9/12), so it has only ever
+      set the cosine's shape — and at `T_max` 12 the last two epochs run at
+      6.7% and 1.7% of base lr. Recommendation: 20, `patience` 5, `warm_up` 2,
+      no code change
+- [ ] Run them. Five runs, two cards, three waves — **submit `p1` and `p4`
+      first**, since the ends are what the tiers need if only one wave lands
 - [ ] **High / Med / Low on biological information** for the tier names. A
       smarter rule for choosing points on the frontier is pinned for later
-- [x] m5 exists on the clean split and fills one cell
+- [x] m5 exists on the clean split, and is now a comparison point rather than
+      a member of the square
 
 ELAJ-High is the one most likely to produce an outright win: m3 reached
 cross-donor phase 0.751 against scVI's 0.705 and SCimilarity's 0.626, and

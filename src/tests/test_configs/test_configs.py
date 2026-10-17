@@ -522,6 +522,9 @@ P_SERIES = {
     "p2_dab7_kl30": (7.0, 30.0),
     "p3_dab168_kl1": (168.0, 1.0),
     "p4_dab336_kl30": (336.0, 30.0),
+    # The cell m5_combined would have filled, run rather than assumed: m5
+    # carried a study_knn checkpoint guard this wave does not have.
+    "p5_dab168_kl30": (168.0, 30.0),
 }
 P_SERIES_KNOBS = ("model.dab.lambda_dab", "model.loss.w_kl_gauss")
 
@@ -582,30 +585,17 @@ def test_p_series_selects_checkpoints_on_nb_alone():
         assert "training.guard_max" not in over, name
 
 
-def test_p_series_shares_m5s_horizon():
-    """`max_epochs` sets T_max on CosineAnnealingLR, and both the KL warm-up
-    and the DAB ramp are fractions of total_steps, so a per-arm horizon would
-    give the arms different schedules as well as different knobs. 12 is
-    m5_combined's."""
-    m5 = _load_yaml_overrides("m5_combined")
-    assert int(m5["training.max_epochs"]) == 12
-    for name, raw in _p_series_overrides().items():
-        assert int(raw["overrides"]["training.max_epochs"]) == 12, name
-        assert int(raw["seed"]) == int(
-            _load_yaml_seed("m5_combined")), f"{name} seed differs from m5's"
-
-
-def _load_yaml_overrides(name: str) -> dict:
-    import yaml
-
-    root = Path(__file__).resolve().parents[2]
-    path = root / "configs" / "experiment" / f"{name}.yaml"
-    return yaml.safe_load(path.read_text(encoding="utf-8"))["overrides"]
-
-
-def _load_yaml_seed(name: str) -> int:
-    import yaml
-
-    root = Path(__file__).resolve().parents[2]
-    path = root / "configs" / "experiment" / f"{name}.yaml"
-    return int(yaml.safe_load(path.read_text(encoding="utf-8"))["seed"])
+def test_p_series_shares_one_horizon_and_one_seed():
+    """`max_epochs` sets T_max on CosineAnnealingLR and is the denominator of
+    both the KL warm-up and the DAB ramp, so it is an optimisation variable
+    and not just a budget. Its VALUE is a decision recorded in
+    RETRAIN_EXPECTATIONS; what this asserts is that the arms agree on it,
+    that none of them falls through to base.yaml's 50, and that the seed is
+    not a fifth variable. (A divergence would also trip the base-identity
+    test above; this one names the cause.)"""
+    raws = _p_series_overrides()
+    horizons = {name: raw["overrides"].get("training.max_epochs")
+                for name, raw in raws.items()}
+    assert all(h is not None for h in horizons.values()), horizons
+    assert len(set(horizons.values())) == 1, horizons
+    assert {int(raw["seed"]) for raw in raws.values()} == {24}

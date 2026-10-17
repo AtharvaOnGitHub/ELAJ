@@ -66,7 +66,18 @@ overrides:
   # m6_drain reached its minimum val_nb at its FINAL epoch, and all six R7
   # and R8 arms had their best epoch last -- is capped by the shape rather
   # than by its configuration.
-  training.max_epochs: 12
+  #
+  # SO: 20 FOR THE SHAPE, early stopping for the length, which is the reading
+  # db7dc26 took for 26 and m6_drain_circ for 20. A horizon that is never
+  # reached costs nothing; one that is reached caps the arm. 20 epochs at the
+  # measured 58 min/epoch is 19.3 h against a two-day wall.
+  #
+  # THE EXPECTATION, PRE-REGISTERED: every arm converges and early-stops
+  # within 15 epochs. THE FALSIFIER: an arm whose best val_nb epoch is 15 or
+  # later was capped by the horizon rather than by its configuration, and its
+  # frontier point is a LOWER BOUND on what that configuration does. That has
+  # to be said in the table rather than quietly reported as the point.
+  training.max_epochs: 20
   training.early_stop_patience: 5
   training.early_stop_warmup_epochs: 2
   training.batch_size: 256
@@ -128,9 +139,24 @@ overrides:
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  # 0.05 of total steps, so the price lands inside epoch 0 while the latent
-  # is still filling. At 12 epochs the ramp finishes at epoch 0.6.
-  training.kl_annealing.warmup_fraction: 0.05
+  # 0.03, NOT m5's 0.05, AND THE CHANGE IS WHAT KEEPS THE SETTING THE SAME.
+  # warmup_fraction is a fraction of total_steps = len(train_loader) *
+  # max_epochs, so the ramp's absolute length moves with the horizon: 0.05 at
+  # 12 epochs is 0.60 epochs, and the same 0.05 at 20 epochs would be 1.00.
+  # m5's reason for the number was a timing one -- "the price arrives during
+  # epoch 0, because that is when the latent fills", the latent holding 43.9
+  # nats by the end of epoch 0 while beta was still near zero -- so the thing
+  # to preserve is 0.60 epochs, not the fraction. 0.03 * 20 = 0.60.
+  training.kl_annealing.warmup_fraction: 0.03
+
+  # THE DAB RAMP MOVES AND CANNOT BE HELD, which is stated rather than
+  # hidden. CompositeLoss ramps lambda_dab as min(1, 2 * step / total_steps),
+  # a hardcoded coefficient, so it saturates at 50% of the horizon: epoch 6
+  # at 12 epochs, epoch 10 at 20. Holding it would need a config field and a
+  # code change in composite.py, which is not worth making to the training
+  # core now. It is identical across all five arms, so it cannot confound the
+  # factorial; it does mean lambda_dab reaches full strength later here than
+  # it did in m5, and p5 is the arm that measures what that costs.
   # Inert: no circular branch on any arm of this wave.
   model.loss.w_kl_circ: 2.0
   # Not a lever, and that is MEASURED, not assumed: m4_tight16's latent sat

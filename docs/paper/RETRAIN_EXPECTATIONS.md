@@ -92,15 +92,47 @@ making epochs 4–8 five consecutive failures; epoch 4 did not breach, and m5's
 have failed on `nb` alone. The guard probably changed neither m5's stop nor
 its selected checkpoint. `p5` is now the measurement that settles it.
 
-## The horizon is an open decision
+## The horizon, settled
 
-`max_epochs` is **12** in all five configs, inherited from m5, and that number
-no longer has a justification — its only argument was keeping m5's cell
-comparable, and m5's cell is now `p5`. The evidence is set out in
+**`max_epochs` 20, `patience` 5, `warm_up` 2, no code change.** 20 sets the
+*shape* of the cosine; early stopping sets the length. The evidence is in
 [The horizon: what the evidence says](#the-horizon-what-the-evidence-says)
-below; the recommendation there is 20. Nothing else in this file depends on the
-choice except how likely the `w_kl_gauss` 1 arms are to report a converged
-point.
+below — the short form is that no arm in this project has ever reached
+`max_epochs`, so it has only ever been a shape parameter, and at `T_max` 12
+the last two epochs run at 6.7% and 1.7% of base learning rate.
+
+**Pre-registered with it: every arm converges and early-stops within 15
+epochs.** The falsifier is sharp — *an arm whose best `val_nb` epoch is 15 or
+later was capped by the horizon rather than by its configuration, and its
+frontier point is a lower bound on what that configuration does.* That gets
+said in the table, not quietly reported as the point. 20 epochs at the
+measured 58 min/epoch is 19.3 h against a two-day wall, so the headroom above
+15 is free.
+
+### Two ramps move with the horizon
+
+Both are fractions of `total_steps = len(train_loader) × max_epochs`, so
+changing the horizon changes them even though neither was part of the
+decision.
+
+| | at `max_epochs` 12 | at 20, unchanged | here |
+|---|---|---|---|
+| β (KL) warm-up | 0.60 epochs | 1.00 epochs | **0.60 epochs**, `warmup_fraction` 0.05 → **0.03** |
+| λ_dab ramp | epoch 6 | epoch 10 | **epoch 10**, unavoidable |
+
+**The β ramp is held, and changing the number is what holds it.** m5's reason
+for `warmup_fraction` 0.05 was a timing argument, not a magnitude one: *"the
+price arrives during epoch 0, because that is when the latent fills"* — the
+latent held 43.9 nats by the end of epoch 0 while β was still near zero. What
+has to be preserved is 0.60 epochs, so the fraction becomes 0.03.
+
+**The λ_dab ramp cannot be held.** `CompositeLoss` ramps it as
+`min(1, 2 × step / total_steps)` with a hardcoded coefficient, so it saturates
+at 50% of the horizon however the horizon is set. Holding it would need a
+config field and a change in `composite.py`, which is not worth making to the
+training core now. It is identical across all five arms, so it cannot confound
+the factorial — but λ_dab reaches full strength later here than it did in m5,
+and `p5` is the arm that measures what that costs.
 
 ## The predictions
 
@@ -261,14 +293,16 @@ jump, not a smooth continuation."* That is five files plus tests in the
 training core, so it is the fix to apply **if** an arm hits the horizon still
 improving — not before, two days from a draft.
 
-**Recommendation: `max_epochs` 20, `patience` 5, `warm_up` 2, no code change.**
+**Settled: `max_epochs` 20, `patience` 5, `warm_up` 2, no code change**, with
+the expectation that every arm converges within 15 and the falsifier stated at
+the top of this file.
 
 ---
 
 ## Running them
 
-Five runs, two cards. At the measured 58 min/epoch and the 9–19 epochs early
-stopping has produced historically, expect 9–18 h each, so three waves.
+Five runs, two cards. At the measured 58 min/epoch, the expected 15 epochs is
+14.5 h and the 20-epoch ceiling is 19.3 h, so three waves.
 **Submit the frontier ends first** — if only the first wave lands in time, the
 ends are what the tiers need:
 

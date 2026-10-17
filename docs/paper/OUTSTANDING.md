@@ -127,12 +127,14 @@ printed at its selected epoch.
 - [x] Pre-register the expectations
 - [x] Adjudicate the guard: removed, with its 1 October origin and its
       six-wave record written down
-- [ ] **Settle the horizon.** `max_epochs` is 12 in all five and the value is
-      inherited, not argued. No arm in this project has ever reached
-      `max_epochs` (m3 17/26, m4 19/26 twice, m5 9/12), so it has only ever
-      set the cosine's shape — and at `T_max` 12 the last two epochs run at
-      6.7% and 1.7% of base lr. Recommendation: 20, `patience` 5, `warm_up` 2,
-      no code change
+- [x] **Horizon settled: `max_epochs` 20**, `patience` 5, `warm_up` 2, no code
+      change — 20 sets the cosine's shape, early stopping sets the length. No
+      arm in this project has ever reached `max_epochs` (m3 17/26, m4 19/26
+      twice, m5 9/12). Pre-registered with it: every arm converges within 15,
+      and an arm whose best `val_nb` epoch is ≥ 15 is reported as a **lower
+      bound**. `warmup_fraction` 0.05 → 0.03 to hold the β ramp at its
+      designed 0.60 epochs; the λ_dab ramp moves 6 → 10 and cannot be held
+      without a code change, which is stated in every config
 - [ ] Run them. Five runs, two cards, three waves — **submit `p1` and `p4`
       first**, since the ends are what the tiers need if only one wave lands
 - [ ] **High / Med / Low on biological information** for the tier names. A

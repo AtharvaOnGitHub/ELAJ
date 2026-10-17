@@ -22,17 +22,24 @@ the prior — and neither of which has ever been read cleanly (see
 
 | | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
 |---|---|---|
-| **`lambda_dab` 7** | `p1_dab7_kl1` | `p2_dab7_kl30` |
-| **`lambda_dab` 168** | `p3_dab168_kl1` | `p5_dab168_kl30` |
-| **`lambda_dab` 336** | — | `p4_dab336_kl30` |
+| **`lambda_dab` 7** | `p1_dab7_kl1` | `p1_dab7_kl30` |
+| **`lambda_dab` 168** | `p1_dab168_kl1` | `p1_dab168_kl30` |
+| **`lambda_dab` 336** | — | `p1_dab336_kl30` |
 
 **Five arms, not four, and `m5_combined` is not one of them.** The square was
-designed with m5 filling the (168, 30) cell. It is run as `p5` instead, for
+designed with m5 filling the (168, 30) cell. It is run as `p1_dab168_kl30` instead, for
 two reasons: m5 trained under a checkpoint guard this wave does not have, so
 carrying it in would mean reading four arms selected one way against a fifth
 selected another; and it would treat m5 as a final model before it had earned
 that. m5 becomes a prior result to compare against rather than a member of
-the wave, and `p5` doubles as the wave's internal reproduction check.
+the wave, and `p1_dab168_kl30` doubles as the wave's internal reproduction check.
+
+**On the naming.** All five carry the wave number `p1` and differ by their
+arm suffix, which is this project's convention: `r1` had six arms, `m2` five,
+`m6` five, and the number increments only when a wave is *superseded* — `m1` →
+`m2` after the reporting defects were fixed, `m2` → `m3` after `d_study`. A
+`p2` would mean a genuine fault was found in `p1` and corrected, not a
+different configuration. A test asserts the five arm names.
 
 **One base, byte-identical across all five arms.** The YAMLs come from one
 shared body and a test asserts that the 44 non-knob override keys agree,
@@ -90,7 +97,7 @@ and warm-up 2, stopping after epoch 8 requires the best rank at epoch 3,
 making epochs 4–8 five consecutive failures; epoch 4 did not breach, and m5's
 `nb` curve was "shallow dip, then back up", so those epochs would most likely
 have failed on `nb` alone. The guard probably changed neither m5's stop nor
-its selected checkpoint. `p5` is now the measurement that settles it.
+its selected checkpoint. `p1_dab168_kl30` is now the measurement that settles it.
 
 ## The horizon, settled
 
@@ -138,17 +145,17 @@ Predicted bands:
 | arm | family ↑ | phase ↑ | donor kNN ↓ | study mix ↓ | val_nb ↓ | expected tier |
 |---|---:|---:|---:|---:|---:|---|
 | **p1_dab7_kl1** | ≥ 0.965 | ≥ 0.62 | 0.55–0.65 | 0.72–0.85 | ≤ 0.405, best of the wave | **High** |
-| **p3_dab168_kl1** | ≥ 0.960 | 0.58–0.65 | 0.48–0.58 | 0.70–0.82 | — | High or Medium |
-| **p2_dab7_kl30** | 0.955–0.970 | 0.55–0.62 | 0.42–0.50 | 0.55–0.70 | — | Medium |
-| **p4_dab336_kl30** | 0.94–0.96 | ≤ 0.55 | ≤ 0.40 | ≤ 0.50 | worst of the wave | **Low** |
-| **p5_dab168_kl30** | 0.955–0.967 | 0.55–0.60 | 0.38–0.44 | 0.47–0.55 | 0.400–0.410 | reproduction of m5 |
+| **p1_dab168_kl1** | ≥ 0.960 | 0.58–0.65 | 0.48–0.58 | 0.70–0.82 | — | High or Medium |
+| **p1_dab7_kl30** | 0.955–0.970 | 0.55–0.62 | 0.42–0.50 | 0.55–0.70 | — | Medium |
+| **p1_dab336_kl30** | 0.94–0.96 | ≤ 0.55 | ≤ 0.40 | ≤ 0.50 | worst of the wave | **Low** |
+| **p1_dab168_kl30** | 0.955–0.967 | 0.55–0.60 | 0.38–0.44 | 0.47–0.55 | 0.400–0.410 | reproduction of m5 |
 
 ## The three questions these runs answer
 
-**1. Is donor-blindness the adversary's doing or the prior's?** `p2` keeps
+**1. Is donor-blindness the adversary's doing or the prior's?** `p1_dab7_kl30` keeps
 m5's expensive latent and takes `lambda_dab` down by a factor of 24. The
 prediction is that **compression carries most of it**: donor kNN within 0.09
-of m5's 0.406 and study mixing within 0.20 of its 0.504. If instead `p2` lands
+of m5's 0.406 and study mixing within 0.20 of its 0.504. If instead `p1_dab7_kl30` lands
 at donor kNN 0.55 or above, the adversary is the primary mechanism and this
 prediction is wrong.
 
@@ -159,10 +166,10 @@ adds little once it is paid" are different papers.
 **2. Does the adversary need a scarce latent to work?** m3's diagnostic
 measured the discriminator's loss correlating **+0.883** with donor kNN — the
 encoder was *hiding* study rather than discarding it. The prediction is that
-`p3` ≈ `p1` on both donor axes, i.e. `lambda_dab` 168 buys little when
+`p1_dab168_kl1` ≈ `p1` on both donor axes, i.e. `lambda_dab` 168 buys little when
 capacity is cheap, because hiding is affordable. If that holds it is an
 interaction, and it explains why m5 is the only arm in this project's history
-to reach study mixing 0.504. **The falsifier:** `p3` reaching donor kNN near
+to reach study mixing 0.504. **The falsifier:** `p1_dab168_kl1` reaching donor kNN near
 0.42 at `w_kl_gauss` 1 would mean the adversary works alone, there is no
 interaction, and `lambda_dab` is the frontier knob on its own.
 
@@ -185,8 +192,8 @@ threshold, declared now:
 Below that the tiers are three indistinguishable configurations, and the
 honest report is **one model with a sweep behind it**, not three.
 
-**The conditional tier.** If `p4` does not beat m5's 0.406 on donor kNN, then
-m5 is already the donor-blind end, `p4` is a redundant point, and the Low tier
+**The conditional tier.** If `p1_dab336_kl30` does not beat m5's 0.406 on donor kNN, then
+m5 is already the donor-blind end, `p1_dab336_kl30` is a redundant point, and the Low tier
 is m5. Raising the pressure past 336 to force a gap would be tuning the
 frontier into existence.
 
@@ -202,14 +209,14 @@ frontier's claim is its shape and the donor axis underneath it.
 
 ## The one real collapse risk
 
-`p4` only. Effective β is `beta_max × w_kl_gauss` = 15 with the ramp
+`p1_dab336_kl30` only. Effective β is `beta_max × w_kl_gauss` = 15 with the ramp
 compressed into epoch 0, and the adversary sits at twice m5's pressure on top
 of it. The signature, **by epoch 3**: `mu_gauss_norm` trending toward zero, or
 the per-dimension KL flooring at `free_bits` across most of the sixteen
 dimensions, with `val_nb` above the mean-profile baseline of **0.4332** — a
 model that has stopped reading the cell and is reproducing the study mean.
 
-A collapsed `p4` is reported as a collapsed point. An information-price axis
+A collapsed `p1_dab336_kl30` is reported as a collapsed point. An information-price axis
 is allowed to have a far end.
 
 ---
@@ -218,7 +225,7 @@ is allowed to have a far end.
 
 `max_epochs` is **12** in all five configs and that value is inherited, not
 argued. Its only justification was keeping m5's cell comparable, and m5's cell
-is now `p5`.
+is now `p1_dab168_kl30`.
 
 **It is a shape, not a length — and that is measured, not asserted.**
 `build_scheduler` sets `T_max = max_epochs` on `CosineAnnealingLR` stepped
@@ -297,17 +304,17 @@ Five runs, two cards. At the measured 58 min/epoch, the expected 15 epochs is
 ends are what the tiers need:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl1 && sbatch data_collation/scripts/train.sh p4_dab336_kl30
+cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl1 && sbatch data_collation/scripts/train.sh p1_dab336_kl30
 ```
 
 Then, as cards free, the two interior cells and finally the reproduction:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p2_dab7_kl30 && sbatch data_collation/scripts/train.sh p3_dab168_kl1
+cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl30 && sbatch data_collation/scripts/train.sh p1_dab168_kl1
 ```
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p5_dab168_kl30
+cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab168_kl30
 ```
 
 `train.sh` asks for one `a100_80`, 16 cores, 100 G and a two-day wall — sized

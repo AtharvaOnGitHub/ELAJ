@@ -1,4 +1,4 @@
-name: p5_dab168_kl30
+name: p1_dab168_kl30
 description: >
   THE CELL m5_combined OCCUPIES, RUN ON THIS WAVE'S PROTOCOL INSTEAD OF
   INHERITED FROM IT. lambda_dab 168, w_kl_gauss 30.
@@ -37,7 +37,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/p_series/p5_dab168_kl30/
+output_dir: outputs/p_series/p1_dab168_kl30/
 # 24, m5_combined's seed, on all five arms. The factorial measures two knobs
 # and a seed difference would be a third.
 seed: 24

@@ -511,30 +511,35 @@ def test_retired_override_names_are_translated(tmp_path):
     assert model_cfg.n_circular == 3 and model_cfg.loss.w_kl_circ == 0.2
 
 
-# ── The p-series 2x2 factorial ────────────────────────────────────────────────
+# ── p1: the 2x2 factorial wave ────────────────────────────────────────────────
 # The four arms differ in exactly two override keys and agree on every other
 # one. That is not a tidiness preference: it is the condition under which the
 # square has main effects and an interaction to read at all. A later edit that
 # touches one arm's base and not the other three turns the factorial back into
 # four unattributable runs, which is the thing LEVERS.md was written about.
-P_SERIES = {
+# ONE WAVE, FIVE ARMS, AND THEY ALL CARRY THE SAME WAVE NUMBER. The series
+# convention here is <letter><wave>_<arm>: r1 had six arms, m2 five, m6 five,
+# and the number increments only when a wave is superseded -- m1 -> m2 after
+# the reporting defects were fixed, m2 -> m3 after d_study. p2 would mean a
+# genuine fault was found in p1 and corrected, not a different configuration.
+P1_ARMS = {
     "p1_dab7_kl1": (7.0, 1.0),
-    "p2_dab7_kl30": (7.0, 30.0),
-    "p3_dab168_kl1": (168.0, 1.0),
-    "p4_dab336_kl30": (336.0, 30.0),
+    "p1_dab7_kl30": (7.0, 30.0),
+    "p1_dab168_kl1": (168.0, 1.0),
+    "p1_dab336_kl30": (336.0, 30.0),
     # The cell m5_combined would have filled, run rather than assumed: m5
     # carried a study_knn checkpoint guard this wave does not have.
-    "p5_dab168_kl30": (168.0, 30.0),
+    "p1_dab168_kl30": (168.0, 30.0),
 }
-P_SERIES_KNOBS = ("model.dab.lambda_dab", "model.loss.w_kl_gauss")
+P1_KNOBS = ("model.dab.lambda_dab", "model.loss.w_kl_gauss")
 
 
-def _p_series_overrides():
+def _p1_overrides():
     import yaml
 
     root = Path(__file__).resolve().parents[2]
     out = {}
-    for name in P_SERIES:
+    for name in P1_ARMS:
         path = root / "configs" / "experiment" / f"{name}.yaml"
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert raw["name"] == name, f"{path} names itself {raw['name']!r}"
@@ -542,23 +547,23 @@ def _p_series_overrides():
     return out
 
 
-def test_p_series_knobs_take_the_four_intended_values():
+def test_p1_knobs_take_the_four_intended_values():
     """m5_combined fills the square's fourth cell at (168, 30), so these four
     must be the other three plus the 336 extension -- no duplicates, no
     accidental third value on either axis."""
-    raws = _p_series_overrides()
+    raws = _p1_overrides()
     got = {
-        name: tuple(float(raw["overrides"][k]) for k in P_SERIES_KNOBS)
+        name: tuple(float(raw["overrides"][k]) for k in P1_KNOBS)
         for name, raw in raws.items()
     }
-    assert got == P_SERIES, got
+    assert got == P1_ARMS, got
 
 
-def test_p_series_shares_one_base_outside_the_two_knobs():
-    raws = _p_series_overrides()
+def test_p1_shares_one_base_outside_the_two_knobs():
+    raws = _p1_overrides()
     bases = {
         name: {k: v for k, v in raw["overrides"].items()
-               if k not in P_SERIES_KNOBS}
+               if k not in P1_KNOBS}
         for name, raw in raws.items()
     }
     reference, expected = next(iter(bases.items()))
@@ -573,19 +578,19 @@ def test_p_series_shares_one_base_outside_the_two_knobs():
         )
 
 
-def test_p_series_selects_checkpoints_on_nb_alone():
+def test_p1_selects_checkpoints_on_nb_alone():
     """No guard, deliberately: `study_knn` is one of the two axes the frontier
     is plotted on, so guarding on it would select the points by their position
     on an axis we then report as a result. It is also arm-dependent in effect,
     which is what stopped m5 at nine of twelve epochs."""
-    for name, raw in _p_series_overrides().items():
+    for name, raw in _p1_overrides().items():
         over = raw["overrides"]
         assert over.get("training.stop_metric") == "nb", name
         assert "training.guard_metric" not in over, name
         assert "training.guard_max" not in over, name
 
 
-def test_p_series_shares_one_horizon_and_one_seed():
+def test_p1_shares_one_horizon_and_one_seed():
     """`max_epochs` sets T_max on CosineAnnealingLR and is the denominator of
     both the KL warm-up and the DAB ramp, so it is an optimisation variable
     and not just a budget. Its VALUE is a decision recorded in
@@ -593,7 +598,7 @@ def test_p_series_shares_one_horizon_and_one_seed():
     that none of them falls through to base.yaml's 50, and that the seed is
     not a fifth variable. (A divergence would also trip the base-identity
     test above; this one names the cause.)"""
-    raws = _p_series_overrides()
+    raws = _p1_overrides()
     horizons = {name: raw["overrides"].get("training.max_epochs")
                 for name, raw in raws.items()}
     assert all(h is not None for h in horizons.values()), horizons

@@ -94,22 +94,22 @@ prior.
 
 | | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
 |---|---|---|
-| **`lambda_dab` 7** | `p1_dab7_kl1` — most biology expected | `p2_dab7_kl30` |
-| **`lambda_dab` 168** | `p3_dab168_kl1` | `p5_dab168_kl30` — m5's cell, run not assumed |
-| **`lambda_dab` 336** | — | `p4_dab336_kl30` — the donor-blind end |
+| **`lambda_dab` 7** | `p1_dab7_kl1` — most biology expected | `p1_dab7_kl30` |
+| **`lambda_dab` 168** | `p1_dab168_kl1` | `p1_dab168_kl30` — m5's cell, run not assumed |
+| **`lambda_dab` 336** | — | `p1_dab336_kl30` — the donor-blind end |
 
 **Five arms, and `m5_combined` is not one of them.** m5 trained under a
 `study_knn` checkpoint guard this wave does not have, so carrying it into the
 square would mean reading four arms selected one way against a fifth selected
 another — and it would treat m5 as a final model before it had earned that.
-`p5` runs that cell on this wave's protocol and doubles as the reproduction
+`p1_dab168_kl30` runs that cell on this wave's protocol and doubles as the reproduction
 check on whether the guard was load-bearing for m5's reported point.
 
 **The expectations are pre-registered** in
 [`RETRAIN_EXPECTATIONS.md`](RETRAIN_EXPECTATIONS.md): a predicted band per arm
 per metric, the three questions the square answers, the separation thresholds
 that make three tiers real rather than three indistinguishable points, and the
-collapse signature for `p4`. Written before any run started, and **no arm gets
+collapse signature for `p1_dab336_kl30`. Written before any run started, and **no arm gets
 adjusted to meet it** — the frontier is an outcome.
 
 **The guard is gone, and the reason is the mechanism rather than one
@@ -135,7 +135,7 @@ printed at its selected epoch.
       and the table says so. Both schedule ramps stretch with the horizon (β
       warm-up 0.60 → 1.00 epochs, λ_dab saturation epoch 6 → 10), identically
       on all five arms, and nothing is adjusted to compensate
-- [ ] Run them. Five runs, two cards, three waves — **submit `p1` and `p4`
+- [ ] Run them. Five runs, two cards, three waves — **submit `p1` and `p1_dab336_kl30`
       first**, since the ends are what the tiers need if only one wave lands
 - [ ] **High / Med / Low on biological information** for the tier names. A
       smarter rule for choosing points on the frontier is pinned for later

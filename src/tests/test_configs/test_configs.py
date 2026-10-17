@@ -509,3 +509,103 @@ def test_retired_override_names_are_translated(tmp_path):
     )
     _, model_cfg, _, _ = load_experiment("e.yaml", root=str(tmp_path))
     assert model_cfg.n_circular == 3 and model_cfg.loss.w_kl_circ == 0.2
+
+
+# ── The n-series 2x2 factorial ────────────────────────────────────────────────
+# The four arms differ in exactly two override keys and agree on every other
+# one. That is not a tidiness preference: it is the condition under which the
+# square has main effects and an interaction to read at all. A later edit that
+# touches one arm's base and not the other three turns the factorial back into
+# four unattributable runs, which is the thing LEVERS.md was written about.
+N_SERIES = {
+    "n1_dab7_kl1": (7.0, 1.0),
+    "n2_dab7_kl30": (7.0, 30.0),
+    "n3_dab168_kl1": (168.0, 1.0),
+    "n4_dab336_kl30": (336.0, 30.0),
+}
+N_SERIES_KNOBS = ("model.dab.lambda_dab", "model.loss.w_kl_gauss")
+
+
+def _n_series_overrides():
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    out = {}
+    for name in N_SERIES:
+        path = root / "configs" / "experiment" / f"{name}.yaml"
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert raw["name"] == name, f"{path} names itself {raw['name']!r}"
+        out[name] = raw
+    return out
+
+
+def test_n_series_knobs_take_the_four_intended_values():
+    """m5_combined fills the square's fourth cell at (168, 30), so these four
+    must be the other three plus the 336 extension -- no duplicates, no
+    accidental third value on either axis."""
+    raws = _n_series_overrides()
+    got = {
+        name: tuple(float(raw["overrides"][k]) for k in N_SERIES_KNOBS)
+        for name, raw in raws.items()
+    }
+    assert got == N_SERIES, got
+
+
+def test_n_series_shares_one_base_outside_the_two_knobs():
+    raws = _n_series_overrides()
+    bases = {
+        name: {k: v for k, v in raw["overrides"].items()
+               if k not in N_SERIES_KNOBS}
+        for name, raw in raws.items()
+    }
+    reference, expected = next(iter(bases.items()))
+    for name, base in bases.items():
+        differing = {
+            k for k in set(base) | set(expected)
+            if base.get(k, "<absent>") != expected.get(k, "<absent>")
+        }
+        assert not differing, (
+            f"{name} differs from {reference} outside the two knobs on "
+            f"{sorted(differing)}; the 2x2 cannot be attributed."
+        )
+
+
+def test_n_series_selects_checkpoints_on_nb_alone():
+    """No guard, deliberately: `study_knn` is one of the two axes the frontier
+    is plotted on, so guarding on it would select the points by their position
+    on an axis we then report as a result. It is also arm-dependent in effect,
+    which is what stopped m5 at nine of twelve epochs."""
+    for name, raw in _n_series_overrides().items():
+        over = raw["overrides"]
+        assert over.get("training.stop_metric") == "nb", name
+        assert "training.guard_metric" not in over, name
+        assert "training.guard_max" not in over, name
+
+
+def test_n_series_shares_m5s_horizon():
+    """`max_epochs` sets T_max on CosineAnnealingLR, and both the KL warm-up
+    and the DAB ramp are fractions of total_steps, so a per-arm horizon would
+    give the arms different schedules as well as different knobs. 12 is
+    m5_combined's."""
+    m5 = _load_yaml_overrides("m5_combined")
+    assert int(m5["training.max_epochs"]) == 12
+    for name, raw in _n_series_overrides().items():
+        assert int(raw["overrides"]["training.max_epochs"]) == 12, name
+        assert int(raw["seed"]) == int(
+            _load_yaml_seed("m5_combined")), f"{name} seed differs from m5's"
+
+
+def _load_yaml_overrides(name: str) -> dict:
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    path = root / "configs" / "experiment" / f"{name}.yaml"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["overrides"]
+
+
+def _load_yaml_seed(name: str) -> int:
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    path = root / "configs" / "experiment" / f"{name}.yaml"
+    return int(yaml.safe_load(path.read_text(encoding="utf-8"))["seed"])

@@ -94,17 +94,39 @@ prior.
 
 | | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
 |---|---|---|
-| **`lambda_dab` 7** | run — most biology expected | run |
-| **`lambda_dab` 168** | run | **= m5, already have it** |
-| **`lambda_dab` 336** | — | run — extends the donor-blind end |
+| **`lambda_dab` 7** | `n1_dab7_kl1` — most biology expected | `n2_dab7_kl30` |
+| **`lambda_dab` 168** | `n3_dab168_kl1` | **= m5, already have it** |
+| **`lambda_dab` 336** | — | `n4_dab336_kl30` — the donor-blind end |
 
 Four runs, four new frontier points, and main effects plus an interaction for
 both knobs. If the frontier does turn out to be traced by one knob, the
 factorial shows that and we say so; constraining to one before looking would
 be assuming the answer.
 
-- [ ] Write the four configs on the m5 base
-- [ ] Run them
+**The expectations are pre-registered** in
+[`RETRAIN_EXPECTATIONS.md`](RETRAIN_EXPECTATIONS.md): a predicted band per arm
+per metric, the three questions the square answers, the separation thresholds
+that make three tiers real rather than three indistinguishable points, and the
+collapse signature for `n4`. Written before any run started, and **no arm gets
+adjusted to meet it** — the frontier is an outcome.
+
+Three deliberate differences from m5, all fixed before the runs: `max_epochs`
+12 everywhere (it sets `T_max` on the cosine and the β-ramp denominator, so it
+cannot vary per arm — the cheap-latent arms may therefore report unconverged
+points, and that is accepted); **no checkpoint guard**, because `study_knn` is
+one of the two axes the frontier is plotted on and selecting points by it would
+be circular; and `model.drain.enabled: false` written out explicitly.
+
+- [x] Write the four configs on the m5 base — generated from one shared body
+      so the 44 non-knob override keys are byte-identical; all four load
+      through `load_experiment` and the repo-wide config test passes
+- [x] Pre-register the expectations
+- [ ] Run them. Two cards, ~11.6 h each at the measured 58 min/epoch, so two
+      waves — **submit `n1` and `n4` first**, since the ends are what the
+      tiers need if only one wave lands in time
+- [ ] Check where m5's best `val_nb` epoch sits. Its guard stopped it at epoch
+      9 of 12; if its best epoch is inside the first nine, the one difference
+      its cell carries is immaterial and Methods says so
 - [ ] **High / Med / Low on biological information** for the tier names. A
       smarter rule for choosing points on the frontier is pinned for later
 - [x] m5 exists on the clean split and fills one cell

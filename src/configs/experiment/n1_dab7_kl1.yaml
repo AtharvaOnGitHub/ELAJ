@@ -1,0 +1,165 @@
+name: n1_dab7_kl1
+description: >
+  THE BIOLOGY END OF THE FRONTIER. Both prices at their lowest: lambda_dab 7,
+  w_kl_gauss 1. Cell (7, 1) of the square.
+
+  WHAT THIS ARM IS FOR. m3_study_raw did the best biology this project has ever
+  measured -- cross-donor family 0.983, cross-donor phase 0.751, val_nb 0.3975 --
+  and it is unquotable, because it trained on the contaminated split and on the
+  382,464-cell corpus. Its configuration was lambda_dab 7 and w_kl_gauss 1. This
+  arm puts those two numbers back on the clean split at m5's width and m5's
+  adversary, and nothing else of m3 comes with them.
+
+  WHAT IS PREDICTED, BEFORE THE RUN.
+
+      cross-donor family       >= 0.965   (m5 0.961, m6_drain 0.969)
+      cross-donor phase        >= 0.62    (m5 0.573, m6_drain 0.607)
+      donor kNN                0.55-0.65  (m3's old 0.617 was at this setting)
+      study mixing             0.72-0.85  (m3's old 0.725)
+      val_nb                   <= 0.405, and the best of the four arms
+      latent                   tens of nats, not m5's ~10
+
+  PHASE IS THE NUMBER THIS ARM IS JUDGED ON. It is the axis m3 was exceptional
+  on and the axis m5 paid the most for, and 0.62 is the threshold: above it, the
+  clean split preserved what m3 had and the High tier is real. m3's own 0.751 is
+  NOT the target, because 24 latent dimensions and a contaminated split both
+  flattered it.
+
+  WHAT WOULD MAKE THIS ARM UNINFORMATIVE RATHER THAN BAD. Phase landing near
+  m5's 0.573 with donor kNN up at 0.60. That is strictly worse than m5 on both
+  axes at once -- off the frontier rather than at its end -- and it would mean
+  the clean split, not the information price, is what limits phase. In that case
+  the three tiers collapse toward one point and the paper reports a single model
+  with a sweep behind it rather than three configurations.
+
+  IT IS NOT EXPECTED TO BEAT scVI OR scANVI, on phase or on family, and nothing
+  here is tuned toward that. The frontier's claim is its shape and the donor axis
+  underneath it.
+
+model:    configs/model/ELAJ_small.yaml
+training: configs/training/base.yaml
+data:     configs/data/corpus_v1.yaml
+
+output_dir: outputs/n_series/n1_dab7_kl1/
+# 24, m5_combined's seed, on all four arms. The factorial measures two knobs
+# and a seed difference would be a third.
+seed: 24
+
+overrides:
+  # ── THE TWO KNOBS. Everything below this block is m5_combined's value. ──
+  model.dab.lambda_dab: 7.0
+  model.loss.w_kl_gauss: 1.0
+
+  # ── THE HORIZON, AND WHY IT IS NOT NEGOTIABLE PER ARM ──────────────────
+  # 12 epochs, exactly m5_combined's, on all four arms. max_epochs is not
+  # just a stopping point: build_scheduler sets T_max = max_epochs on
+  # CosineAnnealingLR, and kl_annealing.warmup_fraction and the DAB ramp are
+  # both fractions of total_steps. Raising it for the arms at w_kl_gauss 1 --
+  # which m6_drain showed were still descending at epoch 14 -- would give
+  # those arms a different learning-rate curve and a different beta ramp from
+  # m5's, and the square would no longer be a square.
+  #
+  # SO AN ARM AT w_kl_gauss 1 MAY REPORT AN UNCONVERGED POINT. That is
+  # accepted before the run. An unconverged point on a matched schedule is
+  # comparable; a converged point on a different schedule is not.
+  training.max_epochs: 12
+  training.early_stop_patience: 5
+  training.early_stop_warmup_epochs: 2
+  training.batch_size: 256
+
+  training.diagnostics.log_every: 50
+  training.diagnostics.latent_every: 3
+  training.block_probe_every: 2
+  training.keep_every_epochs: 1
+
+  # ── NO GUARD, AND THIS IS A CHANGE FROM m5 ─────────────────────────────
+  # m5 ran with guard_metric study_knn and guard_max 0.65. Dropping it is
+  # deliberate and has one decisive reason: study_knn is one of the two axes
+  # the frontier is PLOTTED on. Selecting each arm's reported checkpoint by
+  # its study_knn would choose the points by their position on the axis we
+  # then present as a result, which is circular. The guard also interacts
+  # with the arm: an arm that never dips under the ceiling takes a constant
+  # penalty and therefore ranks exactly on nb, while an arm that dips and
+  # rises -- m5, whose val_study_knn went 0.554 -> 0.720 -- takes the penalty
+  # partway through, which is what stopped m5 at nine of its twelve epochs.
+  # The same written rule was behaving differently per arm.
+  #
+  # So selection here is nb alone, identically on all four, and
+  # early_stopping sees nb alone. Leaving guard_metric unset gives
+  # CheckpointRanking guard=None; trainer.py logs "no guard" at construction,
+  # so the record says so before the run saw any data.
+  #
+  # THE COST, STATED: m5's own cell of the square carries one difference the
+  # other four do not -- it stopped at epoch 9 under a guard. Check where
+  # m5's best val_nb epoch actually sits before reading the square; if it is
+  # inside the first nine, the difference is immaterial and we say that.
+  training.stop_metric: nb
+
+  # Just under the smallest panel of 13,144. m5's value.
+  training.gene_mask_target: 12500
+
+  training.optimizer.lr: 1.0e-3
+  training.kl_annealing.beta_max: 0.5
+  # 0.05 of total steps, so the price lands inside epoch 0 while the latent
+  # is still filling. At 12 epochs the ramp finishes at epoch 0.6.
+  training.kl_annealing.warmup_fraction: 0.05
+  # Inert: no circular branch on any arm of this wave.
+  model.loss.w_kl_circ: 2.0
+  # Not a lever, and that is MEASURED, not assumed: m4_tight16's latent sat
+  # 14x above the 4.00-nat floor, so the allowance never bound. Held at 0.25
+  # because changing a knob known to do nothing would only add a variable.
+  model.loss.free_bits: 0.25
+
+  # The adversary's SHAPE, held fixed: scGPT's AdversarialDiscriminator,
+  # three 256-unit LeakyReLU layers with LayerNorm and no dropout. Only
+  # lambda_dab moves in this wave, and lambda_dab is read against THIS
+  # adversary -- the project's historical low of 7 was measured against the
+  # one 64-unit layer that r1-m4 used, which delivers a smaller gradient at
+  # the same lambda. 7 here is not m3's 7.
+  model.dab.hidden_dim: 256
+  model.dab.n_layers: 3
+  model.dab.normalise: true
+  model.dab.dropout: 0.0
+  model.loss.w_dab: 0.5
+
+  model.ecs.enabled: true
+  model.ecs.threshold: 0.8
+  # 0, so pairs stay within one study. PerStudyBatchSampler puts one study in
+  # each batch; the cross-study variant would drive apart two cells of one
+  # type that sit at low cosine BECAUSE of the batch effect, undoing the
+  # adversary's work with our own objective.
+  model.ecs.buffer_batches: 0
+  model.loss.w_ecs: 50.0
+
+  # Measured at 0.0005x reconstruction's gradient and costing a second
+  # encoder pass every fourth step.
+  model.cce.enabled: false
+
+  model.classifier.enabled: true
+  model.classifier.block: gaussian
+  model.classifier.dropout: 0.0
+  model.classifier.label_smoothing: 0.05
+  model.loss.w_cls: 40.0
+
+  # d_z = d_gauss alone. 16, m5's width, on all four.
+  model.d_gauss: 16
+  model.n_circular: 0
+  model.circular_parameterisation: direction
+  model.kappa_floor: 1.0
+  model.d_platform: 16
+  model.d_study: 16
+  model.d_disease: 0
+
+  model.group_encoder.grad_checkpointing: false
+
+  model.tokens.count_scale: log
+  model.tokens.target_sum: 1.0e4
+  model.tokens.value_part: gene_direction
+  model.group_encoder.readout: cls+pool8
+  model.aggregation_encoder.readout: cls+pool8
+
+  # NO DRAIN AND NO BLANKING ON ANY ARM OF THIS WAVE. The drain is out of the
+  # main paper: m6 held its own targets without relieving the biology block,
+  # and one arm failing to work is not evidence that the mechanism cannot.
+  # It stays in the repository and the supplement, unmixed with the frontier.
+  model.drain.enabled: false

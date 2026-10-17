@@ -94,9 +94,9 @@ prior.
 
 | | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
 |---|---|---|
-| **`lambda_dab` 7** | `f1_dab7_kl1` — most biology expected | `f2_dab7_kl30` |
-| **`lambda_dab` 168** | `f3_dab168_kl1` | **= m5, already have it** |
-| **`lambda_dab` 336** | — | `f4_dab336_kl30` — the donor-blind end |
+| **`lambda_dab` 7** | `p1_dab7_kl1` — most biology expected | `p2_dab7_kl30` |
+| **`lambda_dab` 168** | `p3_dab168_kl1` | **= m5, already have it** |
+| **`lambda_dab` 336** | — | `p4_dab336_kl30` — the donor-blind end |
 
 Four runs, four new frontier points, and main effects plus an interaction for
 both knobs. If the frontier does turn out to be traced by one knob, the

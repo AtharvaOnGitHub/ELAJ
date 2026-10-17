@@ -1,4 +1,4 @@
-name: f1_dab7_kl1
+name: p1_dab7_kl1
 description: >
   THE BIOLOGY END OF THE FRONTIER. Both prices at their lowest: lambda_dab 7,
   w_kl_gauss 1. Cell (7, 1) of the square.
@@ -40,7 +40,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/f_series/f1_dab7_kl1/
+output_dir: outputs/p_series/p1_dab7_kl1/
 # 24, m5_combined's seed, on all four arms. The factorial measures two knobs
 # and a seed difference would be a third.
 seed: 24

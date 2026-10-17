@@ -22,9 +22,9 @@ the prior — and neither of which has ever been read cleanly (see
 
 | | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
 |---|---|---|
-| **`lambda_dab` 7** | `f1_dab7_kl1` | `f2_dab7_kl30` |
-| **`lambda_dab` 168** | `f3_dab168_kl1` | **`m5_combined`, already run** |
-| **`lambda_dab` 336** | — | `f4_dab336_kl30` |
+| **`lambda_dab` 7** | `p1_dab7_kl1` | `p2_dab7_kl30` |
+| **`lambda_dab` 168** | `p3_dab168_kl1` | **`m5_combined`, already run** |
+| **`lambda_dab` 336** | — | `p4_dab336_kl30` |
 
 m5 occupies one cell, so three runs complete the square and the fourth
 extends the donor-blind end.
@@ -81,10 +81,10 @@ Predicted bands:
 
 | arm | family ↑ | phase ↑ | donor kNN ↓ | study mix ↓ | val_nb ↓ | expected tier |
 |---|---:|---:|---:|---:|---:|---|
-| **f1_dab7_kl1** | ≥ 0.965 | ≥ 0.62 | 0.55–0.65 | 0.72–0.85 | ≤ 0.405, best of four | **High** |
-| **f3_dab168_kl1** | ≥ 0.960 | 0.58–0.65 | 0.48–0.58 | 0.70–0.82 | — | High or Medium |
-| **f2_dab7_kl30** | 0.955–0.970 | 0.55–0.62 | 0.42–0.50 | 0.55–0.70 | — | Medium |
-| **f4_dab336_kl30** | 0.94–0.96 | ≤ 0.55 | ≤ 0.40 | ≤ 0.50 | worst of four | **Low** |
+| **p1_dab7_kl1** | ≥ 0.965 | ≥ 0.62 | 0.55–0.65 | 0.72–0.85 | ≤ 0.405, best of four | **High** |
+| **p3_dab168_kl1** | ≥ 0.960 | 0.58–0.65 | 0.48–0.58 | 0.70–0.82 | — | High or Medium |
+| **p2_dab7_kl30** | 0.955–0.970 | 0.55–0.62 | 0.42–0.50 | 0.55–0.70 | — | Medium |
+| **p4_dab336_kl30** | 0.94–0.96 | ≤ 0.55 | ≤ 0.40 | ≤ 0.50 | worst of four | **Low** |
 
 ## The three questions these four runs answer
 
@@ -164,13 +164,13 @@ waves. **Submit the frontier ends first**, because if only one wave finishes
 in time the ends are what the tiers need:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh f1_dab7_kl1 && sbatch data_collation/scripts/train.sh f4_dab336_kl30
+cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl1 && sbatch data_collation/scripts/train.sh p4_dab336_kl30
 ```
 
 Then, when a card frees:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh f2_dab7_kl30 && sbatch data_collation/scripts/train.sh f3_dab168_kl1
+cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p2_dab7_kl30 && sbatch data_collation/scripts/train.sh p3_dab168_kl1
 ```
 
 `train.sh` asks for one `a100_80`, 16 cores, 100 G and a two-day wall — sized

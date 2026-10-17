@@ -1,4 +1,4 @@
-name: f3_dab168_kl1
+name: p3_dab168_kl1
 description: >
   THE ADVERSARY AT m5's STRENGTH, THE LATENT CHEAP. lambda_dab 168,
   w_kl_gauss 1. Cell (168, 1) of the square.
@@ -20,8 +20,8 @@ description: >
 
   WHAT IS PREDICTED, BEFORE THE RUN.
 
-      donor kNN                0.48-0.58, i.e. close to f1_dab7_kl1's
-      study mixing             0.70-0.82, i.e. close to f1_dab7_kl1's
+      donor kNN                0.48-0.58, i.e. close to p1_dab7_kl1's
+      study mixing             0.70-0.82, i.e. close to p1_dab7_kl1's
       cross-donor phase        0.58-0.65
       cross-donor family       >= 0.960
       train_dab                well below chance ln(11) = 2.398 WHILE study
@@ -39,7 +39,7 @@ model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/f_series/f3_dab168_kl1/
+output_dir: outputs/p_series/p3_dab168_kl1/
 # 24, m5_combined's seed, on all four arms. The factorial measures two knobs
 # and a seed difference would be a third.
 seed: 24

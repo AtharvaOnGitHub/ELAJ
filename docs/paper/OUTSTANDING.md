@@ -77,29 +77,37 @@ weaker.
 before `7ed19bd` with donors on both sides of the split wall, so no amount of
 re-scoring repairs them.
 
-**Four retrains, as a ONE-VARIABLE SWEEP.** The m-series changed several
-things per arm, which is why its frontier is a set of points rather than a
-curve. Holding everything at m6's configuration minus the drain and moving
-only `lambda_dab` gives a frontier traced by one knob, which is a far
-stronger figure and a far easier paragraph.
+**Four retrains, as a 2x2 FACTORIAL plus one extension.** See
+[`LEVERS.md`](LEVERS.md) for why: almost nothing in this project has clean
+single-variable evidence, so a sweep of one knob would hand us a frontier and
+no attribution.
 
-| | `lambda_dab` | expected position | also serves as |
-|---|---:|---|---|
-| **ELAJ-High** | 7 | most biology, least donor-blind | m3's pressure at m4's width |
-| **ELAJ-Med** | 40 | middle | the drain control (m6 minus drain) |
-| **ELAJ-Low** | 168 | donor-blind | m5's pressure without m5's KL |
-| **ELAJ-Min** | 336 | most donor-blind | m4's pressure |
+**The base is `m5_combined`, not "m6 minus the drain".** m6 differs from m5 in
+four places, and removing the drain leaves two of them unmotivated:
+`blank_drain_p` becomes meaningless, and `w_kl_gauss` 1 was chosen *because* a
+drain existed to absorb what a cheap latent would hold. m5 is a complete,
+clean-split arm with no drain and no blanking.
 
-Everything else fixed: d_gauss 16, `w_kl_gauss` 1, `d_study` 16, ECS on, no
-drain, clean split. m5 then sits alongside as a fifth point reached by a
-*different* lever (`w_kl_gauss` 30), which is worth having.
+**Two knobs, because both price information and neither has been read
+cleanly.** `lambda_dab` prices it adversarially, `w_kl_gauss` through the
+prior.
 
-- [ ] Write the four configs
+| | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
+|---|---|---|
+| **`lambda_dab` 7** | run — most biology expected | run |
+| **`lambda_dab` 168** | run | **= m5, already have it** |
+| **`lambda_dab` 336** | — | run — extends the donor-blind end |
+
+Four runs, four new frontier points, and main effects plus an interaction for
+both knobs. If the frontier does turn out to be traced by one knob, the
+factorial shows that and we say so; constraining to one before looking would
+be assuming the answer.
+
+- [ ] Write the four configs on the m5 base
 - [ ] Run them
-- [ ] **High / Med / Low on biological information** for now. A smarter rule
-      for choosing points on the frontier is pinned for later
-- [x] m5 exists on the clean split: best donor-blindness (0.406) and best
-      study mixing (0.504) of any arm
+- [ ] **High / Med / Low on biological information** for the tier names. A
+      smarter rule for choosing points on the frontier is pinned for later
+- [x] m5 exists on the clean split and fills one cell
 
 ELAJ-High is the one most likely to produce an outright win: m3 reached
 cross-donor phase 0.751 against scVI's 0.705 and SCimilarity's 0.626, and

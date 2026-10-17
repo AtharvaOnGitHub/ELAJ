@@ -45,11 +45,18 @@ SOURCES = [
     ("axis_m6_drain",        "scanvi", "scANVI",     "baseline", None,   16),
 ]
 
-#: Foundation-model rows, which live in their own per-model directories.
-FOUNDATION = [("fm_geneformer", "geneformer", "Geneformer", 256),
-              ("fm_scgpt", "scgpt", "scGPT", 512),
-              ("fm_scimilarity", "scimilarity", "SCimilarity", None),
-              ("fm_scfoundation", "scfoundation", "scFoundation", None)]
+#: Foundation-model rows. SEVERAL CANDIDATE DIRECTORIES PER MODEL, because
+#: these have been scored in more than one shape: one job per model writes
+#: fm_<name>, while the combined job that scored geneformer before being
+#: OOM-killed wrote fm_all, and a downloaded copy may have been renamed by
+#: hand. The first directory that exists and holds the method's rows wins.
+FOUNDATION = [
+    (["fm_geneformer", "fm_all", "fm_baseline+Geneformer"],
+     "geneformer", "Geneformer", 256),
+    (["fm_scgpt", "fm_all"], "scgpt", "scGPT", 512),
+    (["fm_scimilarity"], "scimilarity", "SCimilarity", 128),
+    (["fm_scfoundation"], "scfoundation", "scFoundation", None),
+]
 
 #: Figure axis key -> (test, label) in the benchmark CSV.
 METRIC_ROWS = {
@@ -113,16 +120,20 @@ def collect(benchmarks: Path) -> list:
         points.append(FrontierPoint(label, family, metrics, val_nb, width))
         logger.info("%-14s %-20s %d axes", label, folder, len(metrics))
 
-    for folder, prefix, label, width in FOUNDATION:
-        path = benchmarks / folder / "benchmark.csv"
-        if not path.is_file():
-            logger.warning("skipping %-14s (not scored yet)", label)
-            continue
-        metrics = read_metrics(path, prefix)
-        if metrics:
-            points.append(FrontierPoint(label, "foundation", metrics,
-                                        None, width))
-            logger.info("%-14s %-20s %d axes", label, folder, len(metrics))
+    for folders, prefix, label, width in FOUNDATION:
+        for folder in folders:
+            path = benchmarks / folder / "benchmark.csv"
+            if not path.is_file():
+                continue
+            metrics = read_metrics(path, prefix)
+            if metrics:
+                points.append(FrontierPoint(label, "foundation", metrics,
+                                            None, width))
+                logger.info("%-14s %-24s %d axes", label, folder, len(metrics))
+                break
+        else:
+            logger.warning("skipping %-14s (none of %s has its rows)",
+                           label, folders)
     return points
 
 
@@ -171,17 +182,22 @@ def main() -> None:
     import matplotlib.pyplot as plt
 
     from endo_model.viz.frontier_panels import legend as frontier_legend
+    from endo_model.viz.frontier_panels import legend_rows
 
+    with_val_nb = [p for p in points if p.val_nb is not None]
     axes_to_plot = ["donor_knn", "xdonor_family", "xdonor_phase", "nmi"]
+    legend_height = 0.21 * legend_rows(with_val_nb) + 0.08
+    total_height = 3.3 + legend_height + 0.45
     fig, axs = plt.subplots(1, len(axes_to_plot),
-                            figsize=(3.5 * len(axes_to_plot), 3.4),
+                            figsize=(3.5 * len(axes_to_plot), total_height),
                             squeeze=False)
     for ax, axis in zip(axs[0], axes_to_plot):
         reconstruction_panel(ax, points, axis, styles)
     fig.suptitle("Reconstruction against the frontier (ELAJ arms only)",
                  fontsize=12)
-    frontier_legend(fig, [p for p in points if p.val_nb is not None], styles)
-    fig.tight_layout(rect=(0, 0.12, 1, 0.93))
+    frontier_legend(fig, with_val_nb, styles)
+    fig.tight_layout(rect=(0, legend_height / total_height, 1,
+                           1 - 0.45 / total_height))
     save_figure(fig, out / "frontier_val_nb")
 
     # The fronts in text, because a figure is not a citable number.

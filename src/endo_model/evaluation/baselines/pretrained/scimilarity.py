@@ -12,6 +12,16 @@ output is cell i of the corpus. Geneformer and scGPT both reorder internally,
 so this module is the odd one out and the shape check below is what proves it
 rather than my reading of their docs.
 
+IT IS SUPERVISED ON CELL TYPE, AND THE TABLE MUST SAY SO. SCimilarity trains
+two objectives at once: an unsupervised reconstruction loss, and a SUPERVISED
+TRIPLET LOSS that pulls cells sharing a Cell Ontology annotation together
+across studies. So its cell-family scores are in the same category as
+scANVI's: not comparable with the unsupervised methods on that label, and
+perfectly fair on every other. Its scIB NMI of 0.856 and ARI of 0.901 against
+cell family are what that objective produces, not evidence that a
+general-purpose embedding recovers our annotations. The settings carry
+`supervised_on` so the report flags the row.
+
 PREPROCESSING IS THEIRS, NOT OURS. lognorm_counts does the tp10k log
 normalisation the model was trained with. We hand over raw counts and let it
 decide, which is what a reader following their tutorial gets. It reads those
@@ -170,6 +180,9 @@ class ScimilarityEmbedder:
                 f"Geneformer's before the row is trusted."
             )
         settings = {
+            # Read by the report, which marks the row. See the note above:
+            # the triplet loss is supervised on Cell Ontology cell type.
+            "supervised_on": "cell family",
             "checkpoint": str(self.repo),
             "pretraining_corpus": "SCimilarity training corpus (~23M cells)",
             "buffer_size": self.batch_size,

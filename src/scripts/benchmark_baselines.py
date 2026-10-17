@@ -420,9 +420,20 @@ def main() -> None:
             logger.error("external latent %s: %s", directory, exc)
             report.record_skip(f"{Path(directory).name}/native", str(exc))
             continue
+        # A pretrained model may be supervised on one of our labels: that is
+        # true of SCimilarity, whose triplet loss uses Cell Ontology cell
+        # type. The manifest declares it and the report marks the row, exactly
+        # as it does for scANVI. Without this the table would report a
+        # supervised cell-family score as though it were unsupervised.
+        supervised = str(emb.settings.get("supervised_on", ""))
+        if supervised:
+            logger.warning("%s is SUPERVISED on %r; its score on that label "
+                           "is not comparable with the unsupervised methods.",
+                           emb.method, supervised)
         logger.info("── %s (external, %d dims, fitted on %s) ──",
                     emb.method, emb.width, emb.fit_on or "the scored cells")
-        report.add(scorer.score(emb, scored, gene_policy="native"))
+        report.add(scorer.score(emb, scored, gene_policy="native",
+                                supervised_on=supervised))
         report.record_settings(emb.method, "native", emb.settings,
                                fit_on=emb.fit_on)
         report.write_csv(out / "benchmark.csv")

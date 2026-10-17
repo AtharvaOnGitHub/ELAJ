@@ -189,7 +189,17 @@ def frontier_figure(points: list[FrontierPoint], donor_axis: str,
 
     axes_to_plot = biology_axes or list(BIOLOGY_AXES)
     nrows = -(-len(axes_to_plot) // ncols)
-    fig, grid = plt.subplots(nrows, ncols, figsize=(3.5 * ncols, 3.3 * nrows),
+
+    # The legend gets its own inches rather than taking them from the panels,
+    # which is what made it overlap the x-labels when the foundation models
+    # added a fourth row. 0.21in per row at 8pt with the spacing set below;
+    # the constant is the gap above the first legend row. Measured by looking:
+    # 0.26 and 0.30 left a visible band of dead space.
+    legend_height = 0.21 * legend_rows(points) + 0.08
+    panel_height = 3.3 * nrows
+    total_height = panel_height + legend_height + 0.45   # +0.45 for the title
+    fig, grid = plt.subplots(nrows, ncols,
+                             figsize=(3.5 * ncols, total_height),
                              squeeze=False)
     for index, biology_axis in enumerate(axes_to_plot):
         frontier_panel(grid[index // ncols][index % ncols], points,
@@ -202,7 +212,8 @@ def frontier_figure(points: list[FrontierPoint], donor_axis: str,
     fig.suptitle(f"Biology against {DONOR_AXES[donor_axis][0]}", fontsize=12,
                  color=palette.ink)
     legend(fig, points, styles, palette)
-    fig.tight_layout(rect=(0, 0.10, 1, 0.95))
+    fig.tight_layout(rect=(0, legend_height / total_height, 1,
+                           1 - 0.45 / total_height))
     return fig
 
 
@@ -225,6 +236,18 @@ def reconstruction_panel(ax, points: list[FrontierPoint], axis: str,
     ax.set_xlabel(f"{name}  {'↓' if lower_better else '↑'}", fontsize=9)
     ax.set_ylabel("val_nb  ↓", fontsize=9)
     ax.margins(x=0.12, y=0.16)
+
+
+def legend_rows(points: list[FrontierPoint]) -> int:
+    """How many rows `legend` will draw: one per family, plus the front.
+
+    Needed BEFORE the figure is sized. The legend grew from three rows to
+    four when the foundation models arrived and overlapped the x-axis labels,
+    because the figure height was fixed and the legend was taking its space
+    from the panels.
+    """
+    return sum(1 for family in FAMILIES
+               if any(p.family == family for p in points)) + 1
 
 
 def legend(fig, points: list[FrontierPoint],

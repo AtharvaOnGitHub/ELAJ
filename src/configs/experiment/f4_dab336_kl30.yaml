@@ -1,53 +1,53 @@
-name: n3_dab168_kl1
+name: f4_dab336_kl30
 description: >
-  THE ADVERSARY AT m5's STRENGTH, THE LATENT CHEAP. lambda_dab 168,
-  w_kl_gauss 1. Cell (168, 1) of the square.
+  THE DONOR-BLIND END. lambda_dab 336, w_kl_gauss 30. Both prices at their
+  highest ever run together.
 
-  THE MECHANISM THIS ARM TESTS. m3's diagnostic is the clearest measurement this
-  project has made about the adversary: the discriminator's loss correlated
-  +0.883 with donor kNN. The encoder was not discarding study, it was HIDING
-  study from the classifier -- fooling it while leaving the information in the
-  geometry, which is what +0.883 means and what makes a fooled adversary no
-  evidence at all. On m1, train_dab fell to 0.2098 against chance ln(11) = 2.398
-  while balanced study purity sat at 0.88.
-
-  So the prediction is that lambda_dab 168 buys little here. With the latent
-  cheap, hiding is affordable: there is enough capacity to carry both the study
-  information and a representation that the discriminator cannot read off it.
-  The adversary should only bite when capacity is ALSO scarce, which is an
-  interaction, and if it holds it is the explanation for why m5 was the only arm
-  in the project's history to reach study mixing 0.504.
+  WHY 336 AND NOT SOMETHING NEW. It is m4_tight16's value, the highest lambda_dab
+  this project has run, so the donor-blind end of the frontier is anchored to a
+  number with history rather than an invented one. It sits outside the 2x2 by
+  design: the square is (7, 168) x (1, 30), and this arm extends the lambda_dab
+  axis one step past m5 at the KL weight m5 used. It is the only arm of the four
+  whose purpose is a frontier POINT rather than an attribution.
 
   WHAT IS PREDICTED, BEFORE THE RUN.
 
-      donor kNN                0.48-0.58, i.e. close to n1_dab7_kl1's
-      study mixing             0.70-0.82, i.e. close to n1_dab7_kl1's
-      cross-donor phase        0.58-0.65
-      cross-donor family       >= 0.960
-      train_dab                well below chance ln(11) = 2.398 WHILE study
-                               mixing stays high -- the fooled-but-separable
-                               signature
+      donor kNN                <= 0.40    (m5 0.406; must beat it to earn a tier)
+      study mixing             <= 0.50    (m5 0.504)
+      cross-donor phase        <= 0.55    (m5 0.573) -- the price, expected
+      cross-donor family       0.94-0.96  (m5 0.961)
+      val_nb                   the worst of the four, and above m5's 0.4043
 
-  THE FALSIFIER IS SHARP. If n3 reaches donor kNN near 0.42 and study mixing
-  near 0.55 at w_kl_gauss 1, the adversary works on its own, there is no
-  interaction, and lambda_dab alone is the frontier knob -- which would be the
-  cleanest possible outcome for the paper and the opposite of what is written
-  here. Read n1 and n3 side by side first; the difference between them IS the
-  main effect of lambda_dab at a cheap latent.
+  THE TIER IS CONDITIONAL AND THE CONDITION IS STATED NOW. If n4 does not beat
+  m5 on donor kNN, then m5 is already the donor-blind end, n4 is a redundant
+  point, and the Low tier is m5. Adding pressure beyond 336 to force it would be
+  tuning the frontier into existence, and the frontier is an outcome.
+
+  WHAT WOULD KILL IT, AND THIS IS THE ONE ARM AT REAL RISK OF COLLAPSE.
+  Effective beta is beta_max x w_kl_gauss = 15 with the ramp compressed into
+  epoch 0, and the adversary is at twice m5's pressure on top of that. The kill
+  signature, by epoch 3: mu_gauss_norm trending toward zero, or the
+  per-dimension KL flooring at free_bits across most of the sixteen dimensions,
+  with val_nb above the mean-profile baseline of 0.4332 -- a model that has
+  stopped reading the cell and is reproducing the study mean.
+
+  A COLLAPSED n4 IS REPORTED AS A COLLAPSED POINT. It is the far end of an
+  information-price axis and the axis is allowed to have a far end. It will not
+  be re-run at a softer setting to make the picture nicer.
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/n_series/n3_dab168_kl1/
+output_dir: outputs/f_series/f4_dab336_kl30/
 # 24, m5_combined's seed, on all four arms. The factorial measures two knobs
 # and a seed difference would be a third.
 seed: 24
 
 overrides:
   # ── THE TWO KNOBS. Everything below this block is m5_combined's value. ──
-  model.dab.lambda_dab: 168.0
-  model.loss.w_kl_gauss: 1.0
+  model.dab.lambda_dab: 336.0
+  model.loss.w_kl_gauss: 30.0
 
   # ── THE HORIZON, AND WHY IT IS NOT NEGOTIABLE PER ARM ──────────────────
   # 12 epochs, exactly m5_combined's, on all four arms. max_epochs is not

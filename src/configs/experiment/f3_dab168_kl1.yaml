@@ -1,48 +1,53 @@
-name: n2_dab7_kl30
+name: f3_dab168_kl1
 description: >
-  THE ADVERSARY NEARLY OFF, THE LATENT EXPENSIVE. lambda_dab 7, w_kl_gauss 30.
-  Cell (7, 30) of the square.
+  THE ADVERSARY AT m5's STRENGTH, THE LATENT CHEAP. lambda_dab 168,
+  w_kl_gauss 1. Cell (168, 1) of the square.
 
-  THE QUESTION ONLY THIS ARM ANSWERS. m5 reached the best donor-blindness and
-  batch mixing of any clean arm -- donor kNN 0.406, study mixing 0.504 -- with
-  lambda_dab 168 and w_kl_gauss 30 moving together. Nobody knows which one did
-  it. This arm keeps the expensive latent and takes the adversary down by a
-  factor of 24. If donor-blindness survives that, it was never the adversary's
-  doing: it was compression, and a 400,000-parameter discriminator with a
-  gradient-reversal layer is doing work the prior was already doing.
+  THE MECHANISM THIS ARM TESTS. m3's diagnostic is the clearest measurement this
+  project has made about the adversary: the discriminator's loss correlated
+  +0.883 with donor kNN. The encoder was not discarding study, it was HIDING
+  study from the classifier -- fooling it while leaving the information in the
+  geometry, which is what +0.883 means and what makes a fooled adversary no
+  evidence at all. On m1, train_dab fell to 0.2098 against chance ln(11) = 2.398
+  while balanced study purity sat at 0.88.
 
-  THAT IS THE MOST CONSEQUENTIAL RESULT AVAILABLE FROM THESE FOUR RUNS, because
-  it decides how the DAB is described in the paper. "Adversarial training
-  removes donor identity" and "the information price removes donor identity, and
-  the adversary adds little once it is paid" are different papers.
+  So the prediction is that lambda_dab 168 buys little here. With the latent
+  cheap, hiding is affordable: there is enough capacity to carry both the study
+  information and a representation that the discriminator cannot read off it.
+  The adversary should only bite when capacity is ALSO scarce, which is an
+  interaction, and if it holds it is the explanation for why m5 was the only arm
+  in the project's history to reach study mixing 0.504.
 
   WHAT IS PREDICTED, BEFORE THE RUN.
 
-      donor kNN                0.42-0.50  (m5 0.406 at 24x the lambda)
-      study mixing             0.55-0.70  (m5 0.504)
-      cross-donor phase        0.55-0.62
-      cross-donor family       0.955-0.970
-      latent                   ~10 nats, as m5's
+      donor kNN                0.48-0.58, i.e. close to f1_dab7_kl1's
+      study mixing             0.70-0.82, i.e. close to f1_dab7_kl1's
+      cross-donor phase        0.58-0.65
+      cross-donor family       >= 0.960
+      train_dab                well below chance ln(11) = 2.398 WHILE study
+                               mixing stays high -- the fooled-but-separable
+                               signature
 
-  THE PREDICTION IS THAT COMPRESSION CARRIES MOST OF IT: donor kNN within 0.09
-  of m5's and study mixing within 0.20, despite lambda_dab falling from 168 to 7.
-  If instead donor kNN lands at 0.55 or above -- where the arms at w_kl_gauss 1
-  are expected -- the adversary is the primary mechanism and the prediction is
-  wrong. Either way the paper's mechanism sentence is settled by this one number.
+  THE FALSIFIER IS SHARP. If n3 reaches donor kNN near 0.42 and study mixing
+  near 0.55 at w_kl_gauss 1, the adversary works on its own, there is no
+  interaction, and lambda_dab alone is the frontier knob -- which would be the
+  cleanest possible outcome for the paper and the opposite of what is written
+  here. Read n1 and n3 side by side first; the difference between them IS the
+  main effect of lambda_dab at a cheap latent.
 
 model:    configs/model/ELAJ_small.yaml
 training: configs/training/base.yaml
 data:     configs/data/corpus_v1.yaml
 
-output_dir: outputs/n_series/n2_dab7_kl30/
+output_dir: outputs/f_series/f3_dab168_kl1/
 # 24, m5_combined's seed, on all four arms. The factorial measures two knobs
 # and a seed difference would be a third.
 seed: 24
 
 overrides:
   # ── THE TWO KNOBS. Everything below this block is m5_combined's value. ──
-  model.dab.lambda_dab: 7.0
-  model.loss.w_kl_gauss: 30.0
+  model.dab.lambda_dab: 168.0
+  model.loss.w_kl_gauss: 1.0
 
   # ── THE HORIZON, AND WHY IT IS NOT NEGOTIABLE PER ARM ──────────────────
   # 12 epochs, exactly m5_combined's, on all four arms. max_epochs is not

@@ -19,6 +19,21 @@ findings to [`EVIDENCE.md`](EVIDENCE.md), claims and schedule to
 > does **not badly** against the fitted baselines, and keeps **donor identity
 > low**. The frontier is reported as the reasoning for three ELAJ tiers.
 
+### The results section has two subsections, and they have different rules
+
+**Results 1 — ELAJ's own biology.** UMAPs and the biological results of the
+ELAJ models, read largely in isolation from the baselines and the foundation
+models. This is the best-foot-forward section: whatever shows the models at
+their strongest takes precedence, and there is no hedging in it.
+
+**Results 2 — the ELAJ frontier.** Where the whole field is contextualised:
+what current technology does and does not make possible. The baselines, the
+foundation models and every ELAJ tier go here, with every caveat attached —
+supervision, width, gene coverage, provenance.
+
+An item below belongs to one or the other, and which one decides how it is
+written.
+
 Primary contribution: **the architecture** — gene grouping, the DNS token,
 the drain, the circular latent, the heads, and the attention statistics sent
 alongside the CLS token. Secondary: the evaluation framework, what the
@@ -62,15 +77,33 @@ weaker.
 before `7ed19bd` with donors on both sides of the split wall, so no amount of
 re-scoring repairs them.
 
-- [ ] **ELAJ-L** — retrain the `m3_study_raw` configuration on the clean
-      split, at d_z 16 rather than 24. The arm most likely to produce an
-      outright win: m3 reached cross-donor phase 0.751 against scVI's 0.705
-      and SCimilarity's 0.626, and phase is a *fair* axis against SCimilarity
-- [ ] **ELAJ-M** — retrain `m4_tight16` on the clean split
-- [x] ELAJ-S candidate exists: m5, clean split, best donor-blindness (0.406)
-      and best study mixing (0.504) of any arm
-- [ ] **Decide the tier names and which arm fills each** after the retrains.
-      m5 is not yet ELAJ-S
+**Four retrains, as a ONE-VARIABLE SWEEP.** The m-series changed several
+things per arm, which is why its frontier is a set of points rather than a
+curve. Holding everything at m6's configuration minus the drain and moving
+only `lambda_dab` gives a frontier traced by one knob, which is a far
+stronger figure and a far easier paragraph.
+
+| | `lambda_dab` | expected position | also serves as |
+|---|---:|---|---|
+| **ELAJ-High** | 7 | most biology, least donor-blind | m3's pressure at m4's width |
+| **ELAJ-Med** | 40 | middle | the drain control (m6 minus drain) |
+| **ELAJ-Low** | 168 | donor-blind | m5's pressure without m5's KL |
+| **ELAJ-Min** | 336 | most donor-blind | m4's pressure |
+
+Everything else fixed: d_gauss 16, `w_kl_gauss` 1, `d_study` 16, ECS on, no
+drain, clean split. m5 then sits alongside as a fifth point reached by a
+*different* lever (`w_kl_gauss` 30), which is worth having.
+
+- [ ] Write the four configs
+- [ ] Run them
+- [ ] **High / Med / Low on biological information** for now. A smarter rule
+      for choosing points on the frontier is pinned for later
+- [x] m5 exists on the clean split: best donor-blindness (0.406) and best
+      study mixing (0.504) of any arm
+
+ELAJ-High is the one most likely to produce an outright win: m3 reached
+cross-donor phase 0.751 against scVI's 0.705 and SCimilarity's 0.626, and
+phase is a *fair* axis against SCimilarity where cell family is not.
 
 Note for the plan: **m6 ep16 already ties SCimilarity on cross-donor phase**
 (0.624 against 0.626) with 0.152 better donor identity, at 1.88 M parameters.
@@ -88,10 +121,16 @@ components the paper claims credit for.
       cannot do
 - [ ] **C-4 attention statistics removed**, CLS only. One config change: the
       readout currently hands on 288 numbers per group instead of 32
-- [ ] **C-5 drain removed.** It did not help the frontier, and reporting that
-      honestly is a contribution. Also answers why m6 reconstructs worst:
-      the drain's loss competing, the 25% covariate blanking, or the drain
-      taking encoder capacity
+- [ ] **C-5 drain removed — SUPPLEMENTARY OR REPO, NOT THE MAIN PAPER.**
+      I had this as "reporting honestly that it did not help is a
+      contribution". That overclaims in the negative direction: one
+      configuration failing to help does not support any claim about whether
+      the mechanism can work, and we are not in a position to state one.
+      It stays as an appendix note or in the repository.
+      The *useful* half survives as a question for ourselves rather than a
+      result: it still answers why m6 reconstructs worst, between the drain's
+      loss competing, the 25% covariate blanking, and the drain taking
+      encoder capacity. Run it for us, not for the reader
 - [ ] **No-phase-head reference**
 
 ## Stage 4b — Paper
@@ -105,8 +144,20 @@ components the paper claims credit for.
 
 ### Factual corrections, must not ship wrong
 
-- [ ] **Donor count is 254, not 269.** `garcia_alonso_2021_b` is the
-      epithelial subset of `_a` and shares all 15 sample ids
+- [ ] **RECALCULATE THE DONOR COUNT, or drop it.** 269 is not obsolete, it
+      is wrong: it counts CELLxGENE donor UUIDs, and one person carries one
+      per dataset. 254 was derived by subtracting the fifteen
+      `garcia_alonso_2021_b` duplicates from it, so it inherits whatever else
+      269 got wrong. Neither number may ship.
+
+          bash data_collation/scripts/check_donor_overlap.sh \
+              configs/experiment/m6_drain.yaml
+
+      Obs only, minutes on a login node. It compares every pair of studies on
+      `source_sample_id` and `patient_id`, which is what `DonorAliases`
+      resolves on, so the count it produces is the count of PEOPLE. If it
+      cannot produce one we trust, the paper says "eleven studies" and gives
+      cells, not donors
 - [ ] **GSE213216's citation is wrong.** The downloaded PDF is Pei et al.
       2023, a re-analysis that used the accession, not the original
       submission

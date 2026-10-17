@@ -76,10 +76,11 @@ overrides:
   # measured 58 min/epoch is 19.3 h against a two-day wall.
   #
   # THE EXPECTATION, PRE-REGISTERED: every arm converges and early-stops
-  # within 15 epochs. THE FALSIFIER: an arm whose best val_nb epoch is 15 or
-  # later was capped by the horizon rather than by its configuration, and its
-  # frontier point is a LOWER BOUND on what that configuration does. That has
-  # to be said in the table rather than quietly reported as the point.
+  # within 15 epochs. THE CHECK: if an arm's best val_nb epoch is its LAST
+  # one, early stopping never fired and the run ended because it ran out of
+  # epochs rather than because the model stopped improving. That arm did not
+  # converge in 20 epochs and the table says so. No claim is made about where
+  # its metrics would have gone, because we would not know.
   training.max_epochs: 20
   training.early_stop_patience: 5
   training.early_stop_warmup_epochs: 2
@@ -142,24 +143,13 @@ overrides:
 
   training.optimizer.lr: 1.0e-3
   training.kl_annealing.beta_max: 0.5
-  # 0.03, NOT m5's 0.05, AND THE CHANGE IS WHAT KEEPS THE SETTING THE SAME.
-  # warmup_fraction is a fraction of total_steps = len(train_loader) *
-  # max_epochs, so the ramp's absolute length moves with the horizon: 0.05 at
-  # 12 epochs is 0.60 epochs, and the same 0.05 at 20 epochs would be 1.00.
-  # m5's reason for the number was a timing one -- "the price arrives during
-  # epoch 0, because that is when the latent fills", the latent holding 43.9
-  # nats by the end of epoch 0 while beta was still near zero -- so the thing
-  # to preserve is 0.60 epochs, not the fraction. 0.03 * 20 = 0.60.
-  training.kl_annealing.warmup_fraction: 0.03
-
-  # THE DAB RAMP MOVES AND CANNOT BE HELD, which is stated rather than
-  # hidden. CompositeLoss ramps lambda_dab as min(1, 2 * step / total_steps),
-  # a hardcoded coefficient, so it saturates at 50% of the horizon: epoch 6
-  # at 12 epochs, epoch 10 at 20. Holding it would need a config field and a
-  # code change in composite.py, which is not worth making to the training
-  # core now. It is identical across all five arms, so it cannot confound the
-  # factorial; it does mean lambda_dab reaches full strength later here than
-  # it did in m5, and p5 is the arm that measures what that costs.
+  # 0.05, m5's value, unchanged. Both schedule ramps are fractions of
+  # total_steps = len(train_loader) * max_epochs, so at this horizon the beta
+  # ramp finishes at epoch 1.0 rather than m5's 0.6 and the DAB ramp saturates
+  # at epoch 10 rather than 6. Recorded because it is true, not as a problem
+  # to fix: both are identical across all five arms and so cannot confound the
+  # factorial.
+  training.kl_annealing.warmup_fraction: 0.05
   # Inert: no circular branch on any arm of this wave.
   model.loss.w_kl_circ: 2.0
   # Not a lever, and that is MEASURED, not assumed: m4_tight16's latent sat

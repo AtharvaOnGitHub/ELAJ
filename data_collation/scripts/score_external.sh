@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:1
-#SBATCH --time=08:00:00
+#SBATCH --time=20:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -33,12 +33,22 @@
 # second model's four hours were lost. Separate jobs fail separately, and
 # three of them finish in the wall time of the slowest rather than the sum.
 #
-# 240G, NOT THE 128G THAT DIED. Cost scales with the embedding WIDTH, and
-# these are wide: 16 dimensions for the fitted baselines against 256 for
-# geneformer and 512 for scgpt. Measured on 15 October: geneformer's kNN
-# battery 53 min, cross-donor 15 min, scIB 45 min; scgpt the same stages at
-# 10, 25 and more than 90 before it was killed. Eight hours covers the
-# widest.
+# SIZED FROM WIDTH, WHICH IS WHAT ACTUALLY DRIVES THE COST. Every stage is a
+# neighbour search over 416,256 cells, and that scales badly in the embedding
+# dimension. Measured:
+#
+#   width   model          outcome at 8 h
+#     16    the baselines  ~45 min, trivially inside
+#    128    SCimilarity    finished comfortably
+#    256    Geneformer     finished: kNN 53 min, x-donor 15, scIB 45
+#    512    scGPT          TIMED OUT having completed scIB, minutes short
+#   high    scFoundation   TIMED OUT still inside the kNN battery after 4 h
+#
+# So 8 hours covered everything up to 256 and nothing above it. 20 hours is
+# sized for scFoundation, which is the widest thing we will score; drop it
+# back with --time on the command line for a narrow model.
+#
+# 240G, not the 128G that died on 15 October in scGPT's scIB battery.
 #
 # The reuse file supplies pca, scvi and scanvi, so nothing is refitted and
 # the 1.16M-cell training corpus is never built.

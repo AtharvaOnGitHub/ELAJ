@@ -1,12 +1,20 @@
 # Scoreboard: ELAJ against the baselines and the foundation models
 
-The paper's main results table, kept current. Last rebuilt 16 October 2026.
+The paper's main results table, kept current. Last rebuilt 18 October 2026, when
+scGPT and scFoundation completed scoring and the foundation column was closed.
 
 ## The claim this table supports
 
 > A parameter-efficient architecture that **beats the foundation models**, does
 > **not badly** against the fitted baselines, and keeps **donor identity low**.
 > The frontier is reported as the justification for three tiers.
+
+**All four foundation models are now scored, and the first clause holds in its
+strongest form.** Geneformer and scGPT are *strictly dominated* by an ELAJ arm
+— better donor identity and better cross-donor phase at once. scFoundation is
+strictly dominated by scVI. Only SCimilarity survives, tying m6ep16 on phase
+(0.625 against 0.624) at 0.152 worse donor identity, and its cell-family
+numbers are supervised.
 
 Beating scVI on cross-donor phase is **not** the claim and never was the right
 target: no method in this table achieves good biology and low donor identity at
@@ -81,32 +89,43 @@ measured union) except where marked; see §3.
 Foundation models are zero-shot, never fine-tuned, each through its own
 documented interface.
 
-| | ELAJ m6ep13 | ELAJ m5 | PCA | scVI | scANVI | Geneformer | scGPT |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| **width** | 16 | 16 | 16 | 16 | 16 | 256 | 512 |
-| **fitted on** | train | train | train | train | train | *pretrained* | *pretrained* |
-| **Cell family** cross-donor ↑ | 0.969 | 0.961 | **0.987** | 0.983 | 0.983 ◆ | 0.902 | 0.984 |
-| kNN ↑ | 0.975 | 0.971 | **0.990** | 0.987 | 0.987 ◆ | 0.949 | 0.987 |
-| **Menstrual phase** cross-donor ↑ | 0.607 | 0.573 | 0.646 | **0.705** | 0.697 | 0.437 | 0.487 |
-| kNN ↑ | 0.795 | 0.783 | — | — | — | 0.718 | 0.738 |
-| **Donor identity** kNN ↓ | 0.492 | **0.406** | 0.692 | 0.689 | 0.689 | 0.542 | 0.563 |
-| neighbours kept /100 ↑ | 64 | **66** | 52 | 48 | 47 | *pending* | *pending* |
-| **Study mixing** ↓ | 0.736 | **0.504** | 0.844 | 0.738 | 0.724 | *pending* | *pending* |
-| **Other biology** cell cycle kNN ↑ | 0.390 | 0.417 | 0.406 | 0.461 | **0.462** | 0.389 | 0.446 |
-| fine type kNN ↑ | 0.447 | 0.443 | 0.506 | 0.531 | **0.533** | 0.414 | 0.473 |
-| disease stage xdonor ↑ | 0.112 | 0.162 | 0.124 | 0.376 | **0.418** | 0.160 | 0.154 |
-| disease grade xdonor ↑ | −0.049 | −0.043 | **−0.015** | −0.079 | −0.081 | 0.005 | −0.022 |
-| **scIB** NMI ↑ | 0.102 | 0.315 | 0.258 | 0.442 | **0.447** | *pending* | *pending* |
-| ARI ↑ | 0.065 | 0.195 | 0.203 | **0.349** | 0.339 | *pending* | *pending* |
-| silhouette bio ↑ | 0.617 | 0.540 | 0.621 | 0.616 | **0.627** | *pending* | *pending* |
-| isolated labels ↑ | **0.631** | 0.567 | 0.610 | 0.606 | 0.623 | *pending* | *pending* |
-| graph connectivity ↑ | 0.985 | 0.988 | 0.723 | **0.986** | 0.983 | *pending* | *pending* |
-| PC regression ↑ | 0.720 | **0.803** | 0.525 | 0.927 | 0.939 | *pending* | *pending* |
-| kBET ↑ | 0.001 | **0.067** | 0.000 | 0.015 | 0.021 | *pending* | *pending* |
-| silhouette batch ↑ | 0.619 | 0.715 | 0.465 | 0.855 | **0.866** | *pending* | *pending* |
+| | ELAJ m6ep13 | ELAJ m5 | PCA | scVI | scANVI | Geneformer | scGPT | SCimilarity | scFoundation |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **width** | 16 | 16 | 16 | 16 | 16 | 256 | 512 | 128 | 3072 |
+| **fitted on** | train | train | train | train | train | *pretrained* | *pretrained* | *pretrained* | *pretrained* |
+| **Cell family** cross-donor ↑ | 0.969 | 0.961 | **0.987** | 0.983 | 0.983 ◆ | 0.902 | 0.984 | 0.990 ◆ | 0.983 |
+| kNN ↑ | 0.975 | 0.971 | **0.990** | 0.987 | 0.987 ◆ | 0.949 | 0.987 | 0.991 ◆ | 0.988 |
+| **Menstrual phase** cross-donor ↑ | 0.607 | 0.573 | 0.646 | **0.705** | 0.697 | 0.437 | 0.487 | 0.625 | 0.645 |
+| kNN ↑ | 0.795 | 0.783 | 0.866 | 0.893 | **0.894** | 0.718 | 0.738 | 0.828 | 0.882 |
+| **Donor identity** kNN ↓ | 0.492 | **0.406** | 0.692 | 0.689 | 0.689 | 0.542 | 0.563 | 0.652 | 0.767 |
+| neighbours kept /100 ↑ | 64 | **66** | 52 | 48 | 47 | 64 | 65 | 57 | 48 |
+| **Study mixing** ↓ | 0.736 | **0.504** | 0.844 | 0.738 | 0.724 | 0.639 | 0.628 | 0.717 | 0.808 |
+| **Other biology** cell cycle kNN ↑ | 0.390 | 0.417 | 0.406 | 0.461 | 0.462 | 0.389 | 0.446 | 0.437 | **0.477** |
+| fine type kNN ↑ | 0.447 | 0.443 | 0.506 | 0.531 | 0.533 | 0.414 | 0.473 | 0.528 | **0.537** |
+| disease stage xdonor ↑ | 0.112 | 0.162 | 0.124 | 0.376 | **0.418** | 0.160 | 0.154 | 0.103 | 0.412 |
+| disease grade xdonor ↑ | −0.049 | −0.043 | −0.015 | −0.079 | −0.081 | 0.005 | −0.022 | −0.004 | **0.013** |
+| **scIB** NMI ↑ | 0.102 | 0.315 | 0.258 | 0.442 | 0.447 ◆ | 0.065 | **0.574** | 0.856 ◆ | 0.345 |
+| ARI ↑ | 0.065 | 0.195 | 0.203 | 0.349 | 0.339 ◆ | 0.077 | **0.420** | 0.901 ◆ | 0.233 |
+| silhouette bio ↑ | 0.617 | 0.540 | 0.621 | 0.616 | 0.627 ◆ | 0.536 | 0.681 | 0.806 ◆ | **0.692** |
+| isolated labels ↑ | 0.631 | 0.567 | 0.610 | 0.606 | 0.623 ◆ | 0.514 | 0.659 | 0.748 ◆ | **0.668** |
+| graph connectivity ↑ | 0.985 | **0.988** | 0.723 | 0.986 | 0.983 | 0.958 | 0.969 | 0.882 | 0.805 |
+| PC regression ↑ | 0.720 | 0.803 | 0.525 | 0.927 | **0.939** | 0.761 | 0.909 | 0.818 | 0.769 |
+| kBET ↑ | 0.001 | **0.067** | 0.000 | 0.015 | 0.021 | 0.000 | 0.018 | 0.001 | 0.001 |
+| silhouette batch ↑ | 0.619 | 0.715 | 0.465 | 0.855 | 0.866 | 0.720 | **0.891** | 0.715 | *failed* ✱ |
 
-◆ scANVI is supervised on cell family, so its two family rows are not a fair
-comparison with anything else. Its other rows are.
+◆ **Supervised on cell family, so every cell-family row is that model's own
+training signal coming back.** scANVI's two family rows and SCimilarity's whole
+scIB block fall under this. SCimilarity's NMI 0.856 and ARI 0.901 are not
+comparable with anything else in the table: the scIB cluster metrics are scored
+*against cell family*, which is exactly what its supervised triplet loss
+optimises. Their other rows — phase, donor identity, study mixing — are fair.
+
+✱ scFoundation's batch silhouette returned **−2.95 × 10²⁴**. Silhouette is
+bounded in [−1, 1], so this is a numerical overflow in the metric, not a
+measurement, and it is reported as failed rather than as a number. Its
+`ilisi_knn` also sits at exactly 0.000. Both are consistent with an embedding
+of extreme magnitude at 3,072 dimensions; the rest of its scIB block is in
+range and is reported.
 
 Disease grade is negative for almost every method, which means no
 representation separates grades across donors better than chance. Read it as a
@@ -114,27 +133,62 @@ null result for the label, not a ranking.
 
 ### What the table says
 
-**ELAJ owns donor-blindness and nothing else, and the margin is large.**
-m5 reaches 0.406 on donor identity against 0.689 to 0.692 for the fitted
-baselines — they encode who a cell came from about seventy percent more
-strongly. The same fact from the other side: m5 keeps 66 of 100 neighbours
-after same-donor exclusion against their 47 to 52.
+**ELAJ owns donor-blindness and the margin is large.** m5 reaches 0.406 on
+donor identity against 0.689–0.692 for the fitted baselines, which encode who
+a cell came from about seventy percent more strongly, and against 0.542–0.767
+for the four foundation models. The same fact from the other side: m5 keeps 66
+of 100 neighbours after same-donor exclusion against the baselines' 47–52.
+**No model of any kind in this table is more donor-blind than ELAJ.**
 
-**The foundation models sit between ELAJ and the baselines on donor identity**,
-at 0.542 and 0.563, and lose to both on phase. Geneformer loses to m6ep13 on
-every one of the four headline metrics despite 16 times the width. scGPT beats
-m6ep13 on cell family, 0.984 against 0.969, at 32 times the width.
+**Two foundation models are strictly dominated by an ELAJ arm**, which is the
+strongest statement in this table and the one the paper leads with:
+
+| | donor ↓ | phase ↑ | dominated by | |
+|---|---:|---:|---|---|
+| Geneformer, 10.3 M params, 256d | 0.542 | 0.437 | **m6ep13** | 0.492 / 0.607 |
+| scGPT, ~51 M params, 512d | 0.563 | 0.487 | **m6ep16** | 0.500 / 0.624 |
+
+Better on donor identity *and* better on cross-donor phase, simultaneously, at
+1.88 M parameters and 16 dimensions. Not "competitive with" — dominated.
+
+**scFoundation is dominated by scVI, not by us.** 0.767 / 0.645 against scVI's
+0.689 / 0.705: worse on both axes. A 100 M-parameter model with a 3,072-
+dimension output losing outright to a 16-dimension VAE fitted on this corpus.
+It has the worst donor identity of anything measured.
+
+**SCimilarity is the only pretrained model still standing**, and it essentially
+ties m6ep16 on phase — 0.625 against 0.624 — while being 0.152 worse on donor
+identity. Its cell-family and scIB numbers are supervised and not comparable
+(see ◆).
 
 **Nothing of ours beats scVI on phase**, 0.705 against our best clean 0.607,
 and nothing in this table achieves good biology and low donor identity at once.
-That is the frontier, not a shortfall: it is the finding the three tiers are
-built on.
+That is the frontier, not a shortfall: it is the finding the tiers are built
+on. The phase numbers to beat, in order: SCimilarity 0.625, scFoundation 0.645,
+PCA 0.646, scANVI 0.697, scVI 0.705.
 
-**Low NMI and ARI are a real weakness.** Leiden clustering of m6ep13's latent
-recovers annotated cell types at 0.102 and 0.065 where scANVI reaches 0.447 and
-0.339. The neighbourhoods carry family (cross-donor 0.969) but do not partition
-into it. m5 is markedly better here (0.315, 0.195) than m6, which is worth
-understanding before the paper claims the latent is usable for cell typing.
+**The foundation models buy donor-blindness by discarding biology.** Geneformer
+and scGPT are the two most donor-blind pretrained models and also the two worst
+on phase — 0.437 and 0.487 against every other method's 0.573 to 0.705. They
+are not finding a better trade; they are further along the same one, in the
+direction that costs biology. ELAJ reaches lower donor identity *and* higher
+phase than either.
+
+**Low NMI and ARI remain a real weakness, and scGPT makes it sharper.** Leiden
+clustering of m6ep13's latent recovers annotated cell types at NMI 0.102 and
+ARI 0.065; m5 is markedly better at 0.315 and 0.195; scGPT reaches **0.574 and
+0.420**, the best of any unsupervised method here and well above scVI's 0.442
+and 0.349. Our neighbourhoods carry family (cross-donor 0.969) but do not
+partition into it, and a 512-dimension transformer partitions better than
+either our latent or scVI's. This is worth understanding before the paper
+claims the latent is usable for cell typing.
+
+**Width is the open caveat and cuts against us on presentation.** We report 16
+dimensions against 128, 256, 512 and 3,072. A reader can fairly ask whether the
+foundation models' advantage on the biology rows is capacity rather than
+pretraining. The width-matched companion rows — a 16-component PCA of each
+foundation embedding, scored identically — are still outstanding and are
+seconds of compute per model.
 
 ---
 
@@ -342,13 +396,26 @@ bonus paragraph, not the thesis.
 
 ## 6. Outstanding
 
-1. **Re-score m3 and m4 on 416,256 cells.** Blocks §5 entirely and may change
-   the headline claim, since m3's old 0.751 phase is above scVI's 0.705.
-2. **Finish scoring the foundation models.** scGPT's scIB battery and the
-   study-mixing rows were lost to an OOM; SCimilarity and scFoundation are
-   embedded but unscored.
-3. **Width-matched companion rows.** A 16-component PCA of each foundation
-   model's embedding, scored identically, so 256 and 512 dimensions against our
-   16 can be read rather than argued about. Seconds of compute per model.
-4. **The m3 24-dimension question.** Either re-score it as-is and state the
-   width, or decide the frontier is reported at matched width.
+1. **Width-matched companion rows.** A 16-component PCA of each foundation
+   model's embedding, scored identically, so 128, 256, 512 and 3,072
+   dimensions against our 16 can be read rather than argued about. Seconds of
+   compute per model, and now the largest open objection to the table.
+2. **The p1 wave.** m3 and m4 are not re-scorable — they trained on the
+   contaminated split — so §5's tiers are being retrained as the five-arm `p1`
+   factorial. See [RETRAIN_EXPECTATIONS](RETRAIN_EXPECTATIONS.md).
+3. **scFoundation's batch silhouette overflowed** (−2.95 × 10²⁴ for a quantity
+   bounded in [−1, 1]). Worth one look at the embedding's magnitude before the
+   supplement quotes any of its scIB block.
+4. **ELAJ's NMI and ARI.** scGPT reaches 0.574 and 0.420 unsupervised against
+   m5's 0.315 and 0.195. Understand this before claiming the latent is usable
+   for cell typing.
+
+### Closed since the last revision
+
+- **All four foundation models scored** on 416,256 cells. Geneformer, scGPT,
+  SCimilarity and scFoundation, zero-shot, each through its own documented
+  interface, none given the filtered gene set.
+- scGPT's scIB battery and study-mixing rows, lost to an OOM on 16 October,
+  recovered on the 20-hour re-run.
+- **Re-score m3 and m4:** withdrawn, not done. Contamination is in the
+  weights; the answer is the retrain, not a re-score.

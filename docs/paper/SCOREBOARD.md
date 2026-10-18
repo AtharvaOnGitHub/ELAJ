@@ -396,10 +396,31 @@ bonus paragraph, not the thesis.
 
 ## 6. Outstanding
 
-1. **Width-matched companion rows.** A 16-component PCA of each foundation
-   model's embedding, scored identically, so 128, 256, 512 and 3,072
-   dimensions against our 16 can be read rather than argued about. Seconds of
-   compute per model, and now the largest open objection to the table.
+1. **Width-matched companion rows — appendix, minor.** A 16-component PCA of
+   each foundation model's embedding, scored identically, so 128, 256, 512 and
+   3,072 dimensions against our 16 can be read rather than argued about.
+
+   **This is confirmatory, not load-bearing, and the earlier framing of it as
+   "the largest open objection" was wrong.** The control is already in the
+   table: PCA is fitted at 16 dimensions and reaches cross-donor family 0.987
+   and phase 0.646, beating scGPT's 0.984 and 0.487 at 512. A 16-dimension
+   linear method already beats a 512-dimension transformer on both biology
+   axes, so extra width is demonstrably not what produces good biology scores
+   here. The same holds on the donor axis: among methods at identical 16
+   dimensions, donor identity ranges 0.406 to 0.692, a spread wider than any
+   gap between width classes.
+
+   Worth having in the appendix so the question is answered rather than
+   argued. **It does not wait on the p1 training queue**: `score_external.sh`
+   asks for `--gres=gpu:1`, any card, because the computation needs no GPU at
+   all and only the PyTorch module's location does, while training asks for
+   `gpu:a100_80:1`. Different pool. At width 16 it is also the cheapest pass
+   the scorer runs — the measured ~45 min, against scGPT timing out at 20 h at
+   width 512.
+
+   Needs one small helper that reads an `ExternalLatent` directory, PCA-reduces
+   it to 16 components and writes a new one; the scoring itself is the existing
+   `score_external.sh`. Not written yet.
 2. **The p1 wave.** m3 and m4 are not re-scorable — they trained on the
    contaminated split — so §5's tiers are being retrained as the five-arm `p1`
    factorial. See [RETRAIN_EXPECTATIONS](RETRAIN_EXPECTATIONS.md).

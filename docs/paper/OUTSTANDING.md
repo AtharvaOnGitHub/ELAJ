@@ -246,6 +246,15 @@ components the paper claims credit for.
 
 ## Loose ends, cheap, not blocking
 
+- [ ] **Width-matched companion rows — appendix, minor.** 16-component PCA of
+      each foundation embedding, re-scored. Confirmatory only: PCA already sits
+      in the main table at 16 dimensions and beats scGPT at 512 on both biology
+      axes, so width is not what drives the biology numbers. Does **not** wait
+      on the p1 queue — `score_external.sh` takes `--gres=gpu:1` (any card)
+      while training takes `gpu:a100_80:1`. Needs a small PCA-reduce helper for
+      `ExternalLatent`; scoring is the existing wrapper
+
+
 - [ ] **bn_mode re-run.** Never run since the selector fix and
       `retained_rows`. Would say whether eval-mode embedding costs biology as
       well as the 0.120 of study purity it costs. 15 min

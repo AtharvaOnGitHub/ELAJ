@@ -230,6 +230,25 @@ The m3 diagnostic that motivated the "hiding" hypothesis — the discriminator's
 loss correlating +0.883 with donor kNN — did not predict this. At a cheap
 latent the adversary works, and works nearly for free.
 
+**THE PCA MARGIN IS INFLATED BY THE GENE AXIS, AND THE TABLE SHOULD NOT HIDE
+IT.** The baseline columns above are scored at 30,962 genes — the neutral
+union — because giving the baselines our curated 15,496-gene vocabulary would
+hand them our prior. That choice is nearly free for scVI and scANVI (+0.004,
++0.003 on cross-donor phase) and **costs PCA 0.045**. So on the same cells:
+
+| | matched axis, 15,496 | wide axis, 30,962 |
+|---|---:|---:|
+| PCA, cross-donor phase | 0.691 | 0.646 |
+| our margin over PCA | **+0.044** | +0.089 |
+| our margin over scVI | +0.033 | +0.029 |
+
+**The scVI claim is robust to the choice; the PCA margin doubles because of
+it.** The paper must quote the matched-axis PCA number beside the wide-axis
+one, or a reader who recomputes will find we picked the axis that flatters us
+on that row. The headline — dominating every method on the phase-against-donor
+plane — survives at either axis, because PCA's donor identity is 0.692 both
+ways.
+
 **ELAJ still owns donor-blindness outright.** m5 at 0.406 and `p1_dab336_kl30`
 at 0.415 are clear of the nearest non-ELAJ method by 0.127. The fitted
 baselines sit at 0.689–0.692, the foundation models at 0.542–0.767.

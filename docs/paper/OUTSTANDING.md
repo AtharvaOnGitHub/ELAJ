@@ -55,9 +55,9 @@ circular latent can and cannot do, the corpus, and the code.
 **Blocked only by two scoring jobs.** Everything else needed for this
 discussion is in hand.
 
-- [ ] **scGPT scoring** — re-run at 20 h; the 8 h job completed scIB and was
+- [x] **scGPT scoring** — done, 416,256 cells. ~~re-run at 20 h; the 8 h job completed scIB and was
       killed minutes short
-- [ ] **scFoundation scoring** — re-run at 20 h; timed out inside kNN after 4 h
+- [x] **scFoundation scoring** — done, 416,256 cells. ~~re-run at 20 h; timed out inside kNN after 4 h
 - [x] Geneformer, SCimilarity scored
 - [ ] **Mark SCimilarity supervised on the cluster copy** (one command; the
       local copy is done). Its triplet loss uses Cell Ontology cell type, so
@@ -155,6 +155,30 @@ An arm that spends less on study separation is the direction, and m3's
 
 The architecture is the contribution, so the queue is ordered by which
 components the paper claims credit for.
+
+### ⛔ BLOCKED, AND NOT ON GPU TIME — ON CHOOSING THE BASE
+
+**Every ablation is one edit to one config, and all of them are blocked on the
+same decision: which arm is the standard ELAJ model.** Ablating each component
+against each frontier arm is five components × five arms = 25 runs, which is
+weeks of a two-GPU budget and answers a question nobody asked. The ablations
+are run against **one** base and reported against it.
+
+That base cannot be chosen yet. `p1_dab168_kl1` currently dominates the whole
+non-ELAJ field, but `p1_dab168_kl30` and `p1_dab336_kl1` are training and
+either could displace it — `p1_dab336_kl1` is specifically testing whether
+the knob that produced `p1_dab168_kl1`'s advantage keeps paying.
+
+**So: write the configs the hour the base is chosen, not before.** Each is the
+base's YAML with one override changed, which the shared-base test will then
+cover automatically. Writing them now against a guess means rewriting five
+files and re-registering five sets of predictions.
+
+**Order to run them in, once unblocked**, cheapest-signal-first: C-4 and C-2
+are single-flag changes with no capacity consequence; C-1 needs a vocabulary
+built with shuffled group assignments; C-3 changes the latent's shape and so
+needs its width decision stated. Five runs at ~11 h on two cards is three
+waves, about a day and a half.
 
 - [ ] **C-1 random gene grouping** — the grouping carries biology (claim C2)
 - [ ] **C-2 DNS sentinel removed** — (claim C3)
@@ -267,6 +291,15 @@ cd /rds/homes/a/axw1008/axw1008 && sbatch data_collation/scripts/continuity_test
 ```
 
 - [ ] wave-3 scoring carries `--dump-latent`
+- [ ] **NO UNCERTAINTY ON THE HEADLINE DIFFERENCE — the largest hole in the
+      claim.** We say 0.735 against scVI's 0.705 and we have no interval on
+      that 0.030. Both methods carry p = 0.005 against *chance*, which says
+      each beats random and says nothing about whether they differ from each
+      other. The benchmark stores cross-donor agreement as a single aggregate
+      — `study-purity` is per-study, but cross-donor is one number plus a note
+      — so no interval is computable from anything on disk. The fix is a
+      bootstrap over the 36 donors, which needs the latents, so it rides on
+      the same `--dump-latent` pass. **A reviewer will ask this first.**
 - [ ] one pass fits scVI so its latent exists
 - [ ] run `continuity_test.sh`
 

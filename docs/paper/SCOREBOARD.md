@@ -247,6 +247,31 @@ makes m5's 0.315 at `lambda_dab` 168 and `w_kl` 30 look like the knobs rather
 than an artefact — the untrained fifth cell is the direct test. **Do not claim
 the latent is usable for unsupervised cell typing.**
 
+**Low NMI does not mean the latent lacks cell-family information, and the
+table proves it from inside.** Across all thirteen methods, kNN recovery of
+cell family spans **0.949–0.991** — a 0.042 range — while Leiden NMI against
+the same label spans **0.055–0.856**, a range nineteen times larger. Every
+representation here encodes cell family about equally well in its
+neighbourhoods; they differ enormously in whether Leiden partitions them into
+it. `p1_dab168_kl1` sits at kNN 0.986 and cross-donor 0.982 with NMI 0.072.
+
+So NMI is measuring cluster geometry, not whether cell family is present. That
+is a statement about the metric, it applies to all thirteen methods rather than
+being special pleading for ours, and it is checkable in the table above.
+
+**What it does not excuse.** For a workflow that Leiden-clusters the latent to
+call cell types, ours is worse and that is real. The claim is bounded: our
+latent carries cell family, and it does not partition into it.
+
+**Two explanations were tested on these numbers and are not supported.**
+Donor retention does not explain NMI across the eleven unsupervised methods
+(r = +0.42, n = 11, and m5 has the lowest donor identity of all at 0.406 with
+the highest ELAJ NMI at 0.315). Study mixing explains less still (r = +0.12).
+Neighbourhood quality explains little (r = +0.42). **What drives NMI here is
+unexplained**, and the direct test — cluster-majority label accuracy against
+kNN label accuracy, which measures information destroyed by discretisation on
+one scale — needs a persisted latent and has not been run.
+
 **SCimilarity's scIB block is its own training signal returning.** NMI 0.856
 and ARI 0.901 are scored *against cell family*, which is what its supervised
 triplet loss optimises. Marked ◆ and excluded, as scANVI's family rows are.

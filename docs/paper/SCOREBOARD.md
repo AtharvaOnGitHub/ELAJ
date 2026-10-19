@@ -202,6 +202,14 @@ prior is the expensive one.** Reading the two available margins of the 2×2:
 | `lambda_dab` 7 → 168, at `w_kl` 1 | **+0.001** | **−0.065** | **−0.114** | +0.004 |
 | `w_kl` 1 → 30, at `lambda_dab` 7 | −0.055 | −0.045 | +0.020 | **+0.086** |
 
+**The two knobs differ in kind, not in magnitude, and this is the sentence for
+the paper:** `lambda_dab` **moves the frontier outward** — it improves donor
+identity and study mixing while leaving phase untouched, so the point it
+produces was not reachable before. `w_kl_gauss` **travels along the frontier**
+— it trades phase for donor identity at roughly 1.2 : 1. One is a quality
+knob, the other is the tier knob, and a tier series should therefore fix
+`lambda_dab` at its best value and vary `w_kl_gauss`.
+
 `lambda_dab` buys donor-blindness and study mixing at **no measurable cost in
 phase**. `w_kl_gauss` buys less donor-blindness, costs 0.055 of phase, and
 makes study mixing *worse*. If the paper names one mechanism for

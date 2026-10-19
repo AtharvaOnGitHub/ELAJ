@@ -53,10 +53,25 @@ BIOLOGY_AXES: dict[str, str] = {
 }
 
 #: Family -> (display name, palette attribute). Colour carries the family.
-FAMILIES: dict[str, tuple[str, str]] = {
-    "elaj": ("ELAJ", "primary"),
-    "baseline": ("Fitted baseline", "secondary"),
-    "foundation": ("Foundation model (zero-shot)", "muted"),
+#
+#: ORDER IS THE LEGEND'S ORDER, and the p1 wave comes first because it is the
+#: result. The m-series is drawn in the same hue at lower saturation: it is
+#: ours, it is superseded, and both facts should be readable without the
+#: caption. Its arms are kept on the figure rather than dropped because the
+#: frontier's shape is the finding, and the m-series arms are points on it.
+#: Family key -> (display name, palette attribute, legend heading).
+#:
+#: THE HEADING IS DECLARED, NOT DERIVED. It used to be `name.split()[0]`,
+#: which worked only while every family's first word was unique -- the moment
+#: the p1 wave arrived, two families both read "ELAJ" in the legend and the
+#: figure stopped distinguishing the result from the arms it supersedes. It is
+#: rendered through mathtext for bold, so spaces are escaped and the heading
+#: stays free of characters mathtext treats specially.
+FAMILIES: dict[str, tuple[str, str, str]] = {
+    "elaj_p1": ("ELAJ p1 — final wave", "primary", r"ELAJ\ p1"),
+    "elaj": ("ELAJ m-series — earlier", "primary_faded", r"ELAJ\ prior"),
+    "baseline": ("Fitted baseline", "secondary", r"Fitted"),
+    "foundation": ("Foundation model (zero-shot)", "muted", r"Foundation"),
 }
 
 #: Markers assigned within a family, in the order points are declared. Nine,
@@ -261,9 +276,9 @@ def legend(fig, points: list[FrontierPoint],
     """
     from matplotlib.lines import Line2D
 
-    groups = [(name, [p for p in points if p.family == family])
-              for family, (name, _attr) in FAMILIES.items()]
-    groups = [(name, members) for name, members in groups if members]
+    groups = [(heading, [p for p in points if p.family == family])
+              for family, (_name, _attr, heading) in FAMILIES.items()]
+    groups = [(heading, members) for heading, members in groups if members]
     if not groups:
         return
 
@@ -277,9 +292,9 @@ def legend(fig, points: list[FrontierPoint],
     blank = lambda: Line2D([], [], linestyle="none", marker="", label=" ")
 
     rows: list[list] = []
-    for name, members in groups:
+    for heading, members in groups:
         row = [Line2D([], [], linestyle="none", marker="",
-                      label=f"$\\bf{{{name.split()[0]}}}$")]
+                      label=f"$\\bf{{{heading}}}$")]
         for point in members:
             colour, marker = styles[point.label]
             row.append(Line2D([], [], linestyle="none", marker=marker,

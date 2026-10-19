@@ -35,6 +35,14 @@ logger = logging.getLogger("elaj.frontier")
 #: Marker order within a family follows this list, so keep related arms
 #: adjacent: the m6 family reads better as four consecutive shapes.
 SOURCES = [
+    # ── The p1 wave: one base, two knobs, one selection rule (lowest val_nb,
+    # no guard). These are the points the paper reports. val_nb is each arm's
+    # own best epoch, read from its metrics.csv, and is the epoch the
+    # benchmark scored.
+    ("p1_dab7_kl1",          "elaj",   "p1 dab7/kl1",    "elaj_p1",  0.4016, 16),
+    ("p1_dab336_kl30",       "elaj",   "p1 dab336/kl30", "elaj_p1",  0.4023, 16),
+    # ── The m-series: ours, superseded, drawn faded. Kept because the
+    # frontier's shape is the finding and these are points on it.
     ("m5_study_v2",          "elaj",   "m5",         "elaj",     0.4043, 16),
     ("ind_m6_drain_ep13",    "elaj",   "m6 ep13",    "elaj",     0.4130, 16),
     ("ind_m6_drain",         "elaj",   "m6 ep16",    "elaj",     0.4130, 16),

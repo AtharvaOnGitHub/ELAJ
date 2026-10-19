@@ -48,6 +48,12 @@ class Palette:
     secondary: str = "#e76f51"    # coral — contrast series, highlights
     cream: str = "#eef0f4"        # "empty" bar segments, area shading
     muted: str = "#8d99ae"        # de-emphasised / reference marks
+    # Same hue as `primary`, desaturated and lightened. For marks that belong
+    # to the primary family but are superseded: the frontier draws the final
+    # p1 wave in `primary` and the earlier m-series in this, so hue carries
+    # "ours" and saturation carries "current". Kept clear of `muted`, which is
+    # a grey-blue and names a different family entirely.
+    primary_faded: str = "#86c9bf"
 
     # ── Categorical scale — Okabe–Ito, colour-blind safe ────────────────────
     # Order is load-bearing: corpus_panels maps disease status onto the first

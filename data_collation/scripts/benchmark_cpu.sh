@@ -71,8 +71,24 @@
 
 set -euo pipefail
 
-# Same parser as benchmark_baselines.sh, by construction. Sets ARMS, EXTRA.
-source "$(dirname "${BASH_SOURCE[0]}")/_benchmark_args.sh"
+# Argument parsing lives in _benchmark_args.sh so the two wrappers cannot
+# drift. It sets ARMS and EXTRA from "$@".
+#
+# RESOLVED FROM THE REPO PATH, NOT FROM BASH_SOURCE. sbatch COPIES the script
+# to /var/spool/slurmd/job<id>/slurm_script before running it, so under a job
+# ${BASH_SOURCE[0]} is that spooled copy and its dirname holds no sibling
+# files. `source "$(dirname "${BASH_SOURCE[0]}")/_benchmark_args.sh"` therefore
+# works when the script is run directly and fails inside every sbatch job with
+# "No such file or directory" -- which is exactly what job 58007920 did.
+#
+# The sibling is still preferred when it exists, so a second checkout or a
+# local run uses its own copy rather than this one.
+REPO=/rds/homes/a/axw1008/axw1008
+ARGS="${REPO}/data_collation/scripts/_benchmark_args.sh"
+SIBLING="$(dirname "${BASH_SOURCE[0]}")/_benchmark_args.sh"
+[[ -f "${SIBLING}" ]] && ARGS="${SIBLING}"
+[[ -f "${ARGS}" ]] || { echo "cannot find _benchmark_args.sh (looked at ${SIBLING} and ${REPO}/data_collation/scripts/)" >&2; exit 2; }
+source "${ARGS}"
 
 module purge
 module load bear-apps/2024a

@@ -108,7 +108,13 @@ source "${VENV}/bin/activate"
 cd /rds/homes/a/axw1008/axw1008/src
 
 python -u - <<'PY'
-import importlib
+# importlib.util, NOT importlib: util is a submodule and is only an
+# attribute of the package once something has imported it. The module-based
+# elaj venv pulls it in by accident through another import, so `import
+# importlib` alone worked there for months; the clean CPU venv imports nothing
+# that does, and the same line died with "module 'importlib' has no attribute
+# 'util'".
+import importlib.util
 print("packages:", ", ".join(
     f"{p}={'ok' if importlib.util.find_spec(p) else 'MISSING'}"
     for p in ("scanpy", "harmonypy", "scanorama", "scvi", "scib_metrics", "scib")))

@@ -39,7 +39,9 @@ SOURCES = [
     # no guard). These are the points the paper reports. val_nb is each arm's
     # own best epoch, read from its metrics.csv, and is the epoch the
     # benchmark scored.
+    ("p1_dab168_kl1",        "elaj",   "p1 dab168/kl1",  "elaj_p1",  0.4024, 16),
     ("p1_dab7_kl1",          "elaj",   "p1 dab7/kl1",    "elaj_p1",  0.4016, 16),
+    ("p1_dab7_kl30",         "elaj",   "p1 dab7/kl30",   "elaj_p1",  0.4025, 16),
     ("p1_dab336_kl30",       "elaj",   "p1 dab336/kl30", "elaj_p1",  0.4023, 16),
     # ── The m-series: ours, superseded, drawn faded. Kept because the
     # frontier's shape is the finding and these are points on it.

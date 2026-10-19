@@ -120,6 +120,13 @@ def parse_args() -> argparse.Namespace:
                         "Its baseline rows are copied in and those methods are "
                         "not run again; only methods absent from it run. The "
                         "elaj row is never reused.")
+    p.add_argument("--dump-latent", default=None,
+                   help="Directory to write each scored embedding into, as "
+                        "an ExternalLatent (latent.npy + manifest.json). "
+                        "Off by default and it changes nothing about scoring: "
+                        "the latents are computed either way and discarded. "
+                        "scripts/continuity_test.py reads what this writes, "
+                        "on CPU, without a second embedding pass.")
     p.add_argument("--fit-split", default=None, choices=["train"],
                    help="Fit the baselines on this split and apply them to "
                         "--splits, as ELAJ is. Methods without an "
@@ -183,6 +190,46 @@ def requested_methods(args) -> list[str]:
     if [m.strip().lower() for m in args.methods] == [NO_METHODS]:
         return []
     return list(args.methods)
+
+
+def dump_latent(args, emb, corpus, key: str) -> None:
+    """Write one scored embedding as an ExternalLatent, if asked.
+
+    WHY THIS EXISTS. The benchmark computes every latent, scores it, and drops
+    it; only UMAP coordinates are ever written. That makes any question about
+    the GEOMETRY of a latent -- rather than about one of its scores --
+    unanswerable without a second embedding pass, which for ELAJ is a GPU job
+    over 416,256 cells. scripts/continuity_test.py needs exactly that, so this
+    writes the latents the same pass already produced.
+
+    ROW IDENTITY IS THE CORPUS'S OWN POSITIONS, which is what ExternalLatent
+    joins by. The embedding here was computed on `corpus` in its own row order,
+    so the positions are 0..n-1 and the fingerprint is that corpus's. Nothing
+    is re-ordered.
+
+    Failure here must not cost the run its table: the scores are the point and
+    the dump is a convenience, so an exception is logged and swallowed.
+    """
+    if not args.dump_latent:
+        return
+    try:
+        # Imported here, not at module scope: this file has no module-level
+        # numpy import and adding one would make `--help` pay for it.
+        import numpy as np
+        from endo_model.evaluation.baselines.external_latent import (
+            ExternalLatent, corpus_fingerprint)
+        latent = np.asarray(emb.latent)
+        ExternalLatent(
+            method=key.replace("/", "__"),
+            latent=latent,
+            row_index=np.arange(latent.shape[0], dtype=np.int64),
+            fingerprint=corpus_fingerprint(corpus),
+            settings={**dict(emb.settings), "dumped_from": key},
+            fit_on=emb.fit_on,
+        ).write(Path(args.dump_latent) / key.replace("/", "__"))
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning("could not dump latent for %s: %s: %s",
+                       key, type(exc).__name__, exc)
 
 
 def pending_keys(args, wide_axis, already) -> list[str]:
@@ -404,6 +451,7 @@ def main() -> None:
                         settings=settings, fit_on="train")
         report.add(scorer.score(emb, corpus, gene_policy="native"))
         report.record_settings("elaj", "native", emb.settings, fit_on="train")
+        dump_latent(args, emb, corpus, "elaj__native__train")
 
     # ── latents computed elsewhere, in their own environments ──────────────
     # Scored against `corpus` rather than `baseline_corpus`: the labels are
@@ -491,6 +539,7 @@ def main() -> None:
                 emb.settings["n_genes"] = restricted.n_genes
             report.add(scorer.score(emb, restricted, gene_policy=policy_tag,
                                     supervised_on=supervised))
+            dump_latent(args, emb, restricted, key)
             report.record_settings(method.name, policy_tag, emb.settings,
                                    fit_on=emb.fit_on)
             # Write after every method so a killed job still leaves a table.

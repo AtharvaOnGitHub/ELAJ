@@ -244,6 +244,32 @@ components the paper claims credit for.
 - [ ] R5 every figure regenerable from a committed script —
       `plot_frontier.sh` is; the rest are not
 
+## ⚠ REMINDER — attach `--dump-latent` to the wave-3 scoring pass
+
+**The continuity test is built and cannot run without this.** When scoring
+`p1_dab168_kl30` and `p1_dab336_kl1`, add `--dump-latent outputs/latents` to
+the `benchmark_baselines.sh` command. It is off by default, changes nothing
+about scoring, and writes each scored embedding as an ExternalLatent.
+
+Without it the latents are computed, scored and discarded exactly as before,
+and getting them back costs a second GPU pass over 416,256 cells.
+
+**And for the comparison that matters**, scVI's latent is needed too. Reusing
+a baselines CSV means scVI is not refitted and so is not dumped — one pass has
+to drop `--reuse-baselines` and pass `--methods pca scvi` instead, which costs
+the scVI fit (~16 min) and PCA (~7 min). One arm is enough for that;
+the others can reuse as usual.
+
+Then, on CPU, outside the GPU cap:
+
+```bash
+cd /rds/homes/a/axw1008/axw1008 && sbatch data_collation/scripts/continuity_test.sh p1_dab168_kl1 --latents outputs/latents --out outputs/continuity
+```
+
+- [ ] wave-3 scoring carries `--dump-latent`
+- [ ] one pass fits scVI so its latent exists
+- [ ] run `continuity_test.sh`
+
 ## Loose ends, cheap, not blocking
 
 - [ ] **Width-matched companion rows — appendix, minor.** 16-component PCA of

@@ -162,9 +162,26 @@ measurement, and it is reported as failed rather than as a number. Its
 of extreme magnitude at 3,072 dimensions; the rest of its scIB block is in
 range and is reported.
 
-Disease grade is negative for almost every method, which means no
-representation separates grades across donors better than chance. Read it as a
-null result for the label, not a ranking.
+**Neither disease row is a ranking, and the stage row in particular must not be
+read as one.** Both are underpowered to the point of carrying no signal for any
+method:
+
+| | donors | p | value vs its own null 95th pct |
+|---|---:|---:|---|
+| disease **stage**, p1_dab168_kl1 | 16 | 0.303 | 0.131 against 0.42 |
+| disease **stage**, scVI | 16 | 0.204 | 0.376 against 0.58 |
+| disease **stage**, scANVI | 16 | 0.169 | 0.418 against 0.61 |
+| disease **grade**, every method | 18 | ≥ 0.43 | negative |
+
+Every disease value in the table sits *below* the 95th percentile of its own
+permutation null, and no method reaches p < 0.16. scVI's 0.376 and scANVI's
+0.418 are **not** advantages over our 0.131 — all three are indistinguishable
+from chance at sixteen donors. Compare cross-donor phase, which reaches
+p = 0.005 at 36 donors with values of 0.65–0.73 against a null 95th percentile
+of 0.19.
+
+Read both disease rows as a null result for the labels at this donor count,
+not as a comparison between methods.
 
 ### What the table says
 

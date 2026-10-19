@@ -530,6 +530,11 @@ P1_ARMS = {
     # The cell m5_combined would have filled, run rather than assumed: m5
     # carried a study_knn checkpoint guard this wave does not have.
     "p1_dab168_kl30": (168.0, 30.0),
+    # EXPLORATORY, and outside the pre-registered 2x2. Chosen after the
+    # square's main effects were read, to test whether lambda_dab stays free
+    # in phase for one more doubling. Shares the base, so the base-identity
+    # test covers it; it is simply not one of the four pre-registered cells.
+    "p1_dab336_kl1": (336.0, 1.0),
 }
 P1_KNOBS = ("model.dab.lambda_dab", "model.loss.w_kl_gauss")
 

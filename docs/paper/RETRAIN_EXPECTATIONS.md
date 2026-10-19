@@ -150,6 +150,30 @@ Predicted bands:
 | **p1_dab336_kl30** | 0.94–0.96 | ≤ 0.55 | ≤ 0.40 | ≤ 0.50 | worst of the wave | **Low** |
 | **p1_dab168_kl30** | 0.955–0.967 | 0.55–0.60 | 0.38–0.44 | 0.47–0.55 | 0.400–0.410 | reproduction of m5 |
 
+## Added after the square was read — exploratory, not pre-registered
+
+`p1_dab336_kl1` is the sixth arm and completes the full 3×2 grid. **It is not
+part of the pre-registered factorial** and must be labelled exploratory in the
+paper: it was chosen after the square's main effects were read, which makes it
+a follow-up the data suggested rather than a prediction the data tested. The
+2×2 stands on its own four cells.
+
+Its predictions are registered here before it runs, to the same standard:
+
+| | predicted | reference |
+|---|---|---|
+| cross-donor phase | 0.72–0.74 | `dab168_kl1` 0.735 |
+| donor kNN | 0.47–0.52 | `dab168_kl1` 0.519 |
+| study mixing | 0.52–0.60 | `dab168_kl1` 0.604 |
+| cross-donor family | ≥ 0.975 | `dab168_kl1` 0.982 |
+| Leiden NMI | 0.06–0.09 | `lambda_dab` does not move NMI |
+
+**The falsifier is the point of the run.** Phase below 0.70 means `lambda_dab`
+stops being free somewhere between 168 and 336, and 168 is the operating point
+to report — a more useful sentence than "we used 168 because it worked". Donor
+at 0.519 or above means the adversary has exhausted the between-study component
+of donor identity, and only the information price can reach what remains.
+
 ## The three questions these runs answer
 
 **1. Is donor-blindness the adversary's doing or the prior's?** `p1_dab7_kl30` keeps

@@ -158,6 +158,17 @@ def main() -> None:
     p.add_argument("--benchmarks", required=True,
                    help="Directory holding the per-run benchmark folders.")
     p.add_argument("--out", required=True, help="Output stem directory.")
+    p.add_argument("--families", nargs="+", default=None,
+                   metavar="FAMILY",
+                   help="Draw only these families; default is all of them. "
+                        "Keys are elaj_p1 (the final wave), elaj (the earlier "
+                        "m-series), baseline and foundation. "
+                        "`--families elaj_p1 baseline foundation` gives the "
+                        "p-series against the field with the superseded arms "
+                        "left out, which is the comparison the paper makes; "
+                        "the m-series belongs on the figure that argues the "
+                        "frontier's SHAPE, not the one that argues the "
+                        "result.")
     args = p.parse_args()
 
     import matplotlib
@@ -173,6 +184,21 @@ def main() -> None:
     if not points:
         logger.error("no points collected; is --benchmarks right?")
         sys.exit(1)
+    if args.families:
+        from endo_model.viz.frontier_panels import FAMILIES
+
+        unknown = [f for f in args.families if f not in FAMILIES]
+        if unknown:
+            logger.error("unknown family %s; known: %s",
+                         ", ".join(unknown), ", ".join(FAMILIES))
+            sys.exit(1)
+        before = len(points)
+        points = [pt for pt in points if pt.family in args.families]
+        logger.info("families %s: kept %d of %d points",
+                    ", ".join(args.families), len(points), before)
+        if not points:
+            logger.error("no points left after the family filter")
+            sys.exit(1)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 

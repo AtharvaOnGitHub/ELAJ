@@ -691,6 +691,77 @@ def main() -> None:
                                          "level": str(meta[col][sel[0]]),
                                          "n_cells": int(sel.size)})
 
+    # ── 4c. the declared groupings, applied here rather than in a second job ─
+    # The statistics above are what keeps any grouping possible. They are not
+    # a reason to make someone run a second job for the obvious ones, so every
+    # grouping in evaluation/groupings.py is applied now and written beside
+    # them. scripts/merge_labels.py is for groupings nobody has thought of.
+    #
+    # WHERE A JUDGEMENT IS OPEN, EVERY VARIANT RUNS. Folding nine menstrual
+    # phases into three is additive for eight of them and not for `menstrual`,
+    # which is the state before the three rather than one of them. So all
+    # three readings are computed -- its own level, folded into proliferative,
+    # excluded -- and which is the result is a person's call made against
+    # three numbers instead of before any.
+    logger.info("── 4c. declared groupings")
+    from endo_model.evaluation.groupings import GROUPINGS, apply_to
+    from endo_model.evaluation.sufficient_stats import merge_agreement
+
+    grouped_rows: list[dict] = []
+    for col, variants in GROUPINGS.items():
+        if col not in meta:
+            continue
+        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
+        if not rows:
+            continue
+        present = {r["level"] for r in rows}
+        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=args.k)
+        for gname, grouping in variants.items():
+            restricted, orphans = apply_to(grouping, present)
+            if orphans:
+                # Never invent a home for a level: say so and move on, so a
+                # vocabulary that has drifted is visible rather than absorbed.
+                logger.warning("   %s/%s: levels not in the grouping, "
+                               "EXCLUDED FROM THIS ROW: %s", col, gname,
+                               ", ".join(orphans))
+            groups = merge_centroids(rows, grouping=restricted)
+            if len(groups) < 2:
+                continue
+            agree = (merge_agreement(counts, names_c, grouping=restricted)
+                     if len(names_c) else {})
+            order = sorted(groups)
+            widest = max(((a, b) for a in order for b in order if a < b),
+                         key=lambda ab: np.linalg.norm(
+                             groups[ab[0]]["centroid"]
+                             - groups[ab[1]]["centroid"]))
+            wd = float(np.linalg.norm(groups[widest[0]]["centroid"]
+                                      - groups[widest[1]]["centroid"]))
+            logger.info("   %-34s %d groups  widest %s..%s=%.3f  "
+                        "agreement %.4f excess %.4f  n=%s",
+                        gname, len(groups), *widest, wd,
+                        agree.get("agreement", float("nan")),
+                        agree.get("excess", float("nan")),
+                        f"{sum(g['n'] for g in groups.values()):,}")
+            for name in order:
+                logger.info("        %-24s n=%11s  scatter %.3f", name,
+                            f"{groups[name]['n']:,}", groups[name]["scatter"])
+            for i, a in enumerate(order):
+                for b in order[i + 1:]:
+                    d = float(np.linalg.norm(groups[a]["centroid"]
+                                             - groups[b]["centroid"]))
+                    width = (groups[a]["scatter"] + groups[b]["scatter"]) / 2
+                    grouped_rows.append({
+                        "label": col, "grouping": gname, "from": a, "to": b,
+                        "distance": d,
+                        "over_scatter": d / width if width else "",
+                        "n_from": groups[a]["n"], "n_to": groups[b]["n"],
+                        "knn_agreement": agree.get("agreement", ""),
+                        "knn_excess": agree.get("excess", ""),
+                        "excluded_levels": ";".join(
+                            sorted(k for k, v in restricted.items()
+                                   if v is None)) or "",
+                        "orphan_levels": ";".join(orphans)})
+
     # ── 5. NMI and ARI — a differently-built check on the same question ──────
     # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster
     # first and then compare to the labels, so they fail in different ways.
@@ -752,6 +823,10 @@ def main() -> None:
          ["label", "from_donor", "to_donor", "count"]),
         ("donor_levels.csv", donor_level_rows,
          ["label", "donor", "level", "n_cells"]),
+        ("grouped_distances.csv", grouped_rows,
+         ["label", "grouping", "from", "to", "distance", "over_scatter",
+          "n_from", "n_to", "knn_agreement", "knn_excess",
+          "excluded_levels", "orphan_levels"]),
     ):
         if not data:
             continue

@@ -136,7 +136,18 @@ def main() -> int:
     stats = Path(args.stats)
     level_rows = read_csv(stats / "level_statistics.csv")
     if not level_rows:
-        raise SystemExit(f"no level_statistics.csv under {stats}")
+        raise SystemExit(
+            f"no level_statistics.csv under {stats}\n"
+            "That file is written by validate_latent.py, so this needs that "
+            "pass to have finished:\n"
+            "    sbatch --mem=360G --time=12:00:00 "
+            "data_collation/scripts/validate_latent.sh \\\n"
+            "        --runs-dir outputs/p_series --splits train val test \\\n"
+            f"        --out {stats} <arm>\n"
+            "And before reaching for this script, read grouped_distances.csv "
+            "in that directory: the pass already applies every grouping in "
+            "evaluation/groupings.py, including each variant of the open "
+            "judgements. This script is for a grouping that is not in there.")
 
     if args.list:
         by_label: dict[str, dict[str, int]] = {}

@@ -449,9 +449,16 @@ def main() -> None:
                                   (None, "", "auto") else "EXPLICIT")}
         emb = Embedding(method="elaj", latent=elaj_latent, fit_seconds=0.0,
                         settings=settings, fit_on="train")
+        # DUMPED BEFORE SCORING, DELIBERATELY. The latent is complete the
+        # moment the embedding pass ends; the scoring battery that follows is
+        # hours of kNN, a 200-permutation null and scIB. Dumping afterwards
+        # means a job that hits its walltime inside the battery throws away a
+        # finished GPU embedding over 1.16 M cells -- the expensive half --
+        # for a table we may not even want. Writing first costs nothing and
+        # makes the embedding survivable on its own.
+        dump_latent(args, emb, corpus, "elaj__native__train")
         report.add(scorer.score(emb, corpus, gene_policy="native"))
         report.record_settings("elaj", "native", emb.settings, fit_on="train")
-        dump_latent(args, emb, corpus, "elaj__native__train")
 
     # ── latents computed elsewhere, in their own environments ──────────────
     # Scored against `corpus` rather than `baseline_corpus`: the labels are

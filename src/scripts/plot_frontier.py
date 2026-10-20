@@ -39,9 +39,14 @@ SOURCES = [
     # no guard). These are the points the paper reports. val_nb is each arm's
     # own best epoch, read from its metrics.csv, and is the epoch the
     # benchmark scored.
+    # ORDER IS THE LEGEND'S ORDER and the two Pareto-optimal arms come first.
+    # Both sit at lambda_dab 168: the front is traced by w_kl_gauss with the
+    # adversary held at its best value, and the other four are dominated.
     ("p1_dab168_kl1",        "elaj",   "p1 dab168/kl1",  "elaj_p1",  0.4024, 16),
+    ("p1_dab168_kl30",       "elaj",   "p1 dab168/kl30", "elaj_p1",  0.4046, 16),
     ("p1_dab7_kl1",          "elaj",   "p1 dab7/kl1",    "elaj_p1",  0.4016, 16),
     ("p1_dab7_kl30",         "elaj",   "p1 dab7/kl30",   "elaj_p1",  0.4025, 16),
+    ("p1_dab336_kl1",        "elaj",   "p1 dab336/kl1",  "elaj_p1",  0.3991, 16),
     ("p1_dab336_kl30",       "elaj",   "p1 dab336/kl30", "elaj_p1",  0.4023, 16),
     # ── The m-series: ours, superseded, drawn faded. Kept because the
     # frontier's shape is the finding and these are points on it.

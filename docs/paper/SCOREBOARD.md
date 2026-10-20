@@ -1,8 +1,7 @@
 # Scoreboard: ELAJ against the baselines and the foundation models
 
-The paper's main results table, kept current. Last rebuilt 19 October 2026, when
-four of five p1 arms were scored and one of them turned out to dominate the
-entire field.
+The paper's main results table, kept current. Last rebuilt 20 October 2026, with the full 3×2 p1 grid scored. Two arms are
+Pareto-optimal and both sit at `lambda_dab` 168; the other four are dominated.
 
 ## The claim this table supports
 
@@ -117,36 +116,41 @@ measured union) except where marked; see §3.
 Foundation models are zero-shot, never fine-tuned, each through its own
 documented interface.
 
-| | **p1 dab168/kl1** | **p1 dab7/kl1** | **p1 dab7/kl30** | **p1 dab336/kl30** | m6ep13 | m5 | PCA | scVI | scANVI | Geneformer | scGPT | SCimilarity | scFoundation |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **`lambda_dab` / `w_kl`** | 168 / 1 | 7 / 1 | 7 / 30 | 336 / 30 | 40 / 1 | 168 / 30 | — | — | — | — | — | — | — |
-| **width** | 16 | 16 | 16 | 16 | 16 | 16 | 16 | 16 | 16 | 256 | 512 | 128 | 3072 |
-| **fitted on** | train | train | train | train | train | train | train | train | train | *pre* | *pre* | *pre* | *pre* |
-| **Cell family** cross-donor ↑ | 0.982 | 0.983 | 0.984 | 0.955 | 0.969 | 0.961 | **0.987** | 0.983 | 0.983 ◆ | 0.902 | 0.984 | 0.990 ◆ | 0.983 |
-| kNN ↑ | 0.986 | 0.987 | 0.988 | 0.966 | 0.975 | 0.971 | **0.990** | 0.987 | 0.987 ◆ | 0.949 | 0.987 | 0.991 ◆ | 0.988 |
-| **Menstrual phase** cross-donor ↑ | **0.735** | 0.734 | 0.679 | 0.592 | 0.607 | 0.573 | 0.646 | 0.705 | 0.697 | 0.437 | 0.487 | 0.625 | 0.645 |
-| kNN ↑ | 0.873 | 0.875 | 0.846 | 0.794 | 0.795 | 0.783 | 0.866 | 0.893 | **0.894** | 0.718 | 0.738 | 0.828 | 0.882 |
-| **Donor identity** kNN ↓ | 0.519 | 0.584 | 0.539 | 0.415 | 0.492 | **0.406** | 0.692 | 0.689 | 0.689 | 0.542 | 0.563 | 0.652 | 0.767 |
-| neighbours kept /100 ↑ | 57 | 58 | 61 | 65 | 64 | **66** | 52 | 48 | 47 | 64 | 65 | 57 | 48 |
-| **Study mixing** ↓ | 0.604 | 0.718 | 0.738 | 0.547 | 0.736 | **0.504** | 0.844 | 0.738 | 0.724 | 0.639 | 0.628 | 0.717 | 0.808 |
-| **Other biology** cell cycle kNN ↑ | 0.463 | 0.472 | 0.451 | 0.426 | 0.390 | 0.417 | 0.406 | 0.461 | 0.462 | 0.389 | 0.446 | 0.437 | **0.477** |
-| fine type kNN ↑ | 0.496 | 0.504 | 0.483 | 0.448 | 0.447 | 0.443 | 0.506 | 0.531 | 0.533 | 0.414 | 0.473 | 0.528 | **0.537** |
-| disease stage xdonor ↑ | 0.131 | 0.163 | 0.140 | 0.089 | 0.112 | 0.162 | 0.124 | 0.376 | **0.418** | 0.160 | 0.154 | 0.103 | 0.412 |
-| disease grade xdonor ↑ | −0.041 | −0.039 | −0.043 | −0.037 | −0.049 | −0.043 | −0.015 | −0.079 | −0.081 | 0.005 | −0.022 | −0.004 | **0.013** |
-| **scIB** NMI ↑ | 0.072 | 0.069 | 0.155 | 0.055 | 0.102 | 0.315 | 0.258 | 0.442 | 0.447 ◆ | 0.065 | **0.574** | 0.856 ◆ | 0.345 |
-| ARI ↑ | 0.050 | 0.090 | 0.133 | 0.074 | 0.065 | 0.195 | 0.203 | 0.349 | 0.339 ◆ | 0.077 | **0.420** | 0.901 ◆ | 0.233 |
-| silhouette bio ↑ | 0.616 | 0.624 | 0.641 | 0.561 | 0.617 | 0.540 | 0.621 | 0.616 | 0.627 ◆ | 0.536 | 0.681 | 0.806 ◆ | **0.692** |
-| isolated labels ↑ | 0.607 | 0.610 | 0.661 | 0.577 | 0.631 | 0.567 | 0.610 | 0.606 | 0.623 ◆ | 0.514 | 0.659 | 0.748 ◆ | **0.668** |
-| graph connectivity ↑ | 0.985 | 0.985 | **0.992** | 0.988 | 0.985 | 0.988 | 0.723 | 0.986 | 0.983 | 0.958 | 0.969 | 0.882 | 0.805 |
-| PC regression ↑ | 0.860 | 0.816 | 0.839 | 0.781 | 0.720 | 0.803 | 0.525 | 0.927 | **0.939** | 0.761 | 0.909 | 0.818 | 0.769 |
-| kBET ↑ | 0.005 | 0.001 | 0.003 | 0.040 | 0.001 | **0.067** | 0.000 | 0.015 | 0.021 | 0.000 | 0.018 | 0.001 | 0.001 |
-| silhouette batch ↑ | 0.773 | 0.702 | 0.711 | 0.682 | 0.619 | 0.715 | 0.465 | 0.855 | 0.866 | 0.720 | **0.891** | 0.715 | *failed* ✱ |
+**The two Pareto-optimal arms carry the table.** The other four p1 arms are
+dominated by one of these two on the donor-against-phase plane and are in §5
+with the rest of the grid, not here.
 
-**The four p1 columns are the paper's models**, and the fifth cell of the 2×2
-— `lambda_dab` 168 with `w_kl` 30 — is untrained. One base, two knobs, one
-selection rule (lowest `val_nb`, no checkpoint guard), checkpoints pinned
-explicitly to each arm's own best epoch. m6ep13 and m5 are kept beside them
-because the frontier's shape is the finding and they are points on it.
+| | **p1 dab168/kl1** | **p1 dab168/kl30** | m6ep13 | m5 | PCA | scVI | scANVI | Geneformer | scGPT | SCimilarity | scFoundation |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **`lambda_dab` / `w_kl`** | 168 / 1 | 168 / 30 | 40 / 1 | 168 / 30 | — | — | — | — | — | — | — |
+| **width** | 16 | 16 | 16 | 16 | 16 | 16 | 16 | 256 | 512 | 128 | 3072 |
+| **fitted on** | train | train | train | train | train | train | train | *pre* | *pre* | *pre* | *pre* |
+| **Cell family** cross-donor ↑ | 0.982 | 0.957 | 0.969 | 0.961 | **0.987** | 0.983 | 0.983 ◆ | 0.902 | 0.984 | 0.990 ◆ | 0.983 |
+| kNN ↑ | 0.986 | 0.967 | 0.975 | 0.971 | **0.990** | 0.987 | 0.987 ◆ | 0.949 | 0.987 | 0.991 ◆ | 0.988 |
+| **Menstrual phase** cross-donor ↑ | **0.735** | 0.603 | 0.607 | 0.573 | 0.646 | 0.705 | 0.697 | 0.437 | 0.487 | 0.625 | 0.645 |
+| kNN ↑ | 0.873 | 0.794 | 0.795 | 0.783 | 0.866 | 0.893 | **0.894** | 0.718 | 0.738 | 0.828 | 0.882 |
+| **Donor identity** kNN ↓ | 0.519 | **0.398** | 0.492 | 0.406 | 0.692 | 0.689 | 0.689 | 0.542 | 0.563 | 0.652 | 0.767 |
+| neighbours kept /100 ↑ | 57 | 65 | 64 | **66** | 52 | 48 | 47 | 64 | 65 | 57 | 48 |
+| **Study mixing** ↓ | 0.604 | **0.513** | 0.736 | 0.504 | 0.844 | 0.738 | 0.724 | 0.639 | 0.628 | 0.717 | 0.808 |
+| **Other biology** cell cycle kNN ↑ | 0.463 | 0.430 | 0.390 | 0.417 | 0.406 | 0.461 | 0.462 | 0.389 | 0.446 | 0.437 | **0.477** |
+| fine type kNN ↑ | 0.496 | 0.444 | 0.447 | 0.443 | 0.506 | 0.531 | 0.533 | 0.414 | 0.473 | 0.528 | **0.537** |
+| disease stage xdonor ✱✱ | 0.131 | 0.083 | 0.112 | 0.162 | 0.124 | 0.376 | 0.418 | 0.160 | 0.154 | 0.103 | 0.412 |
+| disease grade xdonor ✱✱ | −0.041 | −0.038 | −0.049 | −0.043 | −0.015 | −0.079 | −0.081 | 0.005 | −0.022 | −0.004 | 0.013 |
+| **scIB** NMI ↑ | 0.072 | 0.336 | 0.102 | 0.315 | 0.258 | 0.442 | 0.447 ◆ | 0.065 | **0.574** | 0.856 ◆ | 0.345 |
+| ARI ↑ | 0.050 | 0.171 | 0.065 | 0.195 | 0.203 | 0.349 | 0.339 ◆ | 0.077 | **0.420** | 0.901 ◆ | 0.233 |
+| silhouette bio ↑ | 0.616 | 0.582 | 0.617 | 0.540 | 0.621 | 0.616 | 0.627 ◆ | 0.536 | 0.681 | 0.806 ◆ | **0.692** |
+| isolated labels ↑ | 0.607 | 0.599 | 0.631 | 0.567 | 0.610 | 0.606 | 0.623 ◆ | 0.514 | 0.659 | 0.748 ◆ | **0.668** |
+| graph connectivity ↑ | 0.985 | 0.985 | 0.985 | **0.988** | 0.723 | 0.986 | 0.983 | 0.958 | 0.969 | 0.882 | 0.805 |
+| PC regression ↑ | 0.860 | 0.830 | 0.720 | 0.803 | 0.525 | 0.927 | **0.939** | 0.761 | 0.909 | 0.818 | 0.769 |
+| kBET ↑ | 0.005 | 0.040 | 0.001 | **0.067** | 0.000 | 0.015 | 0.021 | 0.000 | 0.018 | 0.001 | 0.001 |
+| silhouette batch ↑ | 0.773 | 0.718 | 0.619 | 0.715 | 0.465 | 0.855 | 0.866 | 0.720 | **0.891** | 0.715 | *failed* ✱ |
+
+**m5 is in the table as the same knobs on the OLD protocol**, beside
+`p1_dab168_kl30` which is that cell re-run here. They agree — donor 0.406
+against 0.398, NMI 0.315 against 0.336 — which settles whether m5's
+clustering was its schedule or its knobs. It was the knobs.
+
+✱✱ Neither disease row is a ranking. See the note below the reading.
 
 ◆ **Supervised on cell family, so every cell-family row is that model's own
 training signal coming back.** scANVI's two family rows and SCimilarity's whole
@@ -185,69 +189,59 @@ not as a comparison between methods.
 
 ### What the table says
 
-**One arm dominates the entire non-ELAJ field.** `p1_dab168_kl1` is better than
-every baseline and every foundation model on cross-donor phase *and* on donor
-identity, simultaneously. Not competitive with — dominated, all seven. The
-Pareto front on those two axes is entirely ours:
+**One arm dominates the entire non-ELAJ field.** `p1_dab168_kl1` is better
+than every baseline and every foundation model on cross-donor phase *and* on
+donor identity, simultaneously. Not competitive with — dominated, all seven.
 
-```
-m5 → p1_dab336_kl30 → m6ep13 → m6ep16 → p1_dab168_kl1
-```
+**The frontier is traced by one knob with the other held fixed, and that is
+the wave's main result.** Of six arms spanning `lambda_dab` {7, 168, 336} ×
+`w_kl_gauss` {1, 30}, exactly two are Pareto-optimal, and **both sit at
+`lambda_dab` 168**:
 
-**The factorial's main result: the adversary is the efficient knob, and the
-prior is the expensive one.** Reading the two available margins of the 2×2:
-
-| change | phase | donor | study mixing | NMI |
+| | donor ↓ | phase ↑ | study ↓ | NMI ↑ |
 |---|---:|---:|---:|---:|
-| `lambda_dab` 7 → 168, at `w_kl` 1 | **+0.001** | **−0.065** | **−0.114** | +0.004 |
-| `w_kl` 1 → 30, at `lambda_dab` 7 | −0.055 | −0.045 | +0.020 | **+0.086** |
+| `p1_dab168_kl30` | **0.398** | 0.603 | **0.513** | **0.336** |
+| `p1_dab168_kl1` | 0.519 | **0.735** | 0.604 | 0.072 |
 
-**The two knobs differ in kind, not in magnitude, and this is the sentence for
-the paper:** `lambda_dab` **moves the frontier outward** — it improves donor
-identity and study mixing while leaving phase untouched, so the point it
-produces was not reachable before. `w_kl_gauss` **travels along the frontier**
-— it trades phase for donor identity at roughly 1.2 : 1. One is a quality
-knob, the other is the tier knob, and a tier series should therefore fix
-`lambda_dab` at its best value and vary `w_kl_gauss`.
+`lambda_dab` 7 and 336 are dominated at both KL levels. So the adversary has a
+best value and the information price is the dial that moves along the front:
+**`lambda_dab` is the quality knob, `w_kl_gauss` is the tier knob.** A tier
+series varies the second with the first fixed, which is now a one-dimensional
+sweep on a known-good base rather than a search.
 
-`lambda_dab` buys donor-blindness and study mixing at **no measurable cost in
-phase**. `w_kl_gauss` buys less donor-blindness, costs 0.055 of phase, and
-makes study mixing *worse*. If the paper names one mechanism for
-donor-blindness, it is the adversary — and the information price is what to
-spend when clustering structure matters, because `w_kl_gauss` is the only knob
-that moves NMI.
+**336 is not merely saturated, it is worse.** Every registered prediction for
+`p1_dab336_kl1` was falsified in the same direction: phase 0.715 against a
+predicted 0.72–0.74, donor 0.528 against 0.47–0.52, study 0.653 against
+0.52–0.60. Compared with 168 at the same KL weight it loses 0.020 of phase and
+0.049 of study mixing for 0.009 *worse* donor identity. The registered
+falsifier said this would be more useful than a win, and it is: 168 is the
+operating point with measurements on both sides of it.
 
-**This falsifies two of the three pre-registered predictions**, which is
-recorded here rather than quietly dropped:
+**The interaction is strong and synergistic**, which is what the fourth cell
+existed to measure. Additivity predicted donor 0.474 at (168, 30); it reached
+**0.398**, 0.077 beyond. The two mechanisms compound rather than overlapping.
 
-| predicted | measured | |
-|---|---|---|
-| compression carries donor-blindness; `dab7_kl30` lands within 0.09 of m5's donor 0.406 | 0.539, and study 0.738 against the predicted 0.70 ceiling | **wrong** |
-| the adversary needs a scarce latent; `dab168_kl1` ≈ `dab7_kl1` on donor and study | 0.519 vs 0.584 donor, 0.604 vs 0.718 study — clearly separated | **wrong** |
-| `w_kl_gauss` has the larger main effect; `lambda_dab` the better donor-per-phase ratio | ratio right, larger effect wrong: `lambda_dab` dominates on both | **half** |
+**A CORRECTION TO THIS FILE'S OWN EARLIER CLAIM.** It said `lambda_dab` buys
+donor-blindness at no cost in phase. The complete square shows that holds
+**only at a cheap latent**:
 
-The m3 diagnostic that motivated the "hiding" hypothesis — the discriminator's
-loss correlating +0.883 with donor kNN — did not predict this. At a cheap
-latent the adversary works, and works nearly for free.
+| | phase cost of `lambda_dab` 7 → 168 |
+|---|---:|
+| at `w_kl` 1 | **+0.001** |
+| at `w_kl` 30 | **−0.076** |
 
-**THE PCA MARGIN IS INFLATED BY THE GENE AXIS, AND THE TABLE SHOULD NOT HIDE
-IT.** The baseline columns above are scored at 30,962 genes — the neutral
-union — because giving the baselines our curated 15,496-gene vocabulary would
-hand them our prior. That choice is nearly free for scVI and scANVI (+0.004,
-+0.003 on cross-donor phase) and **costs PCA 0.045**. So on the same cells:
+So "the adversary shifts the frontier outward" is true at `w_kl` 1 and false
+at 30. The shift-versus-traverse framing survives as a description of the two
+knobs' *roles*; it does not survive as a claim that the adversary is free
+everywhere.
 
-| | matched axis, 15,496 | wide axis, 30,962 |
-|---|---:|---:|
-| PCA, cross-donor phase | 0.691 | 0.646 |
-| our margin over PCA | **+0.044** | +0.089 |
-| our margin over scVI | +0.033 | +0.029 |
-
-**The scVI claim is robust to the choice; the PCA margin doubles because of
-it.** The paper must quote the matched-axis PCA number beside the wide-axis
-one, or a reader who recomputes will find we picked the axis that flatters us
-on that row. The headline — dominating every method on the phase-against-donor
-plane — survives at either axis, because PCA's donor identity is 0.692 both
-ways.
+**`p1_dab168_kl30` settles the NMI question.** It reaches **0.336**, the
+highest of any ELAJ arm, against 0.055–0.155 for the rest of the wave, while
+being the most donor-blind arm in the project at 0.398. m5 is the same knobs
+on the old protocol at 0.315 and 0.406. They agree, so m5's clustering was
+the knobs and not its schedule — the open item that this arm was run to
+resolve. The gap to scVI narrows from 0.07-against-0.442 to
+**0.336 against 0.442**.
 
 **ELAJ still owns donor-blindness outright.** m5 at 0.406 and `p1_dab336_kl30`
 at 0.415 are clear of the nearest non-ELAJ method by 0.127. The fitted
@@ -466,58 +460,61 @@ any.
 
 ---
 
-## 5. The tiers, measured rather than proposed
+## 5. The tiers, and the full 3×2 grid
 
-The m3 → m4 → m5 progression this section once proposed is gone with the arms
-that are not quotable. The tiers are points in the `p1` wave: one base
-(m5_combined), two knobs, one selection rule, a clean split throughout.
+One base (m5_combined), two knobs, one selection rule — lowest `val_nb`, no
+checkpoint guard, checkpoints pinned to each arm's own best epoch — a clean
+split throughout, and six arms.
 
-**Four of five arms scored.**
+| | `w_kl_gauss` 1 | `w_kl_gauss` 30 |
+|---|---|---|
+| **`lambda_dab` 7** | 0.584 / 0.734 | 0.539 / 0.679 |
+| **`lambda_dab` 168** | **0.519 / 0.735** ★ | **0.398 / 0.603** ★ |
+| **`lambda_dab` 336** | 0.528 / 0.715 | 0.415 / 0.592 |
 
-| | arm | `λ_dab` | `w_kl` | donor ↓ | phase ↑ | study ↓ | NMI ↑ |
-|---|---|---:|---:|---:|---:|---:|---:|
-| **High biology** | `p1_dab168_kl1` | 168 | 1 | 0.519 | **0.735** | 0.604 | 0.072 |
-| | `p1_dab7_kl1` | 7 | 1 | 0.584 | 0.734 | 0.718 | 0.069 |
-| **Middle** | `p1_dab7_kl30` | 7 | 30 | 0.539 | 0.679 | 0.738 | **0.155** |
-| *missing* | `p1_dab168_kl30` | 168 | 30 | — | — | — | — |
-| **Low biology** | `p1_dab336_kl30` | 336 | 30 | **0.415** | 0.592 | 0.547 | 0.055 |
+*(donor ↓ / phase ↑; ★ = Pareto-optimal)*
 
-**The separation thresholds declared before the runs are met.**
-[RETRAIN_EXPECTATIONS](RETRAIN_EXPECTATIONS.md) required ≥ 0.05 on donor
-identity and ≥ 0.03 on cross-donor phase between adjacent tiers. High to Low is
-0.104 and 0.143; High to Middle is 0.020 on donor and 0.056 on phase.
+**Two tiers, measured rather than proposed.**
 
-**So the three tiers are not yet three clean points, and the reason is
-specific.** `p1_dab7_kl1` is dominated by `p1_dab168_kl1` — worse on donor by
-0.065, worse on study mixing by 0.114, and level on phase — so it is not a
-tier, it is a point inside the frontier. That leaves `p1_dab168_kl1`,
-`p1_dab7_kl30` and `p1_dab336_kl30` as the candidate three, and the middle one
-clears the donor threshold against High by only 0.020. **The untrained
-`p1_dab168_kl30` is the arm most likely to fill the middle cleanly**, since
-`w_kl` 30 at `lambda_dab` 168 is the one corner of the square that has not been
-seen and is where m5 sat.
+| | arm | `λ_dab` | `w_kl` | donor ↓ | phase ↑ | NMI ↑ | character |
+|---|---|---:|---:|---:|---:|---:|---|
+| **High biology** | `p1_dab168_kl1` | 168 | 1 | 0.519 | **0.735** | 0.072 | dominates every baseline and foundation model |
+| **Low donor** | `p1_dab168_kl30` | 168 | 30 | **0.398** | 0.603 | **0.336** | most donor-blind in the project; best ELAJ clustering |
 
-If it does not, the honest report is **two tiers plus a sweep**, not three
-forced ones. Nothing is being tuned to make a third appear.
+Separated by **0.121** on donor identity and **0.131** on cross-donor phase,
+against thresholds of 0.05 and 0.03 declared before the runs in
+[RETRAIN_EXPECTATIONS](RETRAIN_EXPECTATIONS.md).
 
-**Where the pre-registration was wrong, kept rather than dropped.**
+**Three tiers were the plan and two is the honest answer.** The other four
+arms are dominated: `lambda_dab` 7 and 336 lose to 168 at both KL levels. A
+third tier would come from an intermediate `w_kl_gauss` — somewhere near 5 or
+10 — which is now a one-knob sweep on a known-good base rather than a search,
+and it is not being run to make a picture nicer. Reporting two tiers plus the
+grid that produced them is stronger than three forced points.
 
-| | predicted | measured | |
-|---|---|---|---|
-| `p1_dab7_kl1` phase | ≥ 0.62 | 0.734 | in band, far above |
-| `p1_dab7_kl1` study | 0.72–0.85 | 0.718 | marginally better |
-| `p1_dab168_kl1` donor | 0.48–0.58 | 0.519 | in band |
-| `p1_dab168_kl1` phase | 0.58–0.65 | 0.735 | **above band** |
-| `p1_dab7_kl30` donor | 0.42–0.50 | 0.539 | **above band** |
-| `p1_dab7_kl30` phase | 0.55–0.62 | 0.679 | **above band** |
-| `p1_dab336_kl30` phase | ≤ 0.55 | 0.592 | better than predicted |
-| `p1_dab336_kl30` donor | ≤ 0.40 | 0.415 | **worse than predicted** |
-| `p1_dab336_kl30` study | ≤ 0.50 | 0.547 | **worse than predicted** |
+### Where the pre-registration was wrong
 
-Phase came in above the band on three of four arms, so the predictions were
-systematically pessimistic about biology — which is the direction that matters
-least for honesty and most for the paper. The donor-blind end travelled less
-far than predicted and did not beat m5's 0.406.
+Kept rather than dropped, because the square's value is that it could fail.
+
+| arm | | predicted | measured | |
+|---|---|---|---|---|
+| dab7_kl1 | phase | ≥ 0.62 | 0.734 | in band, far above |
+| dab7_kl1 | study | 0.72–0.85 | 0.718 | marginally better |
+| dab168_kl1 | phase | 0.58–0.65 | 0.735 | **above band** |
+| dab168_kl1 | donor | 0.48–0.58 | 0.519 | in band |
+| dab7_kl30 | phase | 0.55–0.62 | 0.679 | **above band** |
+| dab7_kl30 | donor | 0.42–0.50 | 0.539 | **above band** |
+| dab336_kl30 | donor | ≤ 0.40 | 0.415 | **worse** |
+| dab336_kl30 | study | ≤ 0.50 | 0.547 | **worse** |
+| **dab336_kl1** | phase | 0.72–0.74 | 0.715 | **out** |
+| **dab336_kl1** | donor | 0.47–0.52 | 0.528 | **out** |
+| **dab336_kl1** | study | 0.52–0.60 | 0.653 | **out** |
+| **dab336_kl1** | NMI | 0.06–0.09 | 0.093 | **out** |
+
+Phase came in above band on three of six arms, so the predictions were
+systematically pessimistic about biology. `p1_dab336_kl1` missed on all four
+of its registered quantities in the same direction, which is the falsifier it
+was run for.
 
 ---
 

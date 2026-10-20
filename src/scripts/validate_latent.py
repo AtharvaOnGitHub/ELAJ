@@ -63,16 +63,23 @@ BIOLOGY_LABELS = [
 ]
 # Merged across studies from the columns above; see label_harmonisation.
 HARMONISED = ["cell family", "menstrual phase"]
-# The coarse forms, also merged across studies. No study writes nine menstrual
-# phases -- those are the union of four vocabularies -- and the two severity
-# columns were separately untestable until they were put in one. See the COARSE
-# FORMS block in label_harmonisation.py for the counts and the one assumption.
+
+# THE COARSE FORMS ARE NOT MEASURED HERE, DELIBERATELY. An earlier version of
+# this file measured them and that was the wrong shape: every quantity it wrote
+# was conditional on a grouping chosen before any number existed, so changing
+# the grouping meant re-embedding 1.58 M cells on a GPU. Which levels merge is
+# a scientific decision, and a measurement must not foreclose one.
 #
-# Both forms are reported off the same embedding because they answer different
-# questions: the coarse one is the honest recovery number, the fine one is the
-# stronger ordering test, and neither substitutes for the other.
-COARSE = ["severity", "severity (cases only)", "phase (3-level)",
-          "phase (2-level)", "cycling"]
+# What goes out instead is sufficient statistics at the finest granularity the
+# labels carry -- see evaluation/sufficient_stats.py -- from which centroid
+# geometry and kNN agreement at ANY grouping follow by addition, exactly, on a
+# login node. Verified to twelve decimals in test_sufficient_stats.py.
+#
+# `severity` is the one derived column still built, because it is not a
+# coarsening of anything: it puts two studies' DIFFERENT severity vocabularies
+# into one, which no later merge of a single column could do. Its own levels
+# stay as fine as each study wrote them.
+SEVERITY_FINE = "severity (study vocabularies)"
 # Negative controls. These SHOULD show nothing: library size is handed to the
 # decoder explicitly and mitochondrial fraction is cell stress, so a latent
 # organised by them is organised by technical noise.
@@ -374,25 +381,17 @@ def main() -> None:
     meta["cell family"] = merge_columns(meta, LINEAGE_SOURCE_COLUMNS, LINEAGE)
     meta["menstrual phase"] = merge_columns(meta, PHASE_SOURCE_COLUMNS,
                                             MENSTRUAL_PHASE)
-    from endo_model.evaluation.label_harmonisation import (
-        CELL_CYCLE_SOURCE_COLUMNS, CELL_CYCLING, PHASE_BINARY, PHASE_COARSE,
-        SEVERITY, SEVERITY_CASES, SEVERITY_SOURCE_COLUMNS,
-    )
-
-    coarse = (
-        ("severity", SEVERITY, SEVERITY_SOURCE_COLUMNS),
-        ("severity (cases only)", SEVERITY_CASES, SEVERITY_SOURCE_COLUMNS),
-        ("phase (3-level)", PHASE_COARSE, PHASE_SOURCE_COLUMNS),
-        ("phase (2-level)", PHASE_BINARY, PHASE_SOURCE_COLUMNS),
-        ("cycling", CELL_CYCLING, CELL_CYCLE_SOURCE_COLUMNS),
-    )
-    for name, harmoniser, columns in coarse:
-        meta[name] = merge_columns(meta, columns, harmoniser)
+    # One derived column, and it is a UNION rather than a coarsening: marecko
+    # numbers its patients by rASRM and duempelmann writes CTL/mild/severe, so
+    # the two sit in different columns and neither can be read against the
+    # other. Prefixing each study's own value keeps every level the studies
+    # drew -- nothing is merged here, and "stage_2" against "grade_mild" is a
+    # decision for the merge step.
+    meta[SEVERITY_FINE] = _union_severity(meta)
 
     for name, harmoniser, columns in (
         ("cell family", LINEAGE, LINEAGE_SOURCE_COLUMNS),
         ("menstrual phase", MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS),
-        *coarse,
     ):
         _log_harmonised(meta, name, harmoniser, columns, study_id, names)
 
@@ -515,7 +514,7 @@ def main() -> None:
     dims = args.dims or None
     # The harmonised columns first: they span two studies, so they carry the
     # most cells and the only cross-study evidence on this page.
-    for col in HARMONISED + COARSE + BIOLOGY_LABELS + ["patient_id"]:
+    for col in HARMONISED + [SEVERITY_FINE] + BIOLOGY_LABELS + ["patient_id"]:
         first = True
         for bname, lat in branches.items():
             res = label_knn_agreement(lat, meta[col], k=args.k, n_components=dims)
@@ -535,9 +534,9 @@ def main() -> None:
     # like: each donor carries one phase and one grade, so both come for free.
     # Excluding a cell's own donor removes that shortcut.
     logger.info("── 4. cross-donor: same test, same-donor neighbours discarded")
-    for col in HARMONISED + COARSE + ["EndometriosisGrade",
-                                      "Endometriosis_stage", "phase",
-                                      "disease_status"]:
+    for col in HARMONISED + [SEVERITY_FINE, "EndometriosisGrade",
+                             "Endometriosis_stage", "phase",
+                             "disease_status"]:
         cross_donor_results.setdefault(col, {})
         for bname, lat in branches.items():
             res = cross_group_agreement(lat, meta[col], meta["patient_id"],
@@ -573,71 +572,124 @@ def main() -> None:
                    f"{res['neighbours_kept']:.0f} kept; "
                    f"{res.get('n_groups', 0)} donors")
 
-    # ── 4b. GEOMETRY: does an ordered label come out ORDERED? ───────────────
-    # Everything above asks whether a label is RECOVERABLE -- can a cell's
-    # neighbours predict it. This asks what the latent SAYS about the cells
-    # once they are grouped: where each group sits, and whether groups further
-    # apart in the ordering sit further apart in the space.
+    # ── 4b. GEOMETRY, and the statistics every later regrouping needs ───────
+    # Everything above asks whether a label is RECOVERABLE. This asks what the
+    # latent SAYS once cells are grouped: where each group sits, and how far
+    # apart. PLAIN EUCLIDEAN DISTANCE between level centroids, reported beside
+    # the latent's own RMS radius so a distance of 1.2 can be read as large or
+    # small. The latent has a standard-normal prior, so its dimensions are
+    # commensurate and Euclidean needs no reweighting.
     #
-    # It is the stronger question and the cheaper one. Stronger because a
-    # partition can group correctly by accident in many ways and can group AND
-    # order correctly in far fewer, so the count of wrong answers grows
-    # factorially with the level count. Cheaper because it is a centroid per
-    # level, not a neighbour search -- no k, no permutations, no donor
-    # bookkeeping.
+    # NO SUMMARY STATISTIC IS COMMITTED TO HERE. An earlier version wrote
+    # Somers' D over the ordering and nothing else, which answered one narrow
+    # question -- does distance grow with ordinal separation -- and threw away
+    # which levels sit near which, whether the arrangement is a line or a loop,
+    # and everything a different question would want. The matrix is the result;
+    # a summary is one CPU line away from it, and `ordinal_monotonicity` is
+    # still there for whoever wants that particular one.
     #
-    # The full matrix goes to its own CSV; the table gets Somers' D, the level
-    # count, and spread/scale. READ SPREAD/SCALE FIRST: D only ever looks at
-    # the sign of a difference, so levels that did not separate at all still
-    # produce a D, and on a probe where the true answer was nothing it produced
-    # +0.64. A spread that is a small fraction of the latent's own radius means
-    # D is ordering rounding error.
-    logger.info("── 4b. ordinal geometry: Somers' D over level centroids")
-    from endo_model.evaluation.label_harmonisation import (
-        PHASE_BINARY as _PB, PHASE_COARSE as _PC, SEVERITY as _SEV,
-        SEVERITY_CASES as _SEVC,
+    # AND THE STATISTICS GO OUT AT THE FINEST GRANULARITY THE LABELS CARRY, so
+    # no regrouping ever needs this job again. Three files: per-(donor, level)
+    # sums, raw level x level neighbour counts, and the donor x donor
+    # cross-donor counts. Centroid geometry and kNN agreement at any grouping
+    # follow from them by addition, exactly. The cross-donor statistic does
+    # NOT reproduce exactly -- the matrix supports a pooled estimator and the
+    # benchmark averages a per-cell fraction, which differed by 0.024 at a 10x
+    # spread in donor size -- so the matrix is for choosing a grouping cheaply
+    # and the chosen one still earns one GPU pass. test_sufficient_stats.py
+    # pins all of that.
+    logger.info("── 4b. geometry: Euclidean distance between level centroids")
+    from endo_model.evaluation.latent_validation import _is_labelled
+    from endo_model.evaluation.sufficient_stats import (
+        donor_adjacency, level_statistics, merge_centroids, neighbour_counts,
     )
-    from endo_model.evaluation.latent_validation import ordinal_monotonicity
 
-    ordered_labels = [
-        ("menstrual phase", MENSTRUAL_PHASE.order, MENSTRUAL_PHASE.periodic),
-        ("phase (3-level)", _PC.order, False),
-        ("phase (2-level)", _PB.order, False),
-        ("severity", _SEV.order, False),
-        ("severity (cases only)", _SEVC.order, False),
-        # marecko writes rASRM as 0-4 with 0 for its controls, so the raw
-        # column is already ordered and is kept beside the coarse form: five
-        # levels have far more ways to come out wrong than three.
-        ("Endometriosis_stage", ("0", "1", "2", "3", "4"), False),
-        ("EndometriosisGrade", ("CTL", "mild", "severe"), False),
+    geometry_labels = [
+        "cell family", "menstrual phase", SEVERITY_FINE,
+        "Endometriosis_stage", "EndometriosisGrade", "disease_status",
+        "MenstrualCyclePhase", "MenstrualCyclePhase_main", "phase",
+        "AnnotationMain", "AnnotationRefined",
     ]
-    matrix_rows: list[dict] = []
-    for col, order, periodic in ordered_labels:
+    stat_rows: list[dict] = []
+    distance_rows: list[dict] = []
+    count_rows: list[dict] = []
+    for col in geometry_labels:
         if col not in meta:
             continue
-        for bname, lat in branches.items():
-            res = ordinal_monotonicity(lat, meta[col], order,
-                                       periodic=periodic)
-            if res["n_levels"] < 2:
-                continue
-            logger.info(
-                "   %-9s %-24s levels=%d  D=%+.3f  spread/scale=%.3f  (%s)",
-                bname, col, res["n_levels"], res["d"],
-                res["spread_over_scale"], ", ".join(res["levels"]))
-            record("ordinal-somers-d", col, bname, res["n_levels"], res["d"],
-                   f"{res['n_comparable']} comparable pairs of "
-                   f"{res['n_pairs']}; spread/scale="
-                   f"{res['spread_over_scale']:.3f}; periodic={periodic}; "
-                   f"levels: {', '.join(res['levels'])}")
-            record("ordinal-spread", col, bname, res["n_levels"],
-                   res["spread_over_scale"],
-                   f"largest centroid distance {res['spread']:.3f} over "
-                   f"latent RMS radius {res['scale']:.3f}")
-            for i, a in enumerate(res["levels"]):
-                for j, b in enumerate(res["levels"]):
-                    matrix_rows.append({"label": col, "branch": bname,
-                                        "from": a, "to": b,
-                                        "distance": float(res["matrix"][i, j])})
+        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
+        if not rows:
+            continue
+        for r in rows:
+            stat_rows.append({"label": col, **r})
+
+        groups = merge_centroids(rows, by="level")
+        if len(groups) < 2:
+            continue
+        scale = float(np.sqrt((mu_gauss.astype(float) ** 2).sum(1).mean()))
+        order = sorted(groups)
+        for a in order:
+            for b in order:
+                d = float(np.linalg.norm(groups[a]["centroid"]
+                                         - groups[b]["centroid"]))
+                distance_rows.append({
+                    "label": col, "from": a, "to": b, "distance": d,
+                    "distance_over_scale": d / scale if scale else float("nan"),
+                    "n_from": groups[a]["n"], "n_to": groups[b]["n"],
+                    "scatter_from": groups[a]["scatter"],
+                    "scatter_to": groups[b]["scatter"]})
+        widest = max(
+            ((a, b) for a in order for b in order if a < b),
+            key=lambda ab: np.linalg.norm(groups[ab[0]]["centroid"]
+                                          - groups[ab[1]]["centroid"]))
+        logger.info(
+            "   %-30s %2d levels  widest pair %s..%s = %.3f  "
+            "(latent radius %.3f, mean within-level scatter %.3f)",
+            col, len(groups), *widest,
+            float(np.linalg.norm(groups[widest[0]]["centroid"]
+                                 - groups[widest[1]]["centroid"])),
+            scale, float(np.mean([g["scatter"] for g in groups.values()])))
+
+        # Raw neighbour counts, for agreement at any grouping.
+        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=args.k)
+        for i, a in enumerate(names_c):
+            for j, b in enumerate(names_c):
+                count_rows.append({"label": col, "own": a, "neighbour": b,
+                                   "count": int(counts[i, j])})
+
+    # The donor x donor matrix, once per label whose cells differ. Written for
+    # the labels where the cross-donor test is the question being asked.
+    adjacency_rows: list[dict] = []
+    donor_level_rows: list[dict] = []
+    for col in ("menstrual phase", SEVERITY_FINE, "disease_status",
+                "cell family"):
+        if col not in meta:
+            continue
+        mask = np.array([_is_labelled(v) for v in meta[col]])
+        if mask.sum() < 200:
+            continue
+        adj, dnames = donor_adjacency(mu_gauss, meta["patient_id"],
+                                      labelled_mask=mask,
+                                      k=max(args.k, 100))
+        if not dnames:
+            continue
+        logger.info("   %-30s donor matrix %d x %d, %d relations",
+                    col, len(dnames), len(dnames), int(adj.sum()))
+        for i, a in enumerate(dnames):
+            for j, b in enumerate(dnames):
+                if adj[i, j]:
+                    adjacency_rows.append({"label": col, "from_donor": a,
+                                           "to_donor": b,
+                                           "count": int(adj[i, j])})
+        # Each donor's level, so the merge step can map donors to any
+        # grouping. Its own table: a sentinel row inside the counts would be
+        # one more thing for a reader to know about.
+        pid_str = np.asarray(meta["patient_id"]).astype(str)
+        for donor in dnames:
+            sel = np.flatnonzero((pid_str == donor) & mask)
+            if sel.size:
+                donor_level_rows.append({"label": col, "donor": donor,
+                                         "level": str(meta[col][sel[0]]),
+                                         "n_cells": int(sel.size)})
 
     # ── 5. NMI and ARI — a differently-built check on the same question ──────
     # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster
@@ -682,18 +734,33 @@ def main() -> None:
         w.writerows(rows)
     logger.info("Written to %s", path)
 
-    if matrix_rows:
-        # The centroid distance matrices, long-form: one row per ordered pair
-        # of levels. Separate from validation.csv because that file is one
-        # scalar per row and a matrix is not a scalar; section 4b's table rows
-        # carry the summary.
-        mpath = out / "ordinal_distances.csv"
-        with open(mpath, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["label", "branch", "from", "to",
-                                              "distance"])
+    # ── the merge inputs ────────────────────────────────────────────────────
+    # Four tables beside validation.csv. validation.csv is one scalar per row
+    # and none of these is a scalar; more importantly, these are what a
+    # regrouping reads, so they are the files that keep this job from having
+    # to run again. scripts/merge_labels.py consumes them on a login node.
+    for name, data, fields in (
+        ("level_statistics.csv", stat_rows,
+         ["label", "donor", "level", "n", "sumsq"]
+         + [f"dim{d}" for d in range(mu_gauss.shape[1])]),
+        ("centroid_distances.csv", distance_rows,
+         ["label", "from", "to", "distance", "distance_over_scale",
+          "n_from", "n_to", "scatter_from", "scatter_to"]),
+        ("neighbour_counts.csv", count_rows,
+         ["label", "own", "neighbour", "count"]),
+        ("donor_adjacency.csv", adjacency_rows,
+         ["label", "from_donor", "to_donor", "count"]),
+        ("donor_levels.csv", donor_level_rows,
+         ["label", "donor", "level", "n_cells"]),
+    ):
+        if not data:
+            continue
+        dest = out / name
+        with open(dest, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()
-            w.writerows(matrix_rows)
-        logger.info("Written to %s (%d rows)", mpath, len(matrix_rows))
+            w.writerows(data)
+        logger.info("Written to %s (%d rows)", dest, len(data))
 
     if args.no_figures:
         return
@@ -728,6 +795,53 @@ def main() -> None:
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("  05_cross_donor skipped (%s: %s)",
                        type(exc).__name__, exc)
+
+
+def _union_severity(meta) -> "np.ndarray":
+    """marecko's rASRM and duempelmann's grade in one column, nothing merged.
+
+    These are the corpus's two severity columns and they sit in different
+    studies with different vocabularies, so neither can be read against the
+    other and "stage significant, grade null" has until now been a comparison
+    of two incomparable things.
+
+    This is a UNION, not a coarsening. Each value keeps its study's own
+    wording behind a prefix -- `stage_0`, `stage_3`, `grade_mild` -- so the
+    column carries every level either study drew and asserts nothing about
+    which of them correspond. Whether `stage_1`+`stage_2` is duempelmann's
+    `grade_mild` is a scientific judgement, and it belongs in the merge step
+    where it can be changed, not in the measurement where it cannot.
+
+    rASRM levels are written as given. marecko codes its controls 0, which is
+    established by arithmetic rather than assumed: stage 0 holds 125,136 cells
+    and that is exactly marecko's control count in disease_contrast.py, while
+    stages 1-4 sum to exactly its 50,240 eutopic cells.
+    """
+    import numpy as np
+
+    stage = meta.get("Endometriosis_stage")
+    grade = meta.get("EndometriosisGrade")
+    n = len(meta["patient_id"])
+    out = np.array([None] * n, dtype=object)
+
+    def clean(v):
+        if v is None:
+            return None
+        t = str(v).strip()
+        return None if t.lower() in ("", "nan", "none", "na", "unknown",
+                                     "<na>", "n/a") else t
+
+    for i in range(n):
+        sv = clean(stage[i]) if stage is not None else None
+        gv = clean(grade[i]) if grade is not None else None
+        if sv is not None:
+            # "2.0" and "2" are the same rASRM level read as float or int.
+            if sv.endswith(".0"):
+                sv = sv[:-2]
+            out[i] = f"stage_{sv}"
+        elif gv is not None:
+            out[i] = f"grade_{gv.lower()}"
+    return out
 
 
 def _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,

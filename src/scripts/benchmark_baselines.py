@@ -544,9 +544,17 @@ def main() -> None:
             if wide_axis:
                 emb.settings["gene_vocabulary"] = wide_axis.path
                 emb.settings["n_genes"] = restricted.n_genes
+            # DUMPED BEFORE SCORING, for the reason in dump_latent's own
+            # docstring: the embedding is complete the moment the fit and
+            # transform end, and the battery that follows is hours of kNN and
+            # a 200-permutation null. On the train split one method's battery
+            # runs near five hours, so a walltime kill inside it would throw
+            # away a finished embedding over 1.16 M cells. emb.settings is
+            # already final here -- the wide-axis block above is the last
+            # thing that touches it.
+            dump_latent(args, emb, restricted, key)
             report.add(scorer.score(emb, restricted, gene_policy=policy_tag,
                                     supervised_on=supervised))
-            dump_latent(args, emb, restricted, key)
             report.record_settings(method.name, policy_tag, emb.settings,
                                    fit_on=emb.fit_on)
             # Write after every method so a killed job still leaves a table.

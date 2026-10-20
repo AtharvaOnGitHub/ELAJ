@@ -8,9 +8,15 @@ that single embedding. No training. Runs against checkpoints already on disk,
 so results arrive without waiting for a run to finish.
 
 See docs/walkthrough/12-validation.md for what is being asked and why most of
-the obvious labels are disqualified -- `age` is a model input, `tissue` and
-`platform` are decoder inputs, and `disease_status` is exactly determined by
-tissue in this corpus.
+the obvious labels are disqualified -- `age` is a model input, and `tissue` and
+`platform` are decoder inputs.
+
+`disease_status` WAS disqualified here on the grounds that it is exactly
+determined by tissue. evaluation/disease_contrast.py retired that: it holds for
+ectopic (ovary, peritoneum) and adenomyosis (myometrium), and it is false for
+the pair the field cares about, because CONTROL AND EUTOPIC ARE BOTH
+ENDOMETRIUM. The correction never reached this file, so the column it excludes
+is the one disease label the corpus can be asked about. It is in the list now.
 
 Every result is reported WITH its cell count. The corpus has no shared metadata
 schema: most labels exist for one or two studies, so "n" is not a footnote here,
@@ -47,6 +53,13 @@ BIOLOGY_LABELS = [
     # NEGATIVE control, not as menstrual phase, which is what it was read as
     # for two waves. marecko's menstrual phase is in `Stage`.
     "phase",
+    # Read with ALL its levels, not restricted to endometrium. ectopic and
+    # adenomyosis ARE tissue and tissue is a decoder input, so those levels
+    # are expected to separate and say nothing; control-vs-eutopic is the
+    # cell of the matrix that is not determined by tissue, and the distance
+    # between those two centroids beside the distance to the tissue-determined
+    # levels is the whole read in one object.
+    "disease_status",
 ]
 # Merged across studies from the columns above; see label_harmonisation.
 HARMONISED = ["cell family", "menstrual phase"]
@@ -462,10 +475,17 @@ def main() -> None:
         # A Gaussian-only model has no circular half to score, and its
         # combined latent IS its Gaussian one; scoring both would print the
         # same numbers twice under different names.
+        #
+        # DROPPING "combined" TOO IS THE POINT OF THAT SENTENCE, and until now
+        # the code only dropped "circular", so a Gaussian-only arm scored the
+        # same array twice. Harmless on a 121k validation split. On the full
+        # 1.58 M corpus it doubles a battery that runs for hours, and every p1
+        # arm has n_circular 0.
         del branches["circular"]
+        del branches["combined"]
     logger.info("── 3. biological labels — kNN agreement, per latent half")
-    logger.info("   (branch widths: gaussian %d, circular %d, combined %d)",
-                mu_gauss.shape[1], circ.shape[1], branches["combined"].shape[1])
+    logger.info("   (branch widths: gaussian %d, circular %d, scored: %s)",
+                mu_gauss.shape[1], circ.shape[1], ", ".join(branches))
     dims = args.dims or None
     # The harmonised columns first: they span two studies, so they carry the
     # most cells and the only cross-study evidence on this page.

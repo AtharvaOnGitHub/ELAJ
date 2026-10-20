@@ -37,15 +37,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("elaj.bars")
 
-#: (axis key, panel title, lower_is_better)
-PANELS = [
+#: (axis key, panel title, complement)
+#:
+#: EVERY PANEL IS HIGHER-IS-BETTER, and two of them get there by plotting the
+#: complement of what the benchmark stores. That is a rename, not a sign flip:
+#: 1 - patient kNN IS donor blindness, and 1 - study separation IS study
+#: mixing. Both are quantities with meanings, and the transform is written
+#: into the axis title so a reader cross-checking against SCOREBOARD -- which
+#: reports the raw, lower-is-better form -- can invert in their head rather
+#: than finding two numbers that disagree.
+#:
+#: The hatching now marks "this is the complement", which is the thing that
+#: needs flagging, rather than "lower is better", which no longer applies to
+#: anything on the figure.
+PANELS_MAIN = [
     ("xdonor_family", "Cell family, cross-donor", False),
     ("xdonor_phase", "Menstrual phase, cross-donor", False),
-    ("donor_knn", "Donor identity (patient kNN)", True),
-    ("study_mixing", "Study separation", True),
+    ("donor_knn", "Donor blindness  (1 − patient kNN)", True),
+    ("study_mixing", "Study mixing  (1 − separation)", True),
+]
+
+#: The clustering metrics, kept in their own set rather than dropped.
+#:
+#: They are the two we lose on, and SCOREBOARD §2 explains why they measure
+#: cluster geometry rather than whether cell family is present -- across
+#: thirteen methods, kNN recovery of cell family spans 0.042 while Leiden NMI
+#: on the same label spans 0.801. That explanation is a reason to CONTEXTUALISE
+#: them, not a licence to leave them out of our own figures. Every chart is
+#: therefore drawn twice, and the one with these panels is the one that goes
+#: anywhere a reviewer can ask "what about scIB".
+PANELS_CLUSTERING = [
     ("nmi", "Leiden NMI vs cell family", False),
     ("ari", "Leiden ARI vs cell family", False),
 ]
+
+PANELS = PANELS_MAIN            # rebound per figure; see main()
 
 #: Which arm represents each family in `bars_best`. CHOSEN BY CROSS-DONOR
 #: PHASE, which is the axis the paper's claim is made on, and stated in the
@@ -78,22 +104,22 @@ def bar_figure(points, title: str, note: str = ""):
     if not drawn:
         raise SystemExit("no points carry any of the panel metrics")
 
-    ncols = 3
+    ncols = 2 if len(PANELS) <= 4 else 3
     nrows = (len(PANELS) + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.6 * ncols, 3.6 * nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.9 * ncols, 3.6 * nrows))
     axes = np.atleast_1d(axes).ravel()
 
-    for ax, (key, label, lower_better) in zip(axes, PANELS):
+    for ax, (key, label, complement) in zip(axes, PANELS):
         have = [p for p in drawn if key in p.metrics]
-        values = [p.metrics[key] for p in have]
+        values = [(1.0 - p.metrics[key]) if complement else p.metrics[key]
+                  for p in have]
         colours = [getattr(PALETTE, FAMILIES[p.family][1]) for p in have]
         x = np.arange(len(have))
         # Hatching, not colour, carries direction: it survives greyscale.
         bars = ax.bar(x, values, color=colours, edgecolor=PALETTE.paper,
                       linewidth=0.8,
-                      hatch=("///" if lower_better else None))
-        ax.set_title(f"{label}  {'↓' if lower_better else '↑'}",
-                     fontsize=10, color=PALETTE.ink)
+                      hatch=("///" if complement else None))
+        ax.set_title(f"{label}  ↑", fontsize=10, color=PALETTE.ink)
         ax.set_xticks(x)
         ax.set_xticklabels([p.label for p in have], rotation=45,
                            ha="right", fontsize=8)
@@ -143,31 +169,33 @@ def ceiling_figure(points, title: str):
 
     order = [f for f in ("elaj_p1", "baseline", "foundation")
              if any(p.family == f for p in points)]
-    ncols = 3
+    ncols = 2 if len(PANELS) <= 4 else 3
     nrows = (len(PANELS) + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.6 * ncols, 4.0 * nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.9 * ncols, 4.0 * nrows))
     axes = np.atleast_1d(axes).ravel()
 
-    for ax, (key, label, lower_better) in zip(axes, PANELS):
+    for ax, (key, label, complement) in zip(axes, PANELS):
         picks = []
         for family in order:
             members = [p for p in points
                        if p.family == family and key in p.metrics]
             if not members:
                 continue
-            best = (min if lower_better else max)(
+            # Best is still measured on the RAW metric; only the drawing is
+            # complemented, so "best" cannot change meaning with the display.
+            best = (min if complement else max)(
                 members, key=lambda p: p.metrics[key])
             picks.append((family, best))
         if not picks:
             ax.set_visible(False)
             continue
-        values = [b.metrics[key] for _, b in picks]
+        values = [(1.0 - b.metrics[key]) if complement else b.metrics[key]
+                  for _, b in picks]
         colours = [getattr(PALETTE, FAMILIES[f][1]) for f, _ in picks]
         x = np.arange(len(picks))
         bars = ax.bar(x, values, color=colours, edgecolor=PALETTE.paper,
-                      linewidth=0.8, hatch=("///" if lower_better else None))
-        ax.set_title(f"{label}  {'↓' if lower_better else '↑'}",
-                     fontsize=10, color=PALETTE.ink)
+                      linewidth=0.8, hatch=("///" if complement else None))
+        ax.set_title(f"{label}  ↑", fontsize=10, color=PALETTE.ink)
         # THE MODEL NAME GOES UNDER THE FAMILY NAME, not inside the bar. In
         # the bar it collided with the value label on every short bar, which
         # is exactly the bars a reader looks at hardest.
@@ -199,7 +227,8 @@ def ceiling_figure(points, title: str):
     fig.text(0.5, 0.045,
              "Each bar is the best member of its family ON THAT METRIC, named "
              "under the axis. The bars change identity from panel to panel: no "
-             "row here is a single model, and no model achieves all six.",
+             f"row here is a single model, and no model achieves all "
+             f"{len(PANELS)}.",
              ha="center", fontsize=8, color=PALETTE.ink_soft)
     fig.text(0.5, 0.016,
              "\u25c6 supervised on cell family, which is what that panel "
@@ -230,12 +259,8 @@ def main() -> None:
 
     p1 = [x for x in points if x.family == "elaj_p1"]
     field = [x for x in points if x.family in ("baseline", "foundation")]
-    if p1:
-        save_figure(bar_figure(p1, "The p1 wave: one base, two knobs"),
-                    out / "bars_p1")
-    if field:
-        save_figure(bar_figure(field, "Fitted baselines and foundation models"),
-                    out / "bars_field")
+    ceiling = [x for x in points
+               if x.family in ("elaj_p1", "baseline", "foundation")]
 
     best, chosen = [], []
     for family in ("elaj_p1", "baseline", "foundation"):
@@ -245,11 +270,6 @@ def main() -> None:
             continue
         pick = max(members, key=lambda x: x.metrics[BEST_BY])
         best.append(pick)
-        # NAME THE FAMILY'S OTHER PARETO POINTS. Choosing by phase alone can
-        # pick a member that another member of the same family beats on donor
-        # identity -- scFoundation has the best foundation phase and the worst
-        # donor identity in the whole table. Left unsaid, the single bar reads
-        # as "the best this family can do" on every panel, which it is not.
         others = [m for m in members
                   if m is not pick
                   and "donor_knn" in m.metrics and "donor_knn" in pick.metrics
@@ -262,19 +282,35 @@ def main() -> None:
             label += (" (same family, more donor-blind: "
                       + ", ".join(o.label for o in others) + ")")
         chosen.append(f"{family} → {label}")
-    ceiling = [x for x in points
-               if x.family in ("elaj_p1", "baseline", "foundation")]
-    if ceiling:
-        save_figure(ceiling_figure(
-            ceiling, "Best of each family, per metric"),
-            out / "bars_ceiling")
+    note = ("Representative chosen by cross-donor menstrual phase, the axis "
+            "the claim is made on — " + "; ".join(chosen))
 
-    if best:
-        save_figure(bar_figure(
-            best, "Best of each family, side by side",
-            note=("Representative chosen by cross-donor menstrual phase, the "
-                  "axis the claim is made on — " + "; ".join(chosen))),
-            out / "bars_best")
+    # EVERY FIGURE TWICE: the four headline panels, and the same plus the two
+    # clustering metrics. Dropping NMI and ARI from the headline is an
+    # editorial choice about what the claim rests on; dropping them from the
+    # repository would be a different thing entirely.
+    import scripts.plot_bars as this
+
+    for suffix, panels in (("", PANELS_MAIN),
+                           ("_with_clustering", PANELS_MAIN + PANELS_CLUSTERING)):
+        this.PANELS = panels
+        if p1:
+            save_figure(bar_figure(p1, "The p1 wave: one base, two knobs"),
+                        out / f"bars_p1{suffix}")
+        if field:
+            save_figure(bar_figure(field,
+                                   "Fitted baselines and foundation models"),
+                        out / f"bars_field{suffix}")
+        if ceiling:
+            save_figure(ceiling_figure(ceiling,
+                                       "Best of each family, per metric"),
+                        out / f"bars_ceiling{suffix}")
+        if best:
+            save_figure(bar_figure(best, "Best of each family, side by side",
+                                   note=note),
+                        out / f"bars_best{suffix}")
+    this.PANELS = PANELS_MAIN
+
     logger.info("Written to %s", out)
 
 

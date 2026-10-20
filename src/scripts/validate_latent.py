@@ -63,6 +63,16 @@ BIOLOGY_LABELS = [
 ]
 # Merged across studies from the columns above; see label_harmonisation.
 HARMONISED = ["cell family", "menstrual phase"]
+# The coarse forms, also merged across studies. No study writes nine menstrual
+# phases -- those are the union of four vocabularies -- and the two severity
+# columns were separately untestable until they were put in one. See the COARSE
+# FORMS block in label_harmonisation.py for the counts and the one assumption.
+#
+# Both forms are reported off the same embedding because they answer different
+# questions: the coarse one is the honest recovery number, the fine one is the
+# stronger ordering test, and neither substitutes for the other.
+COARSE = ["severity", "severity (cases only)", "phase (3-level)",
+          "phase (2-level)", "cycling"]
 # Negative controls. These SHOULD show nothing: library size is handed to the
 # decoder explicitly and mitochondrial fraction is cell stress, so a latent
 # organised by them is organised by technical noise.
@@ -364,9 +374,25 @@ def main() -> None:
     meta["cell family"] = merge_columns(meta, LINEAGE_SOURCE_COLUMNS, LINEAGE)
     meta["menstrual phase"] = merge_columns(meta, PHASE_SOURCE_COLUMNS,
                                             MENSTRUAL_PHASE)
+    from endo_model.evaluation.label_harmonisation import (
+        CELL_CYCLE_SOURCE_COLUMNS, CELL_CYCLING, PHASE_BINARY, PHASE_COARSE,
+        SEVERITY, SEVERITY_CASES, SEVERITY_SOURCE_COLUMNS,
+    )
+
+    coarse = (
+        ("severity", SEVERITY, SEVERITY_SOURCE_COLUMNS),
+        ("severity (cases only)", SEVERITY_CASES, SEVERITY_SOURCE_COLUMNS),
+        ("phase (3-level)", PHASE_COARSE, PHASE_SOURCE_COLUMNS),
+        ("phase (2-level)", PHASE_BINARY, PHASE_SOURCE_COLUMNS),
+        ("cycling", CELL_CYCLING, CELL_CYCLE_SOURCE_COLUMNS),
+    )
+    for name, harmoniser, columns in coarse:
+        meta[name] = merge_columns(meta, columns, harmoniser)
+
     for name, harmoniser, columns in (
         ("cell family", LINEAGE, LINEAGE_SOURCE_COLUMNS),
         ("menstrual phase", MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS),
+        *coarse,
     ):
         _log_harmonised(meta, name, harmoniser, columns, study_id, names)
 
@@ -489,7 +515,7 @@ def main() -> None:
     dims = args.dims or None
     # The harmonised columns first: they span two studies, so they carry the
     # most cells and the only cross-study evidence on this page.
-    for col in HARMONISED + BIOLOGY_LABELS + ["patient_id"]:
+    for col in HARMONISED + COARSE + BIOLOGY_LABELS + ["patient_id"]:
         first = True
         for bname, lat in branches.items():
             res = label_knn_agreement(lat, meta[col], k=args.k, n_components=dims)
@@ -509,8 +535,9 @@ def main() -> None:
     # like: each donor carries one phase and one grade, so both come for free.
     # Excluding a cell's own donor removes that shortcut.
     logger.info("── 4. cross-donor: same test, same-donor neighbours discarded")
-    for col in HARMONISED + ["EndometriosisGrade", "Endometriosis_stage",
-                             "phase"]:
+    for col in HARMONISED + COARSE + ["EndometriosisGrade",
+                                      "Endometriosis_stage", "phase",
+                                      "disease_status"]:
         cross_donor_results.setdefault(col, {})
         for bname, lat in branches.items():
             res = cross_group_agreement(lat, meta[col], meta["patient_id"],
@@ -545,6 +572,72 @@ def main() -> None:
                    f"null95={res.get('null_p95', float('nan')):.2f}; "
                    f"{res['neighbours_kept']:.0f} kept; "
                    f"{res.get('n_groups', 0)} donors")
+
+    # ── 4b. GEOMETRY: does an ordered label come out ORDERED? ───────────────
+    # Everything above asks whether a label is RECOVERABLE -- can a cell's
+    # neighbours predict it. This asks what the latent SAYS about the cells
+    # once they are grouped: where each group sits, and whether groups further
+    # apart in the ordering sit further apart in the space.
+    #
+    # It is the stronger question and the cheaper one. Stronger because a
+    # partition can group correctly by accident in many ways and can group AND
+    # order correctly in far fewer, so the count of wrong answers grows
+    # factorially with the level count. Cheaper because it is a centroid per
+    # level, not a neighbour search -- no k, no permutations, no donor
+    # bookkeeping.
+    #
+    # The full matrix goes to its own CSV; the table gets Somers' D, the level
+    # count, and spread/scale. READ SPREAD/SCALE FIRST: D only ever looks at
+    # the sign of a difference, so levels that did not separate at all still
+    # produce a D, and on a probe where the true answer was nothing it produced
+    # +0.64. A spread that is a small fraction of the latent's own radius means
+    # D is ordering rounding error.
+    logger.info("── 4b. ordinal geometry: Somers' D over level centroids")
+    from endo_model.evaluation.label_harmonisation import (
+        PHASE_BINARY as _PB, PHASE_COARSE as _PC, SEVERITY as _SEV,
+        SEVERITY_CASES as _SEVC,
+    )
+    from endo_model.evaluation.latent_validation import ordinal_monotonicity
+
+    ordered_labels = [
+        ("menstrual phase", MENSTRUAL_PHASE.order, MENSTRUAL_PHASE.periodic),
+        ("phase (3-level)", _PC.order, False),
+        ("phase (2-level)", _PB.order, False),
+        ("severity", _SEV.order, False),
+        ("severity (cases only)", _SEVC.order, False),
+        # marecko writes rASRM as 0-4 with 0 for its controls, so the raw
+        # column is already ordered and is kept beside the coarse form: five
+        # levels have far more ways to come out wrong than three.
+        ("Endometriosis_stage", ("0", "1", "2", "3", "4"), False),
+        ("EndometriosisGrade", ("CTL", "mild", "severe"), False),
+    ]
+    matrix_rows: list[dict] = []
+    for col, order, periodic in ordered_labels:
+        if col not in meta:
+            continue
+        for bname, lat in branches.items():
+            res = ordinal_monotonicity(lat, meta[col], order,
+                                       periodic=periodic)
+            if res["n_levels"] < 2:
+                continue
+            logger.info(
+                "   %-9s %-24s levels=%d  D=%+.3f  spread/scale=%.3f  (%s)",
+                bname, col, res["n_levels"], res["d"],
+                res["spread_over_scale"], ", ".join(res["levels"]))
+            record("ordinal-somers-d", col, bname, res["n_levels"], res["d"],
+                   f"{res['n_comparable']} comparable pairs of "
+                   f"{res['n_pairs']}; spread/scale="
+                   f"{res['spread_over_scale']:.3f}; periodic={periodic}; "
+                   f"levels: {', '.join(res['levels'])}")
+            record("ordinal-spread", col, bname, res["n_levels"],
+                   res["spread_over_scale"],
+                   f"largest centroid distance {res['spread']:.3f} over "
+                   f"latent RMS radius {res['scale']:.3f}")
+            for i, a in enumerate(res["levels"]):
+                for j, b in enumerate(res["levels"]):
+                    matrix_rows.append({"label": col, "branch": bname,
+                                        "from": a, "to": b,
+                                        "distance": float(res["matrix"][i, j])})
 
     # ── 5. NMI and ARI — a differently-built check on the same question ──────
     # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster
@@ -588,6 +681,19 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
     logger.info("Written to %s", path)
+
+    if matrix_rows:
+        # The centroid distance matrices, long-form: one row per ordered pair
+        # of levels. Separate from validation.csv because that file is one
+        # scalar per row and a matrix is not a scalar; section 4b's table rows
+        # carry the summary.
+        mpath = out / "ordinal_distances.csv"
+        with open(mpath, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["label", "branch", "from", "to",
+                                              "distance"])
+            w.writeheader()
+            w.writerows(matrix_rows)
+        logger.info("Written to %s (%d rows)", mpath, len(matrix_rows))
 
     if args.no_figures:
         return
@@ -638,40 +744,66 @@ def _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
 
     from endo_model.evaluation.latent_validation import _is_labelled
 
+    pid = np.asarray(meta["patient_id"]).astype(str)
+    logger.info("── 6. donor-level layout (descriptive)")
+
+    # EVERY per-donor property, not only phase. A label constant within a
+    # donor IS a donor-level property, so one point per donor is its natural
+    # unit: 254 donors in 16 dimensions rather than 1.58 M cells, and no
+    # pseudoreplication to argue about, because each donor contributes once.
+    for col in ("MenstrualCyclePhase_main", "phase (3-level)", "severity",
+                "severity (cases only)"):
+        if col not in meta:
+            continue
+        label = meta[col]
+        ok = np.array([_is_labelled(v) for v in label])
+        if ok.sum() < 50:
+            continue
+
+        donors = {}
+        for d in np.unique(pid[ok]):
+            rows = np.flatnonzero(ok & (pid == d))
+            donors[d] = (str(label[rows[0]]), len(rows),
+                         mu_gauss[rows].mean(axis=0))
+        logger.info("   %s — %d donors", col, len(donors))
+        for lv in sorted({v[0] for v in donors.values()}):
+            members = [(d, n) for d, (l_, n, _) in donors.items() if l_ == lv]
+            logger.info("      %-18s %3d donors, %11s cells",
+                        lv, len(members), f"{sum(n for _, n in members):,}")
+
+        # Between-level separation of donor centroids against within-level
+        # spread. >1 means donors sharing a level sit closer to each other
+        # than to donors of another. Descriptive: no p-value is claimed.
+        #
+        # GENERALISED FROM len(groups) == 2, which never fired on the full
+        # corpus -- duempelmann writes three phases in the very column this
+        # was hardcoded to read, so the ratio was skipped exactly where it was
+        # wanted. Any level count now, reducing to the old behaviour at two.
+        groups = {}
+        for _, (lv, _, c) in donors.items():
+            groups.setdefault(lv, []).append(c)
+        if len(groups) < 2:
+            continue
+        stacked = {lv: np.stack(v) for lv, v in groups.items()}
+        within = [np.linalg.norm(x - y) for g in stacked.values()
+                  for i, x in enumerate(g) for y in g[i + 1:]]
+        between = [np.linalg.norm(x - y)
+                   for i, (la, ga) in enumerate(stacked.items())
+                   for lb, gb in list(stacked.items())[i + 1:]
+                   for x in ga for y in gb]
+        if not within or not between:
+            continue
+        w, b = float(np.mean(within)), float(np.mean(between))
+        logger.info("      donor centroids: between-level %.3f, within-level "
+                    "%.3f, ratio %.2f  (>1 = levels separate; %d donors, "
+                    "%d levels, no p-value claimed)",
+                    b, w, b / w if w else float("nan"), len(donors),
+                    len(groups))
+
     phase = meta["MenstrualCyclePhase_main"]
-    pid = meta["patient_id"]
     ok = np.array([_is_labelled(v) for v in phase])
     if ok.sum() < 50:
         return
-
-    logger.info("── 6. donor-level layout (descriptive)")
-    donors = {}
-    for d in np.unique(np.asarray(pid)[ok].astype(str)):
-        rows = np.flatnonzero(ok & (np.asarray(pid).astype(str) == d))
-        donors[d] = (str(phase[rows[0]]), len(rows), mu_gauss[rows].mean(axis=0))
-    for ph in sorted({v[0] for v in donors.values()}):
-        members = [(d, n) for d, (p_, n, _) in donors.items() if p_ == ph]
-        logger.info("   %-16s %d donors, %s cells",
-                    ph, len(members), f"{sum(n for _, n in members):,}")
-
-    # Between-phase separation of donor centroids, against within-phase spread.
-    # >1 means donors of one phase sit closer to each other than to the other
-    # phase. Descriptive only -- no p-value is possible at this donor count.
-    groups = {}
-    for d, (ph, _, c) in donors.items():
-        groups.setdefault(ph, []).append(c)
-    if len(groups) == 2:
-        (a, b) = [np.stack(v) for v in groups.values()]
-        within = float(np.mean([np.linalg.norm(x - y)
-                                for g in (a, b) for x in g for y in g
-                                if not np.allclose(x, y)]) or 0.0)
-        between = float(np.mean([np.linalg.norm(x - y) for x in a for y in b]))
-        logger.info("   donor centroids: between-phase %.3f, within-phase %.3f, "
-                    "ratio %.2f  (>1 = phases separate; %d donors, no p-value "
-                    "possible at this count)",
-                    between, within, between / within if within else float("nan"),
-                    len(donors))
-
     try:
         _plot_phase_umap(mu_gauss[ok], circ[ok], np.asarray(phase)[ok],
                          run_dir, splits)

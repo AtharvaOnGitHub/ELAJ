@@ -140,3 +140,129 @@ class TestPhaseRank:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ── the coarse forms ─────────────────────────────────────────────────────────
+#
+# These hold the arithmetic from label_survey.csv, 20 October 2026. The point
+# of pinning the counts rather than only the mapping is that the mapping's
+# whole justification is that level 0 of marecko's stage column IS its control
+# set -- established by those totals matching disease_contrast.py's -- and a
+# silent change to either side should fail here rather than in a figure.
+
+#: marecko_2024.Endometriosis_stage, from the survey.
+MARECKO_STAGE = {"0": 125_136, "1": 6_162, "2": 23_908, "3": 4_397,
+                 "4": 15_773}
+#: duempelmann_2026.EndometriosisGrade, from the survey.
+DUEMPELMANN_GRADE = {"CTL": 182_582, "mild": 128_061, "severe": 155_728}
+
+
+def _tally(harmoniser, counts):
+    """Coarse level -> cells, for a {source value: cells} survey row."""
+    out = {}
+    for value, n in counts.items():
+        level = harmoniser.lookup(value)
+        if level is not None:
+            out[level] = out.get(level, 0) + n
+    return out
+
+
+def test_severity_merges_two_studies_into_three_levels():
+    from endo_model.evaluation.label_harmonisation import SEVERITY
+
+    marecko = _tally(SEVERITY, MARECKO_STAGE)
+    duempelmann = _tally(SEVERITY, DUEMPELMANN_GRADE)
+
+    assert marecko == {"control": 125_136, "mild": 30_070, "severe": 20_170}
+    assert duempelmann == {"control": 182_582, "mild": 128_061,
+                           "severe": 155_728}
+
+    merged = {k: marecko[k] + duempelmann[k] for k in marecko}
+    assert merged == {"control": 307_718, "mild": 158_131, "severe": 175_898}
+    assert sum(merged.values()) == 641_747
+
+
+def test_stage_level_zero_is_the_control_set():
+    """The claim the whole mapping rests on, as arithmetic.
+
+    marecko holds 125,136 control and 50,240 eutopic cells per
+    disease_contrast.py. Stage 0 must be the first number exactly and stages
+    1-4 the second exactly, or 0 is some stage below I and the mapping is
+    wrong.
+    """
+    from endo_model.evaluation.label_harmonisation import SEVERITY
+
+    assert MARECKO_STAGE["0"] == 125_136
+    assert sum(MARECKO_STAGE[s] for s in "1234") == 50_240
+    assert SEVERITY.lookup("0") == "control"
+    assert {SEVERITY.lookup(s) for s in "1234"} == {"mild", "severe"}
+
+
+def test_severity_reads_floats_and_ints_alike():
+    """An obs column read as float stringifies to "0.0", as int to "0"."""
+    from endo_model.evaluation.label_harmonisation import SEVERITY
+
+    for a, b in (("0", "0.0"), ("2", "2.0"), ("4", "4.0")):
+        assert SEVERITY.lookup(a) == SEVERITY.lookup(b)
+
+
+def test_severity_cases_drops_every_control_spelling():
+    from endo_model.evaluation.label_harmonisation import SEVERITY_CASES
+
+    for control in ("0", "0.0", "CTL", "control"):
+        assert SEVERITY_CASES.lookup(control) is None
+
+    marecko = _tally(SEVERITY_CASES, MARECKO_STAGE)
+    duempelmann = _tally(SEVERITY_CASES, DUEMPELMANN_GRADE)
+    assert marecko == {"mild": 30_070, "severe": 20_170}
+    assert duempelmann == {"mild": 128_061, "severe": 155_728}
+    assert sum(marecko.values()) + sum(duempelmann.values()) == 334_029
+
+
+def test_coarse_phase_covers_every_source_spelling_in_the_corpus():
+    """Every phase value the four studies write must map or be dropped on purpose.
+
+    An unmapped value costs that study's cells silently, which on a label
+    spanning four studies is the failure mode worth a test.
+    """
+    from endo_model.evaluation.label_harmonisation import (
+        MENSTRUAL_PHASE, PHASE_COARSE,
+    )
+
+    # The fine vocabulary is the union of what the studies write, so anything
+    # it knows the coarse form must also know.
+    assert set(MENSTRUAL_PHASE.mapping) <= set(PHASE_COARSE.mapping)
+    assert not PHASE_COARSE.unmapped(MENSTRUAL_PHASE.mapping)
+
+
+def test_coarse_phase_collapses_to_the_clinical_three():
+    from endo_model.evaluation.label_harmonisation import PHASE_COARSE
+
+    assert PHASE_COARSE.order == ("proliferative", "periovulatory",
+                                 "secretory")
+    for fine in ("secretory_early", "secretory_mid", "secretory_late",
+                 "early_mid_secretory", "late_secretory"):
+        assert PHASE_COARSE.lookup(fine) == "secretory"
+    for fine in ("proliferative_early", "proliferative_late"):
+        assert PHASE_COARSE.lookup(fine) == "proliferative"
+    # Menstruation is not a point on the proliferative-secretory axis.
+    assert PHASE_COARSE.lookup("menstrual") is None
+
+
+def test_binary_phase_drops_the_boundary_rather_than_choosing_a_side():
+    from endo_model.evaluation.label_harmonisation import PHASE_BINARY
+
+    assert PHASE_BINARY.lookup("periovulatory") is None
+    assert PHASE_BINARY.lookup("proliferative") == "proliferative"
+    assert PHASE_BINARY.lookup("secretory_late") == "secretory"
+    assert PHASE_BINARY.order == ("proliferative", "secretory")
+
+
+def test_cycling_is_two_levels_and_still_94_percent_one_class():
+    """The coarse form exists to make the label's limitation legible."""
+    from endo_model.evaluation.label_harmonisation import CELL_CYCLING
+
+    survey = {"G1": 164_414, "G2M": 7_588, "S": 3_374}
+    tally = _tally(CELL_CYCLING, survey)
+    assert tally == {"G1": 164_414, "cycling": 10_962}
+    assert tally["G1"] / sum(tally.values()) > 0.93

@@ -526,3 +526,99 @@ def _permutation_null(lab, grp, neigh, usable, kept, has_any, chance, head,
         "n_assignments": int(n_assign),
         "p_floor": float(floor),
     }
+
+
+def ordinal_monotonicity(
+    latent: np.ndarray,
+    labels: np.ndarray,
+    order,
+    periodic: bool = False,
+) -> dict:
+    """Does latent distance grow with separation along an ORDERED label?
+
+    `ordinal_centroid_distance` returns the whole matrix, which is the right
+    object for a figure and no use in a table. This reduces it to the one
+    number the matrix is read for: over every pair of level-pairs, how often
+    the pair that is further apart in the ordering is also further apart in
+    the latent.
+
+    +1 means that holds for every comparable pair. 0 means the levels group
+    without ordering. Negative means the ordering is inverted, which is as
+    informative as positive and is not a failure.
+
+    WHY THIS IS A STRONGER TEST THAN AGREEMENT, restating what
+    `ordinal_centroid_distance` says: a partition can group correctly by
+    accident in many ways, and can group AND order correctly in far fewer. The
+    count of orderings grows factorially with the level count, which is also
+    why the fine-grained form of a label is the better test of ordering even
+    where the coarse form is the better test of recovery.
+
+    SOMERS' D, NOT SPEARMAN, and the reason is ties. Step counts repeat --
+    with four levels, three different pairs are one step apart -- and a rank
+    correlation cannot reach 1 against a tied predictor, so a perfectly
+    ordered four-level layout scores 0.926 and a nine-level one scores
+    something else again. The ceiling would move with the level count, which
+    is the one thing a number compared across labels must not do. Somers' D
+    drops tied-step pairs from the denominator instead of trying to order
+    them, so a perfect layout is 1.0 at every level count.
+
+    `periodic` wraps the step count, so on a cycle the first and last levels
+    are one step apart rather than n-1. Menstrual phase is periodic; severity
+    is not.
+
+    Returns `d`, `n_levels`, `n_pairs`, `n_comparable`, `levels`, and the
+    `matrix` itself, so a caller wanting the figure need not recompute the
+    centroids.
+    """
+    matrix, present = ordinal_centroid_distance(latent, labels, order)
+    if len(present) < 3:
+        # Two levels give exactly one pair: a distance, with no ordering to
+        # check. Report the matrix and leave d undefined rather than
+        # correlating over a single point.
+        return {"d": float("nan"), "n_levels": len(present), "n_pairs": 0,
+                "n_comparable": 0, "levels": present, "matrix": matrix}
+
+    index = {name: i for i, name in enumerate(order) if name in present}
+    pos = np.array([index[name] for name in present], dtype=float)
+    n_full = len(order)
+
+    steps, dists = [], []
+    for a in range(len(present)):
+        for b in range(a + 1, len(present)):
+            gap = abs(pos[a] - pos[b])
+            if periodic:
+                gap = min(gap, n_full - gap)
+            steps.append(gap)
+            dists.append(matrix[a, b])
+    steps = np.asarray(steps, dtype=float)
+    dists = np.asarray(dists, dtype=float)
+
+    concordant = discordant = comparable = 0
+    for i in range(len(steps)):
+        for j in range(i + 1, len(steps)):
+            ds = steps[i] - steps[j]
+            if ds == 0:                      # tied step: nothing to predict
+                continue
+            comparable += 1
+            dd = dists[i] - dists[j]
+            if ds * dd > 0:
+                concordant += 1
+            elif ds * dd < 0:
+                discordant += 1
+
+    d = ((concordant - discordant) / comparable) if comparable else float("nan")
+
+    # `d` ALONE IS NOT READABLE, and this is the failure mode: four levels
+    # sitting on top of one another leave six centroid distances that are pure
+    # noise, and ordering noise gave +0.64 on a probe where the true answer is
+    # nothing. D cannot see that, because it only ever looks at the sign of a
+    # difference. So the separation goes out beside it: `spread` is the largest
+    # centroid distance and `scale` the latent's own RMS radius, and a `spread`
+    # that is a small fraction of `scale` means the levels did not separate and
+    # `d` is describing rounding error.
+    spread = float(matrix.max()) if matrix.size else float("nan")
+    scale = float(np.sqrt((latent.astype(float) ** 2).sum(axis=1).mean()))
+    return {"d": float(d), "n_levels": len(present), "n_pairs": int(len(steps)),
+            "n_comparable": comparable, "levels": present, "matrix": matrix,
+            "spread": spread, "scale": scale,
+            "spread_over_scale": (spread / scale) if scale else float("nan")}

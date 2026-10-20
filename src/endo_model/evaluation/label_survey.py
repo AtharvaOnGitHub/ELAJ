@@ -23,7 +23,13 @@ from dataclasses import dataclass, field
 
 # The columns every validation figure reads. Grouped the way
 # scripts/validate_latent.py groups them, so the two lists stay comparable.
-DISEASE_LABELS = ["EndometriosisGrade", "Endometriosis_stage", "Stage"]
+DISEASE_LABELS = ["EndometriosisGrade", "Endometriosis_stage", "Stage",
+                  # Measured rather than inferred. Its level counts were
+                  # recoverable from the two severity columns -- both
+                  # studies' control totals match disease_contrast.py's
+                  # exactly -- but a column the coarse severity mapping
+                  # rests on should be surveyed, not reconstructed.
+                  "disease_status"]
 PHASE_LABELS = ["MenstrualCyclePhase_main", "MenstrualCyclePhase", "phase"]
 CELLTYPE_LABELS = ["AnnotationMain", "AnnotationRefined", "celltype",
                    "lineage", "cell_type"]

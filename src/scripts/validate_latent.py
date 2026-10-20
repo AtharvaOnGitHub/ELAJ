@@ -572,196 +572,11 @@ def main() -> None:
                    f"{res['neighbours_kept']:.0f} kept; "
                    f"{res.get('n_groups', 0)} donors")
 
-    # ── 4b. GEOMETRY, and the statistics every later regrouping needs ───────
-    # Everything above asks whether a label is RECOVERABLE. This asks what the
-    # latent SAYS once cells are grouped: where each group sits, and how far
-    # apart. PLAIN EUCLIDEAN DISTANCE between level centroids, reported beside
-    # the latent's own RMS radius so a distance of 1.2 can be read as large or
-    # small. The latent has a standard-normal prior, so its dimensions are
-    # commensurate and Euclidean needs no reweighting.
-    #
-    # NO SUMMARY STATISTIC IS COMMITTED TO HERE. An earlier version wrote
-    # Somers' D over the ordering and nothing else, which answered one narrow
-    # question -- does distance grow with ordinal separation -- and threw away
-    # which levels sit near which, whether the arrangement is a line or a loop,
-    # and everything a different question would want. The matrix is the result;
-    # a summary is one CPU line away from it, and `ordinal_monotonicity` is
-    # still there for whoever wants that particular one.
-    #
-    # AND THE STATISTICS GO OUT AT THE FINEST GRANULARITY THE LABELS CARRY, so
-    # no regrouping ever needs this job again. Three files: per-(donor, level)
-    # sums, raw level x level neighbour counts, and the donor x donor
-    # cross-donor counts. Centroid geometry and kNN agreement at any grouping
-    # follow from them by addition, exactly. The cross-donor statistic does
-    # NOT reproduce exactly -- the matrix supports a pooled estimator and the
-    # benchmark averages a per-cell fraction, which differed by 0.024 at a 10x
-    # spread in donor size -- so the matrix is for choosing a grouping cheaply
-    # and the chosen one still earns one GPU pass. test_sufficient_stats.py
-    # pins all of that.
-    logger.info("── 4b. geometry: Euclidean distance between level centroids")
-    from endo_model.evaluation.latent_validation import _is_labelled
-    from endo_model.evaluation.sufficient_stats import (
-        donor_adjacency, level_statistics, merge_centroids, neighbour_counts,
-    )
-
-    geometry_labels = [
-        "cell family", "menstrual phase", SEVERITY_FINE,
-        "Endometriosis_stage", "EndometriosisGrade", "disease_status",
-        "MenstrualCyclePhase", "MenstrualCyclePhase_main", "phase",
-        "AnnotationMain", "AnnotationRefined",
-    ]
-    stat_rows: list[dict] = []
-    distance_rows: list[dict] = []
-    count_rows: list[dict] = []
-    for col in geometry_labels:
-        if col not in meta:
-            continue
-        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
-        if not rows:
-            continue
-        for r in rows:
-            stat_rows.append({"label": col, **r})
-
-        groups = merge_centroids(rows, by="level")
-        if len(groups) < 2:
-            continue
-        scale = float(np.sqrt((mu_gauss.astype(float) ** 2).sum(1).mean()))
-        order = sorted(groups)
-        for a in order:
-            for b in order:
-                d = float(np.linalg.norm(groups[a]["centroid"]
-                                         - groups[b]["centroid"]))
-                distance_rows.append({
-                    "label": col, "from": a, "to": b, "distance": d,
-                    "distance_over_scale": d / scale if scale else float("nan"),
-                    "n_from": groups[a]["n"], "n_to": groups[b]["n"],
-                    "scatter_from": groups[a]["scatter"],
-                    "scatter_to": groups[b]["scatter"]})
-        widest = max(
-            ((a, b) for a in order for b in order if a < b),
-            key=lambda ab: np.linalg.norm(groups[ab[0]]["centroid"]
-                                          - groups[ab[1]]["centroid"]))
-        logger.info(
-            "   %-30s %2d levels  widest pair %s..%s = %.3f  "
-            "(latent radius %.3f, mean within-level scatter %.3f)",
-            col, len(groups), *widest,
-            float(np.linalg.norm(groups[widest[0]]["centroid"]
-                                 - groups[widest[1]]["centroid"])),
-            scale, float(np.mean([g["scatter"] for g in groups.values()])))
-
-        # Raw neighbour counts, for agreement at any grouping.
-        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=args.k)
-        for i, a in enumerate(names_c):
-            for j, b in enumerate(names_c):
-                count_rows.append({"label": col, "own": a, "neighbour": b,
-                                   "count": int(counts[i, j])})
-
-    # The donor x donor matrix, once per label whose cells differ. Written for
-    # the labels where the cross-donor test is the question being asked.
-    adjacency_rows: list[dict] = []
-    donor_level_rows: list[dict] = []
-    for col in ("menstrual phase", SEVERITY_FINE, "disease_status",
-                "cell family"):
-        if col not in meta:
-            continue
-        mask = np.array([_is_labelled(v) for v in meta[col]])
-        if mask.sum() < 200:
-            continue
-        adj, dnames = donor_adjacency(mu_gauss, meta["patient_id"],
-                                      labelled_mask=mask,
-                                      k=max(args.k, 100))
-        if not dnames:
-            continue
-        logger.info("   %-30s donor matrix %d x %d, %d relations",
-                    col, len(dnames), len(dnames), int(adj.sum()))
-        for i, a in enumerate(dnames):
-            for j, b in enumerate(dnames):
-                if adj[i, j]:
-                    adjacency_rows.append({"label": col, "from_donor": a,
-                                           "to_donor": b,
-                                           "count": int(adj[i, j])})
-        # Each donor's level, so the merge step can map donors to any
-        # grouping. Its own table: a sentinel row inside the counts would be
-        # one more thing for a reader to know about.
-        pid_str = np.asarray(meta["patient_id"]).astype(str)
-        for donor in dnames:
-            sel = np.flatnonzero((pid_str == donor) & mask)
-            if sel.size:
-                donor_level_rows.append({"label": col, "donor": donor,
-                                         "level": str(meta[col][sel[0]]),
-                                         "n_cells": int(sel.size)})
-
-    # ── 4c. the declared groupings, applied here rather than in a second job ─
-    # The statistics above are what keeps any grouping possible. They are not
-    # a reason to make someone run a second job for the obvious ones, so every
-    # grouping in evaluation/groupings.py is applied now and written beside
-    # them. scripts/merge_labels.py is for groupings nobody has thought of.
-    #
-    # WHERE A JUDGEMENT IS OPEN, EVERY VARIANT RUNS. Folding nine menstrual
-    # phases into three is additive for eight of them and not for `menstrual`,
-    # which is the state before the three rather than one of them. So all
-    # three readings are computed -- its own level, folded into proliferative,
-    # excluded -- and which is the result is a person's call made against
-    # three numbers instead of before any.
-    logger.info("── 4c. declared groupings")
-    from endo_model.evaluation.groupings import GROUPINGS, apply_to
-    from endo_model.evaluation.sufficient_stats import merge_agreement
-
-    grouped_rows: list[dict] = []
-    for col, variants in GROUPINGS.items():
-        if col not in meta:
-            continue
-        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
-        if not rows:
-            continue
-        present = {r["level"] for r in rows}
-        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=args.k)
-        for gname, grouping in variants.items():
-            restricted, orphans = apply_to(grouping, present)
-            if orphans:
-                # Never invent a home for a level: say so and move on, so a
-                # vocabulary that has drifted is visible rather than absorbed.
-                logger.warning("   %s/%s: levels not in the grouping, "
-                               "EXCLUDED FROM THIS ROW: %s", col, gname,
-                               ", ".join(orphans))
-            groups = merge_centroids(rows, grouping=restricted)
-            if len(groups) < 2:
-                continue
-            agree = (merge_agreement(counts, names_c, grouping=restricted)
-                     if len(names_c) else {})
-            order = sorted(groups)
-            widest = max(((a, b) for a in order for b in order if a < b),
-                         key=lambda ab: np.linalg.norm(
-                             groups[ab[0]]["centroid"]
-                             - groups[ab[1]]["centroid"]))
-            wd = float(np.linalg.norm(groups[widest[0]]["centroid"]
-                                      - groups[widest[1]]["centroid"]))
-            logger.info("   %-34s %d groups  widest %s..%s=%.3f  "
-                        "agreement %.4f excess %.4f  n=%s",
-                        gname, len(groups), *widest, wd,
-                        agree.get("agreement", float("nan")),
-                        agree.get("excess", float("nan")),
-                        f"{sum(g['n'] for g in groups.values()):,}")
-            for name in order:
-                logger.info("        %-24s n=%11s  scatter %.3f", name,
-                            f"{groups[name]['n']:,}", groups[name]["scatter"])
-            for i, a in enumerate(order):
-                for b in order[i + 1:]:
-                    d = float(np.linalg.norm(groups[a]["centroid"]
-                                             - groups[b]["centroid"]))
-                    width = (groups[a]["scatter"] + groups[b]["scatter"]) / 2
-                    grouped_rows.append({
-                        "label": col, "grouping": gname, "from": a, "to": b,
-                        "distance": d,
-                        "over_scatter": d / width if width else "",
-                        "n_from": groups[a]["n"], "n_to": groups[b]["n"],
-                        "knn_agreement": agree.get("agreement", ""),
-                        "knn_excess": agree.get("excess", ""),
-                        "excluded_levels": ";".join(
-                            sorted(k for k, v in restricted.items()
-                                   if v is None)) or "",
-                        "orphan_levels": ";".join(orphans)})
-
+    # ── 4b/4c. geometry, statistics, and the declared groupings ─────────────
+    # The body lives in geometry_tables() above so it can be tested without
+    # a GPU: it takes an array and a dict of object arrays and nothing else.
+    tables = geometry_tables(mu_gauss, meta, k=args.k,
+                             severity_column=SEVERITY_FINE)
     # ── 5. NMI and ARI — a differently-built check on the same question ──────
     # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster
     # first and then compare to the labels, so they fail in different ways.
@@ -806,24 +621,24 @@ def main() -> None:
     logger.info("Written to %s", path)
 
     # ── the merge inputs ────────────────────────────────────────────────────
-    # Four tables beside validation.csv. validation.csv is one scalar per row
+    # Six tables beside validation.csv. validation.csv is one scalar per row
     # and none of these is a scalar; more importantly, these are what a
     # regrouping reads, so they are the files that keep this job from having
-    # to run again. scripts/merge_labels.py consumes them on a login node.
+    # to run again. scripts/merge_labels.py consumes them on bbdefault.
     for name, data, fields in (
-        ("level_statistics.csv", stat_rows,
+        ("level_statistics.csv", tables["level_statistics"],
          ["label", "donor", "level", "n", "sumsq"]
          + [f"dim{d}" for d in range(mu_gauss.shape[1])]),
-        ("centroid_distances.csv", distance_rows,
+        ("centroid_distances.csv", tables["centroid_distances"],
          ["label", "from", "to", "distance", "distance_over_scale",
           "n_from", "n_to", "scatter_from", "scatter_to"]),
-        ("neighbour_counts.csv", count_rows,
+        ("neighbour_counts.csv", tables["neighbour_counts"],
          ["label", "own", "neighbour", "count"]),
-        ("donor_adjacency.csv", adjacency_rows,
+        ("donor_adjacency.csv", tables["donor_adjacency"],
          ["label", "from_donor", "to_donor", "count"]),
-        ("donor_levels.csv", donor_level_rows,
+        ("donor_levels.csv", tables["donor_levels"],
          ["label", "donor", "level", "n_cells"]),
-        ("grouped_distances.csv", grouped_rows,
+        ("grouped_distances.csv", tables["grouped_distances"],
          ["label", "grouping", "from", "to", "distance", "over_scatter",
           "n_from", "n_to", "knn_agreement", "knn_excess",
           "excluded_levels", "orphan_levels"]),
@@ -870,6 +685,220 @@ def main() -> None:
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("  05_cross_donor skipped (%s: %s)",
                        type(exc).__name__, exc)
+
+
+def geometry_tables(mu_gauss, meta, k: int = 30,
+                    severity_column: str = None) -> dict:
+    """Every table a regrouping could need, from a latent and its metadata.
+
+    EXTRACTED FROM main() SO IT CAN BE TESTED WITHOUT A GPU. It needs an
+    array and a dict of object arrays -- no model, no checkpoint, no
+    corpus -- so test_validate_tables.py drives it with the real label
+    spellings out of label_survey.csv and catches the failures that would
+    otherwise surface twelve hours into a cluster job.
+
+    Returns one list of dict rows per output file, keyed by the file's
+    stem. Writing them is the caller's business.
+    """
+    import numpy as np
+
+    severity_column = severity_column or SEVERITY_FINE
+    # ── 4b. GEOMETRY, and the statistics every later regrouping needs ───────
+    # Everything above asks whether a label is RECOVERABLE. This asks what the
+    # latent SAYS once cells are grouped: where each group sits, and how far
+    # apart. PLAIN EUCLIDEAN DISTANCE between level centroids, reported beside
+    # the latent's own RMS radius so a distance of 1.2 can be read as large or
+    # small. The latent has a standard-normal prior, so its dimensions are
+    # commensurate and Euclidean needs no reweighting.
+    #
+    # NO SUMMARY STATISTIC IS COMMITTED TO HERE. An earlier version wrote
+    # Somers' D over the ordering and nothing else, which answered one narrow
+    # question -- does distance grow with ordinal separation -- and threw away
+    # which levels sit near which, whether the arrangement is a line or a loop,
+    # and everything a different question would want. The matrix is the result;
+    # a summary is one CPU line away from it, and `ordinal_monotonicity` is
+    # still there for whoever wants that particular one.
+    #
+    # AND THE STATISTICS GO OUT AT THE FINEST GRANULARITY THE LABELS CARRY, so
+    # no regrouping ever needs this job again. Three files: per-(donor, level)
+    # sums, raw level x level neighbour counts, and the donor x donor
+    # cross-donor counts. Centroid geometry and kNN agreement at any grouping
+    # follow from them by addition, exactly. The cross-donor statistic does
+    # NOT reproduce exactly -- the matrix supports a pooled estimator and the
+    # benchmark averages a per-cell fraction, which differed by 0.024 at a 10x
+    # spread in donor size -- so the matrix is for choosing a grouping cheaply
+    # and the chosen one still earns one GPU pass. test_sufficient_stats.py
+    # pins all of that.
+    logger.info("── 4b. geometry: Euclidean distance between level centroids")
+    from endo_model.evaluation.latent_validation import _is_labelled
+    from endo_model.evaluation.sufficient_stats import (
+        donor_adjacency, level_statistics, merge_centroids, neighbour_counts,
+    )
+
+    geometry_labels = [
+        "cell family", "menstrual phase", severity_column,
+        "Endometriosis_stage", "EndometriosisGrade", "disease_status",
+        "MenstrualCyclePhase", "MenstrualCyclePhase_main", "phase",
+        "AnnotationMain", "AnnotationRefined",
+    ]
+    stat_rows: list[dict] = []
+    distance_rows: list[dict] = []
+    count_rows: list[dict] = []
+    for col in geometry_labels:
+        if col not in meta:
+            continue
+        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
+        if not rows:
+            continue
+        for r in rows:
+            stat_rows.append({"label": col, **r})
+
+        groups = merge_centroids(rows, by="level")
+        if len(groups) < 2:
+            continue
+        scale = float(np.sqrt((mu_gauss.astype(float) ** 2).sum(1).mean()))
+        order = sorted(groups)
+        for a in order:
+            for b in order:
+                d = float(np.linalg.norm(groups[a]["centroid"]
+                                         - groups[b]["centroid"]))
+                distance_rows.append({
+                    "label": col, "from": a, "to": b, "distance": d,
+                    "distance_over_scale": d / scale if scale else float("nan"),
+                    "n_from": groups[a]["n"], "n_to": groups[b]["n"],
+                    "scatter_from": groups[a]["scatter"],
+                    "scatter_to": groups[b]["scatter"]})
+        widest = max(
+            ((a, b) for a in order for b in order if a < b),
+            key=lambda ab: np.linalg.norm(groups[ab[0]]["centroid"]
+                                          - groups[ab[1]]["centroid"]))
+        logger.info(
+            "   %-30s %2d levels  widest pair %s..%s = %.3f  "
+            "(latent radius %.3f, mean within-level scatter %.3f)",
+            col, len(groups), *widest,
+            float(np.linalg.norm(groups[widest[0]]["centroid"]
+                                 - groups[widest[1]]["centroid"])),
+            scale, float(np.mean([g["scatter"] for g in groups.values()])))
+
+        # Raw neighbour counts, for agreement at any grouping.
+        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=k)
+        for i, a in enumerate(names_c):
+            for j, b in enumerate(names_c):
+                count_rows.append({"label": col, "own": a, "neighbour": b,
+                                   "count": int(counts[i, j])})
+
+    # The donor x donor matrix, once per label whose cells differ. Written for
+    # the labels where the cross-donor test is the question being asked.
+    adjacency_rows: list[dict] = []
+    donor_level_rows: list[dict] = []
+    for col in ("menstrual phase", severity_column, "disease_status",
+                "cell family"):
+        if col not in meta:
+            continue
+        mask = np.array([_is_labelled(v) for v in meta[col]])
+        if mask.sum() < 200:
+            continue
+        adj, dnames = donor_adjacency(mu_gauss, meta["patient_id"],
+                                      labelled_mask=mask,
+                                      k=max(k, 100))
+        if not dnames:
+            continue
+        logger.info("   %-30s donor matrix %d x %d, %d relations",
+                    col, len(dnames), len(dnames), int(adj.sum()))
+        for i, a in enumerate(dnames):
+            for j, b in enumerate(dnames):
+                if adj[i, j]:
+                    adjacency_rows.append({"label": col, "from_donor": a,
+                                           "to_donor": b,
+                                           "count": int(adj[i, j])})
+        # Each donor's level, so the merge step can map donors to any
+        # grouping. Its own table: a sentinel row inside the counts would be
+        # one more thing for a reader to know about.
+        pid_str = np.asarray(meta["patient_id"]).astype(str)
+        for donor in dnames:
+            sel = np.flatnonzero((pid_str == donor) & mask)
+            if sel.size:
+                donor_level_rows.append({"label": col, "donor": donor,
+                                         "level": str(meta[col][sel[0]]),
+                                         "n_cells": int(sel.size)})
+
+    # ── 4c. the declared groupings, applied here rather than in a second job ─
+    # The statistics above are what keeps any grouping possible. They are not
+    # a reason to make someone run a second job for the obvious ones, so every
+    # grouping in evaluation/groupings.py is applied now and written beside
+    # them. scripts/merge_labels.py is for groupings nobody has thought of.
+    #
+    # WHERE A JUDGEMENT IS OPEN, EVERY VARIANT RUNS. Folding nine menstrual
+    # phases into three is additive for eight of them and not for `menstrual`,
+    # which is the state before the three rather than one of them. So all
+    # three readings are computed -- its own level, folded into proliferative,
+    # excluded -- and which is the result is a person's call made against
+    # three numbers instead of before any.
+    logger.info("── 4c. declared groupings")
+    from endo_model.evaluation.groupings import GROUPINGS, apply_to
+    from endo_model.evaluation.sufficient_stats import merge_agreement
+
+    grouped_rows: list[dict] = []
+    for col, variants in GROUPINGS.items():
+        if col not in meta:
+            continue
+        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
+        if not rows:
+            continue
+        present = {r["level"] for r in rows}
+        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=k)
+        for gname, grouping in variants.items():
+            restricted, orphans = apply_to(grouping, present)
+            if orphans:
+                # Never invent a home for a level: say so and move on, so a
+                # vocabulary that has drifted is visible rather than absorbed.
+                logger.warning("   %s/%s: levels not in the grouping, "
+                               "EXCLUDED FROM THIS ROW: %s", col, gname,
+                               ", ".join(orphans))
+            groups = merge_centroids(rows, grouping=restricted)
+            if len(groups) < 2:
+                continue
+            agree = (merge_agreement(counts, names_c, grouping=restricted)
+                     if len(names_c) else {})
+            order = sorted(groups)
+            widest = max(((a, b) for a in order for b in order if a < b),
+                         key=lambda ab: np.linalg.norm(
+                             groups[ab[0]]["centroid"]
+                             - groups[ab[1]]["centroid"]))
+            wd = float(np.linalg.norm(groups[widest[0]]["centroid"]
+                                      - groups[widest[1]]["centroid"]))
+            logger.info("   %-34s %d groups  widest %s..%s=%.3f  "
+                        "agreement %.4f excess %.4f  n=%s",
+                        gname, len(groups), *widest, wd,
+                        agree.get("agreement", float("nan")),
+                        agree.get("excess", float("nan")),
+                        f"{sum(g['n'] for g in groups.values()):,}")
+            for name in order:
+                logger.info("        %-24s n=%11s  scatter %.3f", name,
+                            f"{groups[name]['n']:,}", groups[name]["scatter"])
+            for i, a in enumerate(order):
+                for b in order[i + 1:]:
+                    d = float(np.linalg.norm(groups[a]["centroid"]
+                                             - groups[b]["centroid"]))
+                    width = (groups[a]["scatter"] + groups[b]["scatter"]) / 2
+                    grouped_rows.append({
+                        "label": col, "grouping": gname, "from": a, "to": b,
+                        "distance": d,
+                        "over_scatter": d / width if width else "",
+                        "n_from": groups[a]["n"], "n_to": groups[b]["n"],
+                        "knn_agreement": agree.get("agreement", ""),
+                        "knn_excess": agree.get("excess", ""),
+                        "excluded_levels": ";".join(
+                            sorted(k for k, v in restricted.items()
+                                   if v is None)) or "",
+                        "orphan_levels": ";".join(orphans)})
+
+    return {"level_statistics": stat_rows,
+            "centroid_distances": distance_rows,
+            "neighbour_counts": count_rows,
+            "donor_adjacency": adjacency_rows,
+            "donor_levels": donor_level_rows,
+            "grouped_distances": grouped_rows}
 
 
 def _union_severity(meta) -> "np.ndarray":

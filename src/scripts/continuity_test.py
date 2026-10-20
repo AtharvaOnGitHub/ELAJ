@@ -22,6 +22,14 @@ same label:
     A - B   the label information destroyed by replacing "my neighbourhood"
             with "my cluster"
 
+AND THE SAME TWO NUMBERS FOR `study`, WHICH IS WHY THIS ANSWERS MORE THAN THE
+CONTINUITY QUESTION. A latent whose Leiden partition predicts study well and
+cell family badly has not lost the biology; its clustering has found the batch
+instead. That is visible in the UMAPs -- the w_kl_gauss 1 arms fragment into
+single-study islands while the w_kl_gauss 30 arms form study-mixed blobs --
+and it is the one candidate explanation for the NMI spread that has not been
+tested and rejected.
+
 A is local and B is global, and the gap between them is exactly the quantity
 the word "continuity" was standing in for. A latent whose classes grade into
 one another with no gaps has a large gap: every neighbourhood is right, and no
@@ -73,11 +81,22 @@ logger = logging.getLogger("elaj.continuity")
 #: to be read across the sweep rather than at one point.
 RESOLUTIONS = (0.25, 0.5, 1.0, 2.0)
 
-#: Labels worth asking about. Cell family is the one scIB scores, so it is the
-#: one that makes our NMI look bad and the one the claim has to survive.
-#: Menstrual phase is the paper's biological axis and is donor-constant, so it
-#: should behave differently -- that contrast is itself informative.
-LABELS = ("cell family", "menstrual phase")
+#: Labels worth asking about.
+#:
+#: `cell family` is the one scIB scores, so it is the one that makes our NMI
+#: look bad and the one the claim has to survive. `menstrual phase` is the
+#: paper's biological axis and is donor-constant, so it should behave
+#: differently -- that contrast is itself informative.
+#:
+#: `study` IS NOT A BIOLOGICAL LABEL AND IS THE POINT. The UMAPs of the
+#: w_kl_gauss 1 arms fragment into islands that are single-study coloured,
+#: while the w_kl_gauss 30 arms form smooth study-mixed blobs. If Leiden on a
+#: cheap-latent arm is partitioning by STUDY rather than by cell type, its low
+#: NMI against cell family says the clustering found something else, not that
+#: the latent lacks biology. Cluster-majority accuracy for study answers that
+#: directly, and the kNN-based study_mixing number cannot: it asks about
+#: neighbourhoods, and this asks what the PARTITION aligns with.
+LABELS = ("cell family", "menstrual phase", "study")
 
 K_NEIGHBOURS = 30
 
@@ -233,7 +252,13 @@ def main() -> None:
         logger.info("%s: %d cells x %d dims",
                     external.method, len(external.row_index), external.width)
         for label in args.labels:
-            column = corpus.meta.get(label)
+            if label == "study":
+                # Not a harmonised obs column: it is the corpus's own batch
+                # key, and the names make the output readable.
+                column = np.array([corpus.study_name(int(s))
+                                   for s in corpus.study_id], dtype=object)
+            else:
+                column = corpus.meta.get(label)
             if column is None:
                 logger.warning("  %s not in the corpus metadata; skipped", label)
                 continue

@@ -14,12 +14,11 @@ would put cross-donor family (0.95-0.99) on the same scale as Leiden NMI
 (0.05-0.86), and every family bar would read as identical while the NMI bars
 carried the whole picture. Each metric gets its own panel and its own y-range.
 
-RAW VALUES, NEVER FLIPPED. Three of these metrics are better when LOW. The
-tempting fix is to plot 1 - x so every bar points the same way, and it is a
-bad one: a reader who checks a bar against the table finds a different number.
-The direction is carried in the panel title instead, and the lower-is-better
-panels are drawn in a different bar style so the difference survives a
-black-and-white print.
+EVERY PANEL POINTS THE SAME WAY, and two get there by plotting a complement.
+That is safe only because the transform is named in the axis title --
+"Donor blindness (1 - patient kNN)" -- rather than applied silently. A reader
+cross-checking against SCOREBOARD, which reports the raw lower-is-better form,
+can then invert rather than finding two numbers that disagree.
 
 COLOUR IS THE FAMILY, matching the frontier figures, so the two sets of
 figures can be read together.
@@ -47,9 +46,9 @@ logger = logging.getLogger("elaj.bars")
 #: reports the raw, lower-is-better form -- can invert in their head rather
 #: than finding two numbers that disagree.
 #:
-#: The hatching now marks "this is the complement", which is the thing that
-#: needs flagging, rather than "lower is better", which no longer applies to
-#: anything on the figure.
+#: The axis title is the only place the transform is announced, and that is
+#: enough: every panel points the same way, so there is no direction left for
+#: a second visual channel to disambiguate.
 PANELS_MAIN = [
     ("xdonor_family", "Cell family, cross-donor", False),
     ("xdonor_phase", "Menstrual phase, cross-donor", False),
@@ -117,8 +116,7 @@ def bar_figure(points, title: str, note: str = ""):
         x = np.arange(len(have))
         # Hatching, not colour, carries direction: it survives greyscale.
         bars = ax.bar(x, values, color=colours, edgecolor=PALETTE.paper,
-                      linewidth=0.8,
-                      hatch=("///" if complement else None))
+                      linewidth=0.8)
         ax.set_title(f"{label}  ↑", fontsize=10, color=PALETTE.ink)
         ax.set_xticks(x)
         ax.set_xticklabels([p.label for p in have], rotation=45,
@@ -194,7 +192,7 @@ def ceiling_figure(points, title: str):
         colours = [getattr(PALETTE, FAMILIES[f][1]) for f, _ in picks]
         x = np.arange(len(picks))
         bars = ax.bar(x, values, color=colours, edgecolor=PALETTE.paper,
-                      linewidth=0.8, hatch=("///" if complement else None))
+                      linewidth=0.8)
         ax.set_title(f"{label}  ↑", fontsize=10, color=PALETTE.ink)
         # THE MODEL NAME GOES UNDER THE FAMILY NAME, not inside the bar. In
         # the bar it collided with the value label on every short bar, which

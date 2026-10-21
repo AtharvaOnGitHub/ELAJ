@@ -211,6 +211,7 @@ def neighbour_confusion(
     biology to interpret.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     labels = np.asarray(labels)
     keep = np.array([_is_labelled(v) for v in labels])
@@ -224,7 +225,8 @@ def neighbour_confusion(
 
     names, codes = np.unique(labels[keep].astype(str), return_inverse=True)
     kk = min(k, len(lat) - 1)
-    _, idx = NearestNeighbors(n_neighbors=kk + 1).fit(lat).kneighbors(lat)
+    _, idx = NearestNeighbors(n_neighbors=kk + 1,
+                              n_jobs=n_jobs()).fit(lat).kneighbors(lat)
     neighbour_codes = codes[idx[:, 1:]]          # own cell dropped
 
     matrix = np.zeros((len(names), len(names)), dtype=float)
@@ -382,6 +384,7 @@ def cross_group_agreement(
     it, an excess of 0.2 on nine donors cannot be told from noise.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     labels = np.asarray(labels)
     groups = np.asarray(groups)
@@ -395,7 +398,7 @@ def cross_group_agreement(
     grp = _encode(groups[keep].astype(str))
 
     kk = min(k, len(lat) - 1)
-    nn = NearestNeighbors(n_neighbors=kk + 1).fit(lat)
+    nn = NearestNeighbors(n_neighbors=kk + 1, n_jobs=n_jobs()).fit(lat)
     _, idx = nn.kneighbors(lat)
     neigh = idx[:, 1:]
 

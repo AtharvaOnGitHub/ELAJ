@@ -93,6 +93,7 @@ def _compute_via_scib_metrics(
     import scib_metrics as sm
     from scib_metrics.nearest_neighbors import NeighborsResults
     import sklearn.neighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     X = np.ascontiguousarray(embeddings, dtype=np.float32)
     batches = batch_labels.astype(str)
@@ -101,7 +102,8 @@ def _compute_via_scib_metrics(
     # scib-metrics wants each cell's neighbours INCLUDING itself as the
     # first column, which is what a query against the fitted set returns.
     k = min(n_neighbors + 1, X.shape[0])
-    nn = sklearn.neighbors.NearestNeighbors(n_neighbors=k).fit(X)
+    nn = sklearn.neighbors.NearestNeighbors(n_neighbors=k,
+                                            n_jobs=n_jobs()).fit(X)
     distances, indices = nn.kneighbors(X)
     knn = NeighborsResults(indices=indices, distances=distances)
 

@@ -134,6 +134,7 @@ def intrinsic_dimension(points: np.ndarray, seed: int = 24,
     90% of the sample and the estimator silently returned NaN.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     x = np.asarray(points, dtype=float)
     x = x[np.isfinite(x).all(axis=1)]
@@ -145,7 +146,8 @@ def intrinsic_dimension(points: np.ndarray, seed: int = 24,
     if len(x) > max_points:
         x = x[rng.choice(len(x), max_points, replace=False)]
 
-    dist, _ = NearestNeighbors(n_neighbors=3).fit(x).kneighbors(x)
+    dist, _ = NearestNeighbors(n_neighbors=3,
+                               n_jobs=n_jobs()).fit(x).kneighbors(x)
     r1, r2 = dist[:, 1], dist[:, 2]
     ok = (r1 > 0) & (r2 > r1 * (1.0 + 1e-9))
     if ok.sum() < 10:

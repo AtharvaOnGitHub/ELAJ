@@ -146,6 +146,7 @@ def own_study_share(
     neighbours at all.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     latent = project(latent, n_components, seed)
     n = len(latent)
@@ -153,7 +154,7 @@ def own_study_share(
     if k < 1:
         return None
 
-    nn = NearestNeighbors(n_neighbors=k + 1).fit(latent)
+    nn = NearestNeighbors(n_neighbors=k + 1, n_jobs=n_jobs()).fit(latent)
     _, idx = nn.kneighbors(latent)
     neighbours = idx[:, 1:]                       # drop self
     return (study_id[neighbours] == study_id[:, None]).mean(axis=1)

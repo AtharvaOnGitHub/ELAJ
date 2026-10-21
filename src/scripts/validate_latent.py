@@ -508,13 +508,24 @@ def main() -> None:
         # arm has n_circular 0.
         del branches["circular"]
         del branches["combined"]
-    logger.info("── 3. biological labels — kNN agreement, per latent half")
+    logger.info("── 3. kNN agreement for the labels section 4b does not cover")
     logger.info("   (branch widths: gaussian %d, circular %d, scored: %s)",
                 mu_gauss.shape[1], circ.shape[1], ", ".join(branches))
     dims = args.dims or None
-    # The harmonised columns first: they span two studies, so they carry the
-    # most cells and the only cross-study evidence on this page.
-    for col in HARMONISED + [SEVERITY_FINE] + BIOLOGY_LABELS + ["patient_id"]:
+    # ONLY THE LABELS 4b DOES NOT REACH. Every label in geometry_tables gets
+    # its agreement DERIVED from that section's neighbour counts, which is
+    # exact to 1e-9 and costs nothing once the search has run. Measuring it
+    # again here was the single largest cost in job 58239008: 8h48m, of which
+    # disease_status and patient_id at 1.58 M cells were 2h51m each.
+    #
+    # patient_id stays, because donor identity is a headline metric and its
+    # 269 levels are not a grouping anyone regroups. The rest of this list is
+    # the study-specific cell-type columns 4b has no grouping for.
+    covered = {"cell family", "menstrual phase", SEVERITY_FINE,
+               "Endometriosis_stage", "EndometriosisGrade", "disease_status",
+               "MenstrualCyclePhase", "MenstrualCyclePhase_main", "phase",
+               "AnnotationMain", "AnnotationRefined"}
+    for col in [c for c in BIOLOGY_LABELS if c not in covered] + ["patient_id"]:
         first = True
         for bname, lat in branches.items():
             res = label_knn_agreement(lat, meta[col], k=args.k, n_components=dims)
@@ -534,9 +545,20 @@ def main() -> None:
     # like: each donor carries one phase and one grade, so both come for free.
     # Excluding a cell's own donor removes that shortcut.
     logger.info("── 4. cross-donor: same test, same-donor neighbours discarded")
+    # LABELS CONSTANT WITHIN A DONOR ONLY. `phase` is gone from this list:
+    # it is CELL CYCLE, it varies within every donor, and the run showed what
+    # that does -- "Only 1 distinct label assignments over 58 groups", a null
+    # that cannot move, three minutes spent to print excess=57.2% at p=1.000.
+    # The estimator assigns each donor one label, so a within-donor label
+    # makes every donor identical and the test meaningless.
+    #
+    # disease_status is also gone: at 1.58 M cells its search was costing
+    # about three hours and the job died inside it. Control-versus-eutopic is
+    # measured properly by the benchmark's disease_contrast, restricted to
+    # endometrium and run within a study, which is the non-circular form of
+    # that question.
     for col in HARMONISED + [SEVERITY_FINE, "EndometriosisGrade",
-                             "Endometriosis_stage", "phase",
-                             "disease_status"]:
+                             "Endometriosis_stage"]:
         cross_donor_results.setdefault(col, {})
         for bname, lat in branches.items():
             res = cross_group_agreement(lat, meta[col], meta["patient_id"],
@@ -575,8 +597,20 @@ def main() -> None:
     # ── 4b/4c. geometry, statistics, and the declared groupings ─────────────
     # The body lives in geometry_tables() above so it can be tested without
     # a GPU: it takes an array and a dict of object arrays and nothing else.
+    # WRITTEN AS THEY BECOME TRUE, not at the end. Job 58239008 did eleven
+    # hours of work and left no file: it was killed before this section ran.
+    # geometry_tables calls back after the free tables and after each label's
+    # search, so a kill now costs the searches still outstanding and nothing
+    # already computed.
+    early_out = Path(args.out) if args.out else run_dir
+    early_out.mkdir(parents=True, exist_ok=True)
+
+    def _flush(partial):
+        _write_tables(early_out, partial, mu_gauss.shape[1])
+
     tables = geometry_tables(mu_gauss, meta, k=args.k,
-                             severity_column=SEVERITY_FINE)
+                             severity_column=SEVERITY_FINE,
+                             on_progress=_flush)
     # ── 5. NMI and ARI — a differently-built check on the same question ──────
     # kNN agreement asks "are a cell's neighbours like it". NMI and ARI cluster
     # first and then compare to the labels, so they fail in different ways.
@@ -621,36 +655,10 @@ def main() -> None:
     logger.info("Written to %s", path)
 
     # ── the merge inputs ────────────────────────────────────────────────────
-    # Six tables beside validation.csv. validation.csv is one scalar per row
-    # and none of these is a scalar; more importantly, these are what a
-    # regrouping reads, so they are the files that keep this job from having
-    # to run again. scripts/merge_labels.py consumes them on bbdefault.
-    for name, data, fields in (
-        ("level_statistics.csv", tables["level_statistics"],
-         ["label", "donor", "level", "n", "sumsq"]
-         + [f"dim{d}" for d in range(mu_gauss.shape[1])]),
-        ("centroid_distances.csv", tables["centroid_distances"],
-         ["label", "from", "to", "distance", "distance_over_scale",
-          "n_from", "n_to", "scatter_from", "scatter_to"]),
-        ("neighbour_counts.csv", tables["neighbour_counts"],
-         ["label", "own", "neighbour", "count"]),
-        ("donor_adjacency.csv", tables["donor_adjacency"],
-         ["label", "from_donor", "to_donor", "count"]),
-        ("donor_levels.csv", tables["donor_levels"],
-         ["label", "donor", "level", "n_cells"]),
-        ("grouped_distances.csv", tables["grouped_distances"],
-         ["label", "grouping", "from", "to", "distance", "over_scatter",
-          "n_from", "n_to", "knn_agreement", "knn_excess",
-          "excluded_levels", "orphan_levels"]),
-    ):
-        if not data:
-            continue
-        dest = out / name
-        with open(dest, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(data)
-        logger.info("Written to %s (%d rows)", dest, len(data))
+    # Written here AND incrementally during section 4b, so this final call is
+    # a no-op restatement when the job completes and the only copy when it
+    # does not.
+    _write_tables(out, tables, mu_gauss.shape[1])
 
     if args.no_figures:
         return
@@ -687,218 +695,248 @@ def main() -> None:
                        type(exc).__name__, exc)
 
 
-def geometry_tables(mu_gauss, meta, k: int = 30,
-                    severity_column: str = None) -> dict:
+def _write_tables(out, tables, n_dims: int) -> None:
+    """The merge inputs, written wherever they are currently true.
+
+    CALLED REPEATEDLY, ON PURPOSE. Job 58239008 spent eleven hours on a
+    1.58 M-cell corpus and was killed before any of these existed. Each call
+    rewrites whatever tables have content, so the cost of a walltime kill is
+    the work still outstanding rather than all of it.
+
+    validation.csv is not here: it is one scalar per row and holds a different
+    kind of thing. These are what scripts/merge_labels.py reads.
+    """
+    import csv as _csv
+
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    schema = (
+        ("level_statistics.csv", "level_statistics",
+         ["label", "donor", "level", "n", "sumsq"]
+         + [f"dim{d}" for d in range(n_dims)]),
+        ("centroid_distances.csv", "centroid_distances",
+         ["label", "from", "to", "distance", "distance_over_scale",
+          "n_from", "n_to", "scatter_from", "scatter_to"]),
+        ("neighbour_counts.csv", "neighbour_counts",
+         ["label", "own", "neighbour", "count"]),
+        ("donor_adjacency.csv", "donor_adjacency",
+         ["label", "from_donor", "to_donor", "count"]),
+        ("donor_levels.csv", "donor_levels",
+         ["label", "donor", "level", "n_cells"]),
+        ("grouped_distances.csv", "grouped_distances",
+         ["label", "grouping", "from", "to", "distance", "over_scatter",
+          "n_from", "n_to", "excluded_levels", "orphan_levels"]),
+        ("grouped_agreement.csv", "grouped_agreement",
+         ["label", "grouping", "agreement", "chance", "excess", "n_levels"]),
+    )
+    for name, key, fields in schema:
+        data = tables.get(key) or []
+        if not data:
+            continue
+        dest = out / name
+        with open(dest, "w", newline="", encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(data)
+        logger.info("   wrote %s (%d rows)", dest.name, len(data))
+
+
+def geometry_tables(mu_gauss, meta, k: int = 30, severity_column=None,
+                    on_progress=None) -> dict:
     """Every table a regrouping could need, from a latent and its metadata.
 
-    EXTRACTED FROM main() SO IT CAN BE TESTED WITHOUT A GPU. It needs an
-    array and a dict of object arrays -- no model, no checkpoint, no
-    corpus -- so test_validate_tables.py drives it with the real label
-    spellings out of label_survey.csv and catches the failures that would
-    otherwise surface twelve hours into a cluster job.
+    EXTRACTED FROM main() SO IT CAN BE TESTED WITHOUT A GPU. It needs an array
+    and a dict of object arrays -- no model, no checkpoint, no corpus -- so
+    test_validate_tables.py drives it with the real label spellings out of
+    label_survey.csv.
 
-    Returns one list of dict rows per output file, keyed by the file's
-    stem. Writing them is the caller's business.
+    ── ORDERED BY COST, AFTER A JOB DIED WITH NOTHING WRITTEN ──────────────
+    Job 58239008 embedded 1.58 M cells, spent 8h48m on neighbour searches and
+    2h22m on the cross-donor battery, and was killed on walltime before this
+    function ran at all. Eleven hours of work and not one of its files
+    existed. Two things follow, and both are structural rather than a matter
+    of asking for more time:
+
+    THE FREE TABLES COME FIRST. Per-(donor, level) sums and the centroid
+    distances derived from them need no neighbour search -- they are additions
+    over cells -- and they are the tables that make every later regrouping
+    possible. They are built and handed to `on_progress` before anything
+    expensive begins, so a kill costs the searches and not the statistics.
+
+    ONE SEARCH PER LABEL, NOT THREE. The run searched once for
+    `label_knn_agreement`, once for the level counts and once for the donor
+    counts, over the same cells. All three read off one graph: see
+    `sufficient_stats.neighbour_tables`. kNN agreement is now DERIVED from the
+    level counts rather than measured separately, which was proved exact to
+    1e-9 before the change.
+
+    `on_progress(partial)` is called after the free tables and again after
+    each label's search, with everything known so far, so the caller can write
+    files as they become true.
     """
     import numpy as np
 
-    severity_column = severity_column or SEVERITY_FINE
-    # ── 4b. GEOMETRY, and the statistics every later regrouping needs ───────
-    # Everything above asks whether a label is RECOVERABLE. This asks what the
-    # latent SAYS once cells are grouped: where each group sits, and how far
-    # apart. PLAIN EUCLIDEAN DISTANCE between level centroids, reported beside
-    # the latent's own RMS radius so a distance of 1.2 can be read as large or
-    # small. The latent has a standard-normal prior, so its dimensions are
-    # commensurate and Euclidean needs no reweighting.
-    #
-    # NO SUMMARY STATISTIC IS COMMITTED TO HERE. An earlier version wrote
-    # Somers' D over the ordering and nothing else, which answered one narrow
-    # question -- does distance grow with ordinal separation -- and threw away
-    # which levels sit near which, whether the arrangement is a line or a loop,
-    # and everything a different question would want. The matrix is the result;
-    # a summary is one CPU line away from it, and `ordinal_monotonicity` is
-    # still there for whoever wants that particular one.
-    #
-    # AND THE STATISTICS GO OUT AT THE FINEST GRANULARITY THE LABELS CARRY, so
-    # no regrouping ever needs this job again. Three files: per-(donor, level)
-    # sums, raw level x level neighbour counts, and the donor x donor
-    # cross-donor counts. Centroid geometry and kNN agreement at any grouping
-    # follow from them by addition, exactly. The cross-donor statistic does
-    # NOT reproduce exactly -- the matrix supports a pooled estimator and the
-    # benchmark averages a per-cell fraction, which differed by 0.024 at a 10x
-    # spread in donor size -- so the matrix is for choosing a grouping cheaply
-    # and the chosen one still earns one GPU pass. test_sufficient_stats.py
-    # pins all of that.
-    logger.info("── 4b. geometry: Euclidean distance between level centroids")
+    from endo_model.evaluation.groupings import GROUPINGS, apply_to
     from endo_model.evaluation.latent_validation import _is_labelled
     from endo_model.evaluation.sufficient_stats import (
-        donor_adjacency, level_statistics, merge_centroids, neighbour_counts,
+        merge_agreement, merge_centroids, level_statistics, neighbour_tables,
     )
 
-    geometry_labels = [
+    severity_column = severity_column or SEVERITY_FINE
+    tables: dict[str, list] = {
+        "level_statistics": [], "centroid_distances": [],
+        "neighbour_counts": [], "donor_adjacency": [], "donor_levels": [],
+        "grouped_distances": [], "grouped_agreement": [],
+    }
+
+    labels = [c for c in (
         "cell family", "menstrual phase", severity_column,
         "Endometriosis_stage", "EndometriosisGrade", "disease_status",
         "MenstrualCyclePhase", "MenstrualCyclePhase_main", "phase",
-        "AnnotationMain", "AnnotationRefined",
-    ]
-    stat_rows: list[dict] = []
-    distance_rows: list[dict] = []
-    count_rows: list[dict] = []
-    for col in geometry_labels:
-        if col not in meta:
-            continue
+        "AnnotationMain", "AnnotationRefined") if c in meta]
+    scale = float(np.sqrt((mu_gauss.astype(float) ** 2).sum(1).mean()))
+
+    # ── free: sums, centroids, distances, and every declared grouping ───────
+    logger.info("── 4a. statistics and centroid geometry (no neighbour search)")
+    per_label_rows: dict[str, list] = {}
+    for col in labels:
         rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
         if not rows:
             continue
-        for r in rows:
-            stat_rows.append({"label": col, **r})
+        per_label_rows[col] = rows
+        tables["level_statistics"].extend({"label": col, **r} for r in rows)
 
         groups = merge_centroids(rows, by="level")
         if len(groups) < 2:
             continue
-        scale = float(np.sqrt((mu_gauss.astype(float) ** 2).sum(1).mean()))
         order = sorted(groups)
         for a in order:
             for b in order:
                 d = float(np.linalg.norm(groups[a]["centroid"]
                                          - groups[b]["centroid"]))
-                distance_rows.append({
+                tables["centroid_distances"].append({
                     "label": col, "from": a, "to": b, "distance": d,
                     "distance_over_scale": d / scale if scale else float("nan"),
                     "n_from": groups[a]["n"], "n_to": groups[b]["n"],
                     "scatter_from": groups[a]["scatter"],
                     "scatter_to": groups[b]["scatter"]})
-        widest = max(
-            ((a, b) for a in order for b in order if a < b),
-            key=lambda ab: np.linalg.norm(groups[ab[0]]["centroid"]
-                                          - groups[ab[1]]["centroid"]))
-        logger.info(
-            "   %-30s %2d levels  widest pair %s..%s = %.3f  "
-            "(latent radius %.3f, mean within-level scatter %.3f)",
-            col, len(groups), *widest,
-            float(np.linalg.norm(groups[widest[0]]["centroid"]
-                                 - groups[widest[1]]["centroid"])),
-            scale, float(np.mean([g["scatter"] for g in groups.values()])))
+        widest = max(((a, b) for a in order for b in order if a < b),
+                     key=lambda ab: np.linalg.norm(groups[ab[0]]["centroid"]
+                                                   - groups[ab[1]]["centroid"]))
+        logger.info("   %-30s %2d levels  widest %s..%s=%.3f  "
+                    "(radius %.3f, mean scatter %.3f)", col, len(groups),
+                    *widest,
+                    float(np.linalg.norm(groups[widest[0]]["centroid"]
+                                         - groups[widest[1]]["centroid"])),
+                    scale,
+                    float(np.mean([g["scatter"] for g in groups.values()])))
 
-        # Raw neighbour counts, for agreement at any grouping.
-        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=k)
-        for i, a in enumerate(names_c):
-            for j, b in enumerate(names_c):
-                count_rows.append({"label": col, "own": a, "neighbour": b,
-                                   "count": int(counts[i, j])})
-
-    # The donor x donor matrix, once per label whose cells differ. Written for
-    # the labels where the cross-donor test is the question being asked.
-    adjacency_rows: list[dict] = []
-    donor_level_rows: list[dict] = []
-    for col in ("menstrual phase", severity_column, "disease_status",
-                "cell family"):
-        if col not in meta:
-            continue
-        mask = np.array([_is_labelled(v) for v in meta[col]])
-        if mask.sum() < 200:
-            continue
-        adj, dnames = donor_adjacency(mu_gauss, meta["patient_id"],
-                                      labelled_mask=mask,
-                                      k=max(k, 100))
-        if not dnames:
-            continue
-        logger.info("   %-30s donor matrix %d x %d, %d relations",
-                    col, len(dnames), len(dnames), int(adj.sum()))
-        for i, a in enumerate(dnames):
-            for j, b in enumerate(dnames):
-                if adj[i, j]:
-                    adjacency_rows.append({"label": col, "from_donor": a,
-                                           "to_donor": b,
-                                           "count": int(adj[i, j])})
-        # Each donor's level, so the merge step can map donors to any
-        # grouping. Its own table: a sentinel row inside the counts would be
-        # one more thing for a reader to know about.
-        pid_str = np.asarray(meta["patient_id"]).astype(str)
-        for donor in dnames:
-            sel = np.flatnonzero((pid_str == donor) & mask)
-            if sel.size:
-                donor_level_rows.append({"label": col, "donor": donor,
-                                         "level": str(meta[col][sel[0]]),
-                                         "n_cells": int(sel.size)})
-
-    # ── 4c. the declared groupings, applied here rather than in a second job ─
-    # The statistics above are what keeps any grouping possible. They are not
-    # a reason to make someone run a second job for the obvious ones, so every
-    # grouping in evaluation/groupings.py is applied now and written beside
-    # them. scripts/merge_labels.py is for groupings nobody has thought of.
-    #
-    # WHERE A JUDGEMENT IS OPEN, EVERY VARIANT RUNS. Folding nine menstrual
-    # phases into three is additive for eight of them and not for `menstrual`,
-    # which is the state before the three rather than one of them. So all
-    # three readings are computed -- its own level, folded into proliferative,
-    # excluded -- and which is the result is a person's call made against
-    # three numbers instead of before any.
-    logger.info("── 4c. declared groupings")
-    from endo_model.evaluation.groupings import GROUPINGS, apply_to
-    from endo_model.evaluation.sufficient_stats import merge_agreement
-
-    grouped_rows: list[dict] = []
-    for col, variants in GROUPINGS.items():
-        if col not in meta:
-            continue
-        rows = level_statistics(mu_gauss, meta[col], meta["patient_id"])
-        if not rows:
-            continue
-        present = {r["level"] for r in rows}
-        counts, names_c = neighbour_counts(mu_gauss, meta[col], k=k)
-        for gname, grouping in variants.items():
-            restricted, orphans = apply_to(grouping, present)
+        # The declared groupings' DISTANCES are free too; their agreement
+        # needs a search and is added in the pass below.
+        for gname, grouping in GROUPINGS.get(col, {}).items():
+            restricted, orphans = apply_to(grouping, {r["level"] for r in rows})
             if orphans:
-                # Never invent a home for a level: say so and move on, so a
-                # vocabulary that has drifted is visible rather than absorbed.
                 logger.warning("   %s/%s: levels not in the grouping, "
-                               "EXCLUDED FROM THIS ROW: %s", col, gname,
-                               ", ".join(orphans))
-            groups = merge_centroids(rows, grouping=restricted)
-            if len(groups) < 2:
+                               "EXCLUDED: %s", col, gname, ", ".join(orphans))
+            merged = merge_centroids(rows, grouping=restricted)
+            if len(merged) < 2:
                 continue
-            agree = (merge_agreement(counts, names_c, grouping=restricted)
-                     if len(names_c) else {})
-            order = sorted(groups)
-            widest = max(((a, b) for a in order for b in order if a < b),
-                         key=lambda ab: np.linalg.norm(
-                             groups[ab[0]]["centroid"]
-                             - groups[ab[1]]["centroid"]))
-            wd = float(np.linalg.norm(groups[widest[0]]["centroid"]
-                                      - groups[widest[1]]["centroid"]))
-            logger.info("   %-34s %d groups  widest %s..%s=%.3f  "
-                        "agreement %.4f excess %.4f  n=%s",
-                        gname, len(groups), *widest, wd,
-                        agree.get("agreement", float("nan")),
-                        agree.get("excess", float("nan")),
-                        f"{sum(g['n'] for g in groups.values()):,}")
-            for name in order:
-                logger.info("        %-24s n=%11s  scatter %.3f", name,
-                            f"{groups[name]['n']:,}", groups[name]["scatter"])
-            for i, a in enumerate(order):
-                for b in order[i + 1:]:
-                    d = float(np.linalg.norm(groups[a]["centroid"]
-                                             - groups[b]["centroid"]))
-                    width = (groups[a]["scatter"] + groups[b]["scatter"]) / 2
-                    grouped_rows.append({
+            gorder = sorted(merged)
+            for i, a in enumerate(gorder):
+                for b in gorder[i + 1:]:
+                    d = float(np.linalg.norm(merged[a]["centroid"]
+                                             - merged[b]["centroid"]))
+                    width = (merged[a]["scatter"] + merged[b]["scatter"]) / 2
+                    tables["grouped_distances"].append({
                         "label": col, "grouping": gname, "from": a, "to": b,
                         "distance": d,
                         "over_scatter": d / width if width else "",
-                        "n_from": groups[a]["n"], "n_to": groups[b]["n"],
-                        "knn_agreement": agree.get("agreement", ""),
-                        "knn_excess": agree.get("excess", ""),
+                        "n_from": merged[a]["n"], "n_to": merged[b]["n"],
                         "excluded_levels": ";".join(
-                            sorted(k for k, v in restricted.items()
+                            sorted(x for x, v in restricted.items()
                                    if v is None)) or "",
                         "orphan_levels": ";".join(orphans)})
+            logger.info("      %-32s %d groups  n=%s", gname, len(merged),
+                        f"{sum(g['n'] for g in merged.values()):,}")
+    if on_progress:
+        on_progress(tables)
 
-    return {"level_statistics": stat_rows,
-            "centroid_distances": distance_rows,
-            "neighbour_counts": count_rows,
-            "donor_adjacency": adjacency_rows,
-            "donor_levels": donor_level_rows,
-            "grouped_distances": grouped_rows}
+    # ── one neighbour search per label, everything else read off it ─────────
+    logger.info("── 4b. one neighbour search per label (k=%d levels, k=%d donors)",
+                k, max(k, 100))
+    for col in labels:
+        if col not in per_label_rows:
+            continue
+        lcounts, lnames, dcounts, dnames = neighbour_tables(
+            mu_gauss, meta[col], meta["patient_id"],
+            k_small=k, k_large=max(k, 100))
+        if not lnames:
+            logger.info("   %-30s too few labelled cells, skipped", col)
+            continue
+
+        agree = merge_agreement(lcounts, lnames)
+        logger.info("   %-30s n=%9s %3d levels  agreement=%.4f chance=%.4f "
+                    "excess=%.4f", col,
+                    f"{int(lcounts.sum() // max(k, 1)):,}", len(lnames),
+                    agree["agreement"], agree["chance"], agree["excess"])
+        tables["grouped_agreement"].append({
+            "label": col, "grouping": "__fine__",
+            "agreement": agree["agreement"], "chance": agree["chance"],
+            "excess": agree["excess"], "n_levels": agree["n_levels"]})
+        for i, a in enumerate(lnames):
+            for j, b in enumerate(lnames):
+                tables["neighbour_counts"].append(
+                    {"label": col, "own": a, "neighbour": b,
+                     "count": int(lcounts[i, j])})
+
+        for gname, grouping in GROUPINGS.get(col, {}).items():
+            restricted, _ = apply_to(grouping, set(lnames))
+            g = merge_agreement(lcounts, lnames, grouping=restricted)
+            if not np.isfinite(g.get("agreement", float("nan"))):
+                continue
+            logger.info("      %-32s agreement=%.4f excess=%.4f (%d groups)",
+                        gname, g["agreement"], g["excess"], g["n_levels"])
+            tables["grouped_agreement"].append({
+                "label": col, "grouping": gname,
+                "agreement": g["agreement"], "chance": g["chance"],
+                "excess": g["excess"], "n_levels": g["n_levels"]})
+
+        # Donor counts only where a label is constant within a donor: that is
+        # the premise the cross-donor estimator rests on, and the run proved
+        # what happens otherwise -- cell cycle gave "1 distinct label
+        # assignment over 58 groups", a degenerate null, because every donor
+        # carries all three phases.
+        pid = np.asarray(meta["patient_id"]).astype(str)
+        mask = np.array([_is_labelled(v) for v in meta[col]])
+        per_donor = {}
+        constant = True
+        for donor in dnames:
+            vals = {str(v) for v in np.asarray(meta[col])[mask & (pid == donor)]}
+            if len(vals) > 1:
+                constant = False
+                break
+            per_donor[donor] = vals.pop() if vals else None
+        if not constant:
+            logger.info("      varies WITHIN donors, so no donor matrix: "
+                        "the cross-donor estimator does not apply")
+            continue
+        logger.info("      donor matrix %d x %d, %d relations",
+                    len(dnames), len(dnames), int(dcounts.sum()))
+        for i, a in enumerate(dnames):
+            for j, b in enumerate(dnames):
+                if dcounts[i, j]:
+                    tables["donor_adjacency"].append(
+                        {"label": col, "from_donor": a, "to_donor": b,
+                         "count": int(dcounts[i, j])})
+        for donor, level in per_donor.items():
+            if level is not None:
+                tables["donor_levels"].append(
+                    {"label": col, "donor": donor, "level": level,
+                     "n_cells": int((mask & (pid == donor)).sum())})
+        if on_progress:
+            on_progress(tables)
+
+    return tables
 
 
 def _union_severity(meta) -> "np.ndarray":

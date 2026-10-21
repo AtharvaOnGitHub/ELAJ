@@ -198,7 +198,8 @@ def test_every_expected_table_is_produced_and_non_empty():
     latent, meta, _ = corpus()
     tables = geometry_tables(latent, with_harmonised(meta), k=15)
     for name in ("level_statistics", "centroid_distances", "neighbour_counts",
-                 "donor_adjacency", "donor_levels", "grouped_distances"):
+                 "donor_adjacency", "donor_levels", "grouped_distances",
+                 "grouped_agreement"):
         assert tables[name], f"{name} is empty"
 
 
@@ -296,8 +297,9 @@ def test_every_row_writes_cleanly_through_the_real_csv_fieldnames(tmp_path):
         "donor_levels": ["label", "donor", "level", "n_cells"],
         "grouped_distances": ["label", "grouping", "from", "to", "distance",
                               "over_scatter", "n_from", "n_to",
-                              "knn_agreement", "knn_excess",
                               "excluded_levels", "orphan_levels"],
+        "grouped_agreement": ["label", "grouping", "agreement", "chance",
+                              "excess", "n_levels"],
     }
     for name, columns in fields.items():
         extra = set().union(*(set(r) for r in tables[name])) - set(columns)
@@ -320,3 +322,65 @@ def test_a_label_absent_from_meta_is_skipped_not_fatal():
     assert tables["level_statistics"]
     assert not any(r["label"] == "AnnotationRefined"
                    for r in tables["level_statistics"])
+
+
+def test_progress_callback_fires_before_any_neighbour_search():
+    """The lesson of job 58239008: the free tables must exist early.
+
+    It embedded 1.58 M cells, spent 8h48m on neighbour searches, and was
+    killed before writing anything. The first callback must therefore carry
+    the statistics and the centroid geometry -- the tables that make every
+    later regrouping possible -- while carrying no neighbour counts at all,
+    because nothing has searched yet.
+    """
+    latent, meta, _ = corpus()
+    seen = []
+    geometry_tables(latent, with_harmonised(meta), k=15,
+                    on_progress=lambda t: seen.append(
+                        {k: len(v) for k, v in t.items()}))
+    assert len(seen) >= 2, "expected a free-tables call and per-label calls"
+    first = seen[0]
+    assert first["level_statistics"] > 0
+    assert first["centroid_distances"] > 0
+    assert first["grouped_distances"] > 0
+    assert first["neighbour_counts"] == 0, "searched before the free flush"
+    assert first["donor_adjacency"] == 0
+    # and the tables only ever grow
+    for earlier, later in zip(seen, seen[1:]):
+        for key in earlier:
+            assert later[key] >= earlier[key], key
+
+
+def test_within_donor_labels_get_no_donor_matrix():
+    """Cell cycle varies inside every donor, so the cross-donor premise fails.
+
+    The run printed "Only 1 distinct label assignments over 58 groups" for it
+    -- a null that cannot move -- because the estimator gives each donor one
+    label and every donor's is G1. A donor matrix for such a label is
+    misleading, so none is written.
+    """
+    latent, meta, _ = corpus()
+    tables = geometry_tables(latent, with_harmonised(meta), k=15)
+    with_matrix = {r["label"] for r in tables["donor_adjacency"]}
+    assert "phase" not in with_matrix          # cell cycle: within-donor
+    assert "Endometriosis_stage" in with_matrix  # constant within a donor
+
+
+def test_derived_agreement_matches_a_direct_measurement():
+    """Section 3's expensive per-label measurement is now derived from counts.
+
+    Exact to 1e-9 or the change was not free, so it is checked against
+    label_knn_agreement on the same cells rather than assumed.
+    """
+    from endo_model.evaluation.latent_validation import label_knn_agreement
+
+    latent, meta, _ = corpus()
+    meta = with_harmonised(meta)
+    tables = geometry_tables(latent, meta, k=15)
+    fine = {r["label"]: r for r in tables["grouped_agreement"]
+            if r["grouping"] == "__fine__"}
+    for label, row in fine.items():
+        direct = label_knn_agreement(latent, meta[label], k=15)
+        assert row["agreement"] == pytest.approx(direct["agreement"],
+                                                 abs=1e-9), label
+        assert row["excess"] == pytest.approx(direct["excess"], abs=1e-9), label

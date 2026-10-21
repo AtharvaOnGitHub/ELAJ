@@ -105,6 +105,7 @@ def neighbour_counts(latent: np.ndarray, labels, k: int = 30,
     would combine as if equal. These are integers.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     labels = np.asarray(labels)
     ok = _labelled(labels)
@@ -114,7 +115,8 @@ def neighbour_counts(latent: np.ndarray, labels, k: int = 30,
     lat = np.asarray(latent, dtype=float)[ok]
     names, codes = np.unique(labels[ok].astype(str), return_inverse=True)
     kk = min(k, len(lat) - 1)
-    _, idx = NearestNeighbors(n_neighbors=kk + 1).fit(lat).kneighbors(lat)
+    _, idx = NearestNeighbors(n_neighbors=kk + 1,
+                              n_jobs=n_jobs()).fit(lat).kneighbors(lat)
     neigh = codes[idx[:, 1:]]                       # own cell dropped
 
     matrix = np.zeros((len(names), len(names)), dtype=np.int64)
@@ -151,6 +153,7 @@ def donor_adjacency(latent: np.ndarray, donors, labelled_mask=None,
     for every cell.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
     donors = np.asarray(donors).astype(str)
     ok = (np.ones(len(donors), dtype=bool) if labelled_mask is None
@@ -161,7 +164,8 @@ def donor_adjacency(latent: np.ndarray, donors, labelled_mask=None,
     lat = np.asarray(latent, dtype=float)[ok]
     names, codes = np.unique(donors[ok], return_inverse=True)
     kk = min(k, len(lat) - 1)
-    _, idx = NearestNeighbors(n_neighbors=kk + 1).fit(lat).kneighbors(lat)
+    _, idx = NearestNeighbors(n_neighbors=kk + 1,
+                              n_jobs=n_jobs()).fit(lat).kneighbors(lat)
     neigh = codes[idx[:, 1:]]
 
     matrix = np.zeros((len(names), len(names)), dtype=np.int64)
@@ -308,3 +312,67 @@ def cross_donor_from_adjacency(matrix: np.ndarray, donors, donor_label,
             "n_donors": int(usable.sum()),
             "n_labels": int(len(counts)),
             "kept_fraction": float(total / max(matrix.sum(), 1.0))}
+
+
+def neighbour_tables(latent: np.ndarray, labels, donors,
+                     k_small: int = 30, k_large: int = 100):
+    """One neighbour search, every table that needs one.
+
+    WHY THIS REPLACES THREE PASSES. The full-corpus run did a neighbour search
+    per label for `label_knn_agreement`, a second for `neighbour_counts` and a
+    third for `donor_adjacency`, over the same cells. On 1.58 M cells one such
+    search costs around three hours for the widest labels, and the job died on
+    walltime with 8h48m spent in section 3 alone.
+
+    All three want the same graph. The agreement is the diagonal of the level
+    counts; the level counts at k_small are the first k_small columns of the
+    search at k_large, because kneighbors returns neighbours in distance
+    order; and the donor counts are the same indices read against donor
+    identity instead of label identity. So the search runs once at k_large and
+    everything is read off it.
+
+    The cells are those carrying the label, which is what the separate
+    functions each did, so the graph is the one they would have built.
+
+    Returns (level_counts, level_names, donor_counts, donor_names). Level
+    counts are at k_small, donor counts at k_large.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    from endo_model.evaluation.knn_backend import n_jobs
+
+    labels = np.asarray(labels)
+    donors = np.asarray(donors).astype(str)
+    ok = _labelled(labels)
+    if int(ok.sum()) < k_large + 1:
+        empty = np.empty((0, 0), dtype=np.int64)
+        return empty, [], empty, []
+
+    lat = np.asarray(latent, dtype=float)[ok]
+    lnames, lcodes = np.unique(labels[ok].astype(str), return_inverse=True)
+    dnames, dcodes = np.unique(donors[ok], return_inverse=True)
+
+    kk = min(k_large, len(lat) - 1)
+    _, idx = NearestNeighbors(n_neighbors=kk + 1,
+                              n_jobs=n_jobs()).fit(lat).kneighbors(lat)
+    idx = idx[:, 1:]                                  # own cell dropped
+    ks = min(k_small, idx.shape[1])
+
+    level_counts = np.zeros((len(lnames), len(lnames)), dtype=np.int64)
+    near_levels = lcodes[idx[:, :ks]]
+    for c in range(len(lnames)):
+        block = near_levels[lcodes == c]
+        if block.size:
+            level_counts[c] = np.bincount(block.ravel(),
+                                          minlength=len(lnames))
+
+    donor_counts = np.zeros((len(dnames), len(dnames)), dtype=np.int64)
+    near_donors = dcodes[idx]
+    for c in range(len(dnames)):
+        block = near_donors[dcodes == c]
+        if block.size:
+            donor_counts[c] = np.bincount(block.ravel(),
+                                          minlength=len(dnames))
+
+    return (level_counts, [str(n) for n in lnames],
+            donor_counts, [str(n) for n in dnames])

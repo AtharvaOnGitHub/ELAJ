@@ -110,8 +110,9 @@ def majority_from_neighbours(latent: np.ndarray, codes: np.ndarray,
     first for a query against the training set, so the first column is cut.
     """
     from sklearn.neighbors import NearestNeighbors
+    from endo_model.evaluation.knn_backend import n_jobs
 
-    nn = NearestNeighbors(n_neighbors=k + 1).fit(latent)
+    nn = NearestNeighbors(n_neighbors=k + 1, n_jobs=n_jobs()).fit(latent)
     idx = nn.kneighbors(latent, return_distance=False)[:, 1:]
     votes = codes[idx]
     n_labels = int(codes.max()) + 1

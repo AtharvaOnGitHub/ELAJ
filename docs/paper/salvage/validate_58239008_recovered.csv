@@ -1,0 +1,22 @@
+test,label,n_cells,n_levels,agreement,chance,excess,null95,p_value,neighbours_kept,k,n_donors,verdict,clock,contributing_studies
+knn-agreement,cell family,640606,4,0.994,0.638,0.983,,,,,,,00:17:10,"marecko_2024 174,848; duempelmann_2026 465,758"
+knn-agreement,menstrual phase,736312,9,0.855,0.244,0.8079999999999999,,,,,,,00:54:41,"marecko_2024 159,800; garcia_alonso_2021_a 100,096; garcia_alonso_2021_b 10,240; duempelmann_2026 466,176"
+knn-agreement,severity (study vocabularies),641024,8,0.608,0.22,0.49700000000000005,,,,,,,01:23:11,"marecko_2024 174,848; duempelmann_2026 466,176"
+knn-agreement,MenstrualCyclePhase_main,466176,3,0.851,0.369,0.763,,,,,,,01:38:15,"duempelmann_2026 466,176"
+knn-agreement,MenstrualCyclePhase,466176,5,0.843,0.341,0.7609999999999999,,,,,,,01:53:19,"duempelmann_2026 466,176"
+knn-agreement,Stage,285184,16,0.778,0.108,0.7509999999999999,,,,,,,01:59:01,"marecko_2024 174,848; garcia_alonso_2021_a 100,096; garcia_alonso_2021_b 10,240"
+knn-agreement,AnnotationMain,465758,5,0.992,0.785,0.9620000000000001,,,,,,,02:14:03,"duempelmann_2026 465,758"
+knn-agreement,AnnotationRefined,465769,63,0.684,0.304,0.546,,,,,,,02:29:05,"duempelmann_2026 465,769"
+knn-agreement,celltype,220160,45,0.843,0.07,0.8320000000000001,,,,,,,02:32:31,"marecko_2024 174,848; li_2025 45,312"
+knn-agreement,lineage,174848,4,0.998,0.398,0.997,,,,,,,02:34:42,"marecko_2024 174,848"
+knn-agreement,EndometriosisGrade,466176,3,0.52,0.34,0.273,,,,,,,02:49:46,"duempelmann_2026 466,176"
+knn-agreement,Endometriosis_stage,174848,5,0.873,0.537,0.726,,,,,,,02:51:56,"marecko_2024 174,848"
+knn-agreement,phase,174848,3,0.953,0.881,0.607,,,,,,,02:54:07,"marecko_2024 174,848"
+knn-agreement,disease_status,1577728,4,0.654,0.338,0.47700000000000004,,,,,,,05:45:08,"shih_2022 74,496; tan_2022 114,944; ferrero_2024 15,872; lin_2023 140,032; wang_2022 49,152; marecko_2024 174,848; garcia_alonso_2021_a 100,096; garcia_alonso_2021_b 10,240; fonseca_2023 386,560; li_2025 45,312; duempelmann_2026 466,176"
+knn-agreement,patient_id,1577728,269,0.327,0.006,0.32299999999999995,,,,,,,08:36:09,"shih_2022 74,496; tan_2022 114,944; ferrero_2024 15,872; lin_2023 140,032; wang_2022 49,152; marecko_2024 174,848; garcia_alonso_2021_a 100,096; garcia_alonso_2021_b 10,240; fonseca_2023 386,560; li_2025 45,312; duempelmann_2026 466,176"
+cross-donor,cell family,630689,,,,0.981,0.05,0.005,66,100,118,SIGNIFICANT,09:07:05,
+cross-donor,menstrual phase,723599,,,,0.68,-0.0,0.005,64,100,142,SIGNIFICANT,09:47:41,
+cross-donor,severity (study vocabularies),631090,,,,0.265,0.01,0.005,67,100,118,SIGNIFICANT,10:18:40,
+cross-donor,EndometriosisGrade,465391,,,,0.026000000000000002,0.08,0.408,75,100,60,not significant,10:35:19,
+cross-donor,Endometriosis_stage,164474,,,,0.332,0.03,0.005,41,100,58,SIGNIFICANT,10:38:07,
+cross-donor,phase,164474,,,,0.5720000000000001,1.0,1.0,41,100,58,UNDETECTABLE (p could not fall below 1.00),10:40:54,

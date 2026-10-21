@@ -1,0 +1,26 @@
+stage,n_cells,minutes,min_per_million_cells
+1b. cell-cycle phase against the circular latent,,0.0,
+2. continuous covariates against the latent,,0.0,
+"3. biological labels — kNN agreement, per latent half",,0.2,
+cell family,640606,28.4,44.4
+menstrual phase,736312,37.5,51.0
+severity (study vocabularies),641024,28.5,44.5
+MenstrualCyclePhase_main,466176,15.1,32.3
+MenstrualCyclePhase,466176,15.1,32.3
+Stage,285184,5.7,20.0
+AnnotationMain,465758,15.0,32.3
+AnnotationRefined,465769,15.0,32.3
+celltype,220160,3.4,15.6
+lineage,174848,2.2,12.5
+EndometriosisGrade,466176,15.1,32.3
+Endometriosis_stage,174848,2.2,12.4
+phase,174848,2.2,12.5
+disease_status,1577728,171.0,108.4
+patient_id,1577728,171.0,108.4
+"4. cross-donor: same test, same-donor neighbours discarded",,0.0,
+cell family,630689,30.9,49.0
+menstrual phase,723599,40.6,56.1
+severity (study vocabularies),631090,31.0,49.1
+EndometriosisGrade,465391,16.6,35.8
+Endometriosis_stage,164474,2.8,17.0
+phase,164474,2.8,16.9

@@ -209,20 +209,22 @@ waves, about a day and a half.
 
 ### Factual corrections, must not ship wrong
 
-- [ ] **RECALCULATE THE DONOR COUNT, or drop it.** 269 is not obsolete, it
-      is wrong: it counts CELLxGENE donor UUIDs, and one person carries one
-      per dataset. 254 was derived by subtracting the fifteen
-      `garcia_alonso_2021_b` duplicates from it, so it inherits whatever else
-      269 got wrong. Neither number may ship.
+- [x] **DONOR COUNT RESOLVED: 254, measured.** Job 58542096, 22 October 2026,
+      `check_donor_overlap.sh` over all 55 study pairs on both
+      `source_sample_id` and `patient_id`. Result: `pairs_with_overlap: 1`.
+      Only `garcia_alonso_2021_a` vs `_b` overlaps, sharing 15 of 15 samples
+      and 0 of 15 donor ids. So 269 identifiers minus those 15 duplicates is
+      the entire correction and **254 is the count of PEOPLE**. The worry that
+      269 was wrong in further ways is closed by that 1 — there are no other
+      overlapping pairs to find.
 
-          bash data_collation/scripts/check_donor_overlap.sh \
-              configs/experiment/m6_drain.yaml
-
-      Obs only, minutes on a login node. It compares every pair of studies on
-      `source_sample_id` and `patient_id`, which is what `DonorAliases`
-      resolves on, so the count it produces is the count of PEOPLE. If it
-      cannot produce one we trust, the paper says "eleven studies" and gives
-      cells, not donors
+      THE SAME RUN CORRECTED §10.4's LEAKAGE FIGURE, which matters more than
+      the count. 7 of the 15 shared samples split differently between the two
+      studies and **17,873 held-out cells** belong to a donor whose other
+      identifier is in training — 4.3% of 416,256, not the 0.7% that section
+      estimated. The old figure counted only `_b`'s side; for five of the
+      seven it is `_a`, the larger study, whose cells are held out. Stated in
+      the paper as a limitation with the measured number.
 - [ ] **GSE213216's citation is wrong.** The downloaded PDF is Pei et al.
       2023, a re-analysis that used the accession, not the original
       submission
@@ -301,7 +303,45 @@ cd /rds/homes/a/axw1008/axw1008 && sbatch data_collation/scripts/continuity_test
       bootstrap over the 36 donors, which needs the latents, so it rides on
       the same `--dump-latent` pass. **A reviewer will ask this first.**
 - [ ] one pass fits scVI so its latent exists
-- [ ] run `continuity_test.sh`
+
+### ⛔ CONTINUITY TEST — BUILT, TESTED, AND NOT BEING RUN
+
+`scripts/continuity_test.py` and its eight tests stay in the repo. They are
+not being run and no result from them goes in the paper. Recorded here so the
+decision is visible rather than looking like an oversight.
+
+It compared kNN-majority accuracy (A) against Leiden-cluster-majority accuracy
+(B) and read `A − B` as the label information that clustering destroys, with
+the intent of showing our low NMI is a clustering artefact. Four reasons that
+does not work, all raised on 22 October:
+
+1. **Leiden is one clustering among many.** Nothing makes it the biologically
+   right partition, so what the test measures is what Leiden does, not what
+   the latent holds.
+2. **A is not reliably nested inside B.** Leiden optimises modularity on a
+   kNN graph and does not produce convex or contiguous regions in the
+   embedding, so for cells near a cluster boundary some of the 30 neighbours
+   fall in another cluster — and boundary cells are exactly where the gap
+   comes from. The exception sits where the signal is.
+3. **`A − B` is a scalar difference of two aggregate accuracies over 1.58 M
+   cells**, hiding which cells, which labels, which clusters, and the whole
+   resolution dependence. Same error as reaching for Somers' D over the
+   centroid matrix.
+4. **It cannot say whether Leiden is valid**, so it cannot license any
+   conclusion about NMI or ARI. A large gap is equally consistent with "the
+   information is below cluster scale", "Leiden found a different but
+   legitimate partition", and "the labels are wrong".
+
+**What replaces it, both already measured.** The direct claim: the model
+splits the corpus by cell type having never been given cell type — kNN
+agreement 0.994, groups separated by 3.36 times their own width, and a UMAP
+that shows it. And the onus-shifting measurement: NMI spreads the four
+methods by 0.382 on cell family and by 0.010 on AnnotationRefined, over the
+same latents and the same scorer, while kNN recovery moves by at most 0.036.
+A metric that reorders methods by 0.38 on one label and 0.01 on another,
+while the information barely moves, is reporting cluster geometry. That is an
+argument from numbers we hold, against a proxy, rather than a new test
+defending us to the proxy.
 
 ## Loose ends, cheap, not blocking
 

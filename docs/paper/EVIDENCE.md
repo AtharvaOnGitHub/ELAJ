@@ -1184,7 +1184,12 @@ so the two studies present the same fifteen people under thirty identifiers.
 **Three consequences.**
 
 *The corpus holds 254 donors, not 269.* Every count in Methods that says
-269 is wrong by fifteen.
+269 is wrong by fifteen. **VERIFIED, not derived, on 22 October 2026.**
+`check_donor_overlap.sh` compared all 55 study pairs on both
+`source_sample_id` and `patient_id` and found `pairs_with_overlap: 1` — this
+pair and no other. So 269 minus these fifteen is the whole correction, and
+254 is the number of PEOPLE. The earlier worry that 269 might be wrong in
+further ways is closed by that 1.
 
 *10,729 cells are duplicated*, 0.9% of the 1.2 M training cells.
 
@@ -1195,12 +1200,34 @@ one UUID and in val or test under the other. `SplitFingerprint` checks
 whether the donor wall MOVED, not whether two identifiers are the same
 person, so nothing in the pipeline could have caught this.
 
-**Magnitude.** `_b` puts 1,372 cells in test and a similar number in val, so
-about 2,700 of the 382,464 held-out cells, **0.7%**, are affected. Even a
-large per-cell distortion moves a headline metric at the 0.001 level. The
-direction is unfavourable to us for cross-donor agreement, since a cell's
-"other donor" neighbours can include the same person, and favourable for
-patient kNN for the same reason.
+**Magnitude: 17,873 held-out cells, 4.3%.** MEASURED 22 October 2026 by
+`check_donor_overlap.sh` (job 58542096), and it corrects this section's own
+earlier estimate of 0.7%, which was low by a factor of 6.6.
+
+The earlier figure counted only `_b`'s held-out cells, on the reasoning that
+`_b` is the small study. That is the wrong side to count. Seven of the fifteen
+shared samples split differently between the two studies, and for five of them
+it is `_a` — the large one — whose cells are held out:
+
+| sample | `_a` | `_b` | held out |
+|---|---|---|---:|
+| `A30` | train 17,000 | test 376 | 376 |
+| `E3` | train 3,018 | val 795 | 795 |
+| `SAMN15049042` | val 1,958 | train 995 | 1,958 |
+| `SAMN15049043` | val 3,069 | train 990 | 3,069 |
+| `SAMN15049046` | test 2,945 | val 997 | 3,942 |
+| `SAMN15049049` | test 6,737 | train 874 | 6,737 |
+| `SAMN15049051` | train 2,025 | test 996 | 996 |
+| | | | **17,873** |
+
+17,873 of 416,256 held-out cells is **4.3%**. `SAMN15049046` is held out on
+both sides, which is why its row contributes both counts.
+
+The direction is unfavourable to us for cross-donor agreement, since a cell's
+"other donor" neighbours can include the same person under the other
+identifier, and favourable for patient kNN for the same reason. At 4.3% the
+distortion is larger than the 0.001-level the old figure implied, and the
+paper states the measured number rather than an estimate.
 
 **Why it is not fixed.** The correct fix is to drop `_b`, which carries no
 information `_a` lacks. That changes the gene vocabulary, the splits, the

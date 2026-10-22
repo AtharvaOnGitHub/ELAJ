@@ -54,7 +54,7 @@ Full corpus, 1,577,728 cells, `p1_dab168_kl1`, Gaussian latent, 16 dimensions.
 | AnnotationRefined | 465,769 | 63 | 0.684 | 0.304 | 54.6% |
 | severity (study vocabularies) | 641,024 | 8 | 0.608 | 0.220 | 49.7% |
 | disease_status | 1,577,728 | 4 | 0.654 | 0.338 | 47.7% |
-| patient_id | 1,577,728 | 269 | 0.327 | 0.006 | 32.3% |
+| patient_id | 1,577,728 | 269 ¹ | 0.327 | 0.006 | 32.3% |
 | EndometriosisGrade | 466,176 | 3 | 0.520 | 0.340 | 27.3% |
 
 ### Cross-donor, k=100, 200 permutations
@@ -67,6 +67,14 @@ Full corpus, 1,577,728 cells, `p1_dab168_kl1`, Gaussian latent, 16 dimensions.
 | **Endometriosis_stage** | 164,474 | **33.2%** | 0.03 | **0.005** | 41 | 58 |
 | EndometriosisGrade | 465,391 | 2.6% | 0.08 | 0.408 | 75 | 60 |
 | phase (cell cycle) | 164,474 | 57.2% | 1.00 | 1.000 | 41 | 58 |
+
+¹ 269 is the number of `patient_id` IDENTIFIERS, which is what the column
+holds and so what the test counted. It is **254 people**: CellxGene mints a
+fresh donor UUID per dataset, and `garcia_alonso_2021_a` and `_b` present the
+same fifteen women under thirty identifiers. Measured over all 55 study pairs
+on 22 October (job 58542096) — that pair is the only overlap in the corpus.
+The paper says 254; a metric keyed on `patient_id` says 269 and both are
+right about different things.
 
 **Menstrual phase at 142 donors against a null95 of about zero** is the most
 powered result this project has produced. The val+test equivalent had 36

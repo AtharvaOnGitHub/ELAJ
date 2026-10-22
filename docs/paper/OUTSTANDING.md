@@ -196,7 +196,37 @@ waves, about a day and a half.
       result: it still answers why m6 reconstructs worst, between the drain's
       loss competing, the 25% covariate blanking, and the drain taking
       encoder capacity. Run it for us, not for the reader
-- [ ] **No-phase-head reference**
+- [ ] **C-6 PHASE CLASSIFIER REMOVED — the first ablation a reviewer asks
+      for, ahead of C-1 and C-4.** This sat in this list as an unelaborated
+      line, "No-phase-head reference", and what it implies went unnoticed
+      until 22 October: **every reported p1 arm trains with a supervised head
+      on menstrual phase.** `model.classifier.enabled: true`,
+      `block: gaussian`, `w_cls: 40.0` — all six arms. The head reads
+      `mu_gauss`, which is the exact tensor the benchmark scores.
+
+      SEMI-SUPERVISED, AND THE EXTENT IS THE POINT. The loss is masked and
+      returns exact zero on unlabelled cells, and phase exists in 4 of 11
+      studies while `PerStudyBatchSampler` puts one study per batch, so most
+      batches carry no phase loss at all. On the train split:
+
+          cells with a phase label     512,101 of 1,161,472   44.1%
+          donors with a phase label         91 of 184         49.5%
+          studies carrying phase             4 of 11   (_b subsets _a, so 3)
+
+      WHAT IT DOES AND DOES NOT TOUCH. Phase is the only label given. Cell
+      type has no head and no conditioning, `d_disease` is 0, and stage and
+      grade have neither — so the cell-type result and every disease result
+      are emergent and unaffected. The phase numbers are not: "phase emerges
+      from the architecture" is not a claim we can make. What survives is
+      "semi-supervision on 44% of cells transfers to donors the model never
+      saw", which is a real question a supervised head can fail — and the
+      held-out figure (0.735) being HIGHER than the train one (0.673) is the
+      shape transfer rather than memorisation would produce.
+
+      The run: `w_cls: 0` on the chosen headline arm, everything else
+      byte-identical. One GPU job. It separates what the architecture does
+      from what the head does, and it is the ablation that decides how the
+      phase axis of the frontier may be described.
 
 ## Stage 4b — Paper
 
@@ -240,10 +270,23 @@ waves, about a day and a half.
 - [ ] **Weights provenance.** scGPT and scFoundation checkpoints came from
       third-party HuggingFace mirrors because the canonical links are Google
       Drive and SharePoint. sha256 recorded for both
-- [ ] **Supervision.** scANVI and SCimilarity are supervised on cell type
+- [ ] **Supervision.** scANVI and SCimilarity are supervised on cell type —
+      **and so is ELAJ, semi-supervised on menstrual phase.** Every p1 arm
+      trains a classification head on `mu_gauss` at `w_cls: 40.0`, masked to
+      the 44.1% of training cells that carry a phase label (91 of 184 donors,
+      4 of 11 studies). No phase number may appear beside an unsupervised
+      baseline without saying so. Cell type, disease status, stage and grade
+      are NOT given and stay emergent. See C-6.
+- [ ] **POPULATE `supervised_on` FOR ELAJ ROWS.** The benchmark CSV already
+      has the column and already fills it for scANVI (`cell family`); it is
+      blank on every ELAJ row, so the tables do not carry the fact above.
+      One argument at the `scorer.score` call in `benchmark_baselines.py`,
+      which makes every table self-documenting instead of relying on a
+      sentence in Methods
 - [ ] **Width.** The kNN metrics are not width-matched: 16 against 128, 256
       and 512
-- [ ] **§10.4 limitation** with the 0.7% aliasing figure
+- [ ] **§10.4 limitation** with the measured 4.3% figure (17,873 held-out
+      cells), not the 0.7% estimate it carried until 22 October
 - [ ] **Foundation-model leakage audit.** Per-study deposition dates against
       each pretraining snapshot. Reported, not acted on, as agreed.
       PanglaoDB closed 2019 so scBERT could not have seen us; Geneformer V1

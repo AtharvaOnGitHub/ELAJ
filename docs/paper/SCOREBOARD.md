@@ -35,6 +35,19 @@ written. Neither is true now. The frontier is still real and is still what the
 tiers are built on; what changed is that **ELAJ occupies its upper-left corner,
 not merely its donor-blind end.**
 
+**⚠ PHASE IS SEMI-SUPERVISED IN EVERY ELAJ ARM, AND NO TABLE HERE SAYS SO
+YET.** `model.classifier.enabled: true`, `block: gaussian`, `w_cls: 40.0` on
+all six p1 arms: a classification head on menstrual phase reading `mu_gauss`,
+the tensor these numbers score. The loss is masked to the 44.1% of training
+cells that carry a label — 91 of 184 donors, 4 of 11 studies — and returns
+exact zero elsewhere, so semi-supervised is the accurate word. Found 22
+October. **Every phase figure on this page sits beside baselines that had no
+such head**, scANVI excepted, which is marked for cell type. The claim
+available is "semi-supervision transfers to unseen donors", not "phase
+emerges". Cell family, disease status, stage and grade have no head and no
+conditioning and are unaffected. C-6 in OUTSTANDING is the run that separates
+the two.
+
 **What is not claimed.** Cell family is a *tie*: 0.982 against scVI's 0.983 and
 below PCA's 0.987. Leiden NMI and ARI are **worse** in every p1 arm than in the
 m5 they supersede — see §2. And the fifth arm is untrained, so the 2×2 has

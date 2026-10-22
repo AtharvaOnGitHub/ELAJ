@@ -5,10 +5,17 @@ its two files by row position, so a silent misalignment would not surface
 until the analysis was already wrong. `_dump_cells` takes arrays and a dict,
 so it is tested here rather than discovered on the cluster.
 
-The first run of this file found a real defect: validate_latent.py imports
-numpy per function rather than at module scope, and `_dump_cells` used `np`
-without importing it. That would have been a NameError five minutes into the
-job.
+Two real defects have been found this way, and the second got past the first
+version of this file:
+
+  validate_latent.py imports numpy per function, not at module scope, and
+  `_dump_cells` used `np` without importing it -- a NameError five minutes in.
+
+  `names` is a DICT {study id: name}, not a list, and this file passed a list.
+  The real call indexed a dict as an array, which numpy makes 0-dimensional,
+  and both validate jobs died on `IndexError: too many indices`. The fixture
+  now uses the real shape -- a dict, with non-contiguous ids, because the ids
+  are renumbered after study exclusions and are not positions into anything.
 """
 
 from __future__ import annotations
@@ -27,7 +34,13 @@ from scripts.validate_latent import _dump_cells            # noqa: E402
 
 N, D = 2000, 16
 FAMILIES = ("stromal", "epithelial", "immune", "endothelial")
-STUDIES = ["marecko_2024", "duempelmann_2026", "li_2025"]
+#: The real thing: a dict keyed by study id, built in validate_latent as
+#: `{s["id"]: s["name"] for s in study_configs}`. The ids are NOT 0..n-1 --
+#: excluded studies are dropped and the rest renumbered, so a corpus can hold
+#: any set of integers. These are deliberately non-contiguous and not
+#: zero-based, so indexing them positionally cannot accidentally pass.
+STUDIES = {5: "marecko_2024", 8: "fonseca_2023", 10: "duempelmann_2026"}
+STUDY_IDS = sorted(STUDIES)
 
 
 def corpus(seed: int = 0):
@@ -47,7 +60,7 @@ def corpus(seed: int = 0):
         "pct_counts_mt": rng.normal(5, 2, N),
     }
     return (rng.normal(0, 1, (N, D)).astype(np.float32), meta,
-            np.array([i % 3 for i in range(N)]),
+            np.array([STUDY_IDS[i % 3] for i in range(N)]),
             np.array([("train", "val", "test")[i % 3] for i in range(N)],
                      dtype=object))
 
@@ -88,11 +101,38 @@ def test_study_and_split_are_added(tmp_path):
     are wanted for colouring a figure."""
     dump(tmp_path)
     rows = read_meta(tmp_path)
-    assert rows[0]["study"] == STUDIES[0]
-    assert rows[1]["study"] == STUDIES[1]
+    assert rows[0]["study"] == STUDIES[STUDY_IDS[0]]
+    assert rows[1]["study"] == STUDIES[STUDY_IDS[1]]
     assert rows[0]["split"] == "train"
     assert rows[1]["split"] == "val"
-    assert {r["study"] for r in rows} == set(STUDIES)
+    assert {r["study"] for r in rows} == set(STUDIES.values())
+
+
+def test_study_ids_are_looked_up_not_indexed(tmp_path):
+    """The bug that killed both validate jobs, pinned.
+
+    `names` is a dict with renumbered, non-contiguous ids. Indexing it as an
+    array makes numpy produce a 0-d array and the lookup raises. A positional
+    implementation would also silently mislabel every cell if the ids happened
+    to be contiguous, so this asserts the NAMES land, not just that it runs.
+    """
+    mu, meta, study_id, split_of = corpus()
+    _dump_cells(tmp_path, mu, np.zeros((N, 0), np.float32),
+                np.zeros((N, 0)), meta, study_id, STUDIES, split_of)
+    rows = read_meta(tmp_path)
+    for i in (0, 1, 2, 500, N - 1):
+        assert rows[i]["study"] == STUDIES[int(study_id[i])], i
+
+
+def test_an_unmapped_study_id_falls_back_rather_than_crashing(tmp_path):
+    """A study id absent from the dict keeps the run alive and stays visible."""
+    mu, meta, study_id, split_of = corpus()
+    partial = {k: v for k, v in STUDIES.items() if k != STUDY_IDS[-1]}
+    _dump_cells(tmp_path, mu, np.zeros((N, 0), np.float32),
+                np.zeros((N, 0)), meta, study_id, partial, split_of)
+    rows = read_meta(tmp_path)
+    missing = str(STUDY_IDS[-1])
+    assert any(r["study"] == missing for r in rows)
 
 
 def test_missing_values_are_blank_not_the_word_nan(tmp_path):

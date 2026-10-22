@@ -767,7 +767,17 @@ def _dump_cells(out, mu_gauss, mu_angle, kappa, meta, study_id, names,
 
     # Study and split are not in `meta` -- they are the loader's own bookkeeping
     # -- and both are wanted for colouring, so they are added here.
-    study_name = np.asarray(names, dtype=object)[np.asarray(study_id)]
+    #
+    # `names` IS A DICT {study id: name}, NOT A LIST. It is built as
+    # `{s["id"]: s["name"] for s in study_configs}`, and the ids are the
+    # renumbered ones after exclusions, so they are not 0..n-1 positions into
+    # anything. Indexing it as an array gave `IndexError: too many indices for
+    # array: array is 0-dimensional`, because np.asarray of a dict is 0-d, and
+    # it killed both validate jobs five minutes in. `.get(int(i), i)` is the
+    # form the rest of this file already uses; falling back to the raw id
+    # keeps an unmapped study visible instead of crashing on it.
+    study_name = np.array([names.get(int(i), i) for i in np.asarray(study_id)],
+                          dtype=object)
     columns = {"study": study_name, "split": np.asarray(split_of)}
     columns.update({c: v for c, v in meta.items()})
 

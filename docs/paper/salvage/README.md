@@ -71,7 +71,7 @@ Full corpus, 1,577,728 cells, `p1_dab168_kl1`, Gaussian latent, 16 dimensions.
 ¹ 269 is the number of `patient_id` IDENTIFIERS, which is what the column
 holds and so what the test counted. It is **254 people**: CellxGene mints a
 fresh donor UUID per dataset, and `garcia_alonso_2021_a` and `_b` present the
-same fifteen women under thirty identifiers. Measured over all 55 study pairs
+same fifteen people under thirty identifiers. Measured over all 55 study pairs
 on 22 October (job 58542096) — that pair is the only overlap in the corpus.
 The paper says 254; a metric keyed on `patient_id` says 269 and both are
 right about different things.

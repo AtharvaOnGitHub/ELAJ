@@ -44,7 +44,7 @@ EXTRA=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --dims|--k|--out|--root|--config-dir|--runs-dir|--cycle-period|--permutations|\
-        --umap-cells|--baseline-cells|--topology-cells)
+        --umap-cells|--baseline-cells|--topology-cells|--dump-cells)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
         --splits)
             # nargs="+": take every following bare word as a split name.

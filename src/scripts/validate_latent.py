@@ -148,6 +148,18 @@ def parse_args() -> argparse.Namespace:
                         "minute or an hour: 900 points runs in seconds, 3000 "
                         "in tens of minutes. 1500-2000 recovers a torus "
                         "reliably. 0 skips the topology.")
+    p.add_argument("--dump-cells", default=None,
+                   help="Directory for the per-cell latent and metadata, "
+                        "row-aligned: latent.npy plus metadata.csv.gz. "
+                        "Written about five minutes in, before any "
+                        "measurement, because the embedding is complete then "
+                        "and everything after it is hours. Everything else "
+                        "this script writes is a summary of cells into groups "
+                        "and cannot be cross-tabulated afterwards -- with cell "
+                        "type the strongest axis in the latent, questions like "
+                        "'where does phase sit WITHIN stroma' need the cells "
+                        "themselves. About 150 MB for 1.58 M cells, after "
+                        "which that class of question is a local read.")
     p.add_argument("--no-figures", action="store_true",
                    help="Measure and write the CSV only.")
     return p.parse_args()
@@ -394,6 +406,23 @@ def main() -> None:
         ("menstrual phase", MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS),
     ):
         _log_harmonised(meta, name, harmoniser, columns, study_id, names)
+
+    # ── the per-cell dump, written here and not later ───────────────────────
+    # Everything below this point summarises cells into groups. The summaries
+    # answer the questions already asked; they cannot answer a new one. Cell
+    # type turned out to be the strongest axis in the latent, which makes
+    # "what does phase look like WITHIN stroma" the obvious next question, and
+    # no table of per-label group statistics can be cross-tabulated into that
+    # answer after the fact.
+    #
+    # So the latent and the metadata go out together, row-aligned, as soon as
+    # both exist -- about five minutes into a twelve-hour job rather than at
+    # its end, for the reason two dead jobs already demonstrated. After this
+    # every new cross-tabulation is a local read of two files instead of
+    # another pass over 1.58 M cells on a GPU.
+    if args.dump_cells:
+        _dump_cells(Path(args.dump_cells), mu_gauss, mu_angle, kappa, meta,
+                    study_id, names, split_of)
 
     # The number that decides whether the cross-donor test can answer anything.
     donors = {str(v) for v, ph in zip(meta["patient_id"],
@@ -693,6 +722,75 @@ def main() -> None:
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("  05_cross_donor skipped (%s: %s)",
                        type(exc).__name__, exc)
+
+
+def _dump_cells(out, mu_gauss, mu_angle, kappa, meta, study_id, names,
+                split_of) -> None:
+    """The latent and the metadata for every cell, row-aligned, in one place.
+
+    WHY THIS IS NOT THE SAME AS THE TABLES. Everything else this script writes
+    is a summary of cells into groups, one grouping at a time. A summary
+    answers the question it was built for and no other: there is no way to get
+    "where do secretory stromal cells sit relative to proliferative stromal
+    cells" out of a table of per-phase centroids and a table of per-cell-type
+    centroids, because the cross-tabulation was never computed. Cell type is
+    the strongest axis in this latent, so that class of question is the one
+    worth asking next, and it needs the cells.
+
+    WRITTEN BEFORE ANY MEASUREMENT, which is the lesson of two dead jobs: the
+    latent exists the moment the embedding ends and everything after it is
+    hours. Five minutes in, this is on disk.
+
+    Two files, both plain:
+
+        latent.npy        float32 (n_cells, d_gauss)
+        metadata.csv.gz   one row per cell, same order
+
+    plus the circular half when the arm has one, which no p1 arm does. CSV
+    rather than a binary format because the consumer is a laptop and the
+    columns are mostly short repeated strings that gzip flattens.
+    """
+    import csv as _csv
+    import gzip
+
+    import numpy as np
+
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / "latent.npy", np.asarray(mu_gauss, dtype=np.float32))
+    written = ["latent.npy"]
+    if mu_angle is not None and np.size(mu_angle) and mu_angle.shape[1]:
+        np.save(out / "latent_circular.npy",
+                np.asarray(mu_angle, dtype=np.float32))
+        np.save(out / "kappa.npy", np.asarray(kappa, dtype=np.float32))
+        written += ["latent_circular.npy", "kappa.npy"]
+
+    # Study and split are not in `meta` -- they are the loader's own bookkeeping
+    # -- and both are wanted for colouring, so they are added here.
+    study_name = np.asarray(names, dtype=object)[np.asarray(study_id)]
+    columns = {"study": study_name, "split": np.asarray(split_of)}
+    columns.update({c: v for c, v in meta.items()})
+
+    def clean(v):
+        if v is None:
+            return ""
+        t = str(v)
+        return "" if t.strip().lower() in ("nan", "none", "na", "<na>") else t
+
+    n = len(mu_gauss)
+    path = out / "metadata.csv.gz"
+    with gzip.open(path, "wt", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        keys = list(columns)
+        w.writerow(keys)
+        cols = [columns[k] for k in keys]
+        for i in range(n):
+            w.writerow([clean(c[i]) for c in cols])
+    written.append("metadata.csv.gz")
+    size = sum((out / f).stat().st_size for f in written) / 1e6
+    logger.info("Dumped %s cells x %d dims and %d metadata columns to %s "
+                "(%s, %.0f MB)", f"{n:,}", mu_gauss.shape[1], len(columns),
+                out, ", ".join(written), size)
 
 
 def _write_tables(out, tables, n_dims: int) -> None:

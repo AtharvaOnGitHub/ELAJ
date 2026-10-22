@@ -642,7 +642,7 @@ def main() -> None:
     # because "the proliferative donors sit here" is reportable even when the
     # significance test cannot run.
     _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
-                           args.splits)
+                           args.splits, umap_cells=args.umap_cells)
 
     out = Path(args.out) if args.out else run_dir
     out.mkdir(parents=True, exist_ok=True)
@@ -987,7 +987,7 @@ def _union_severity(meta) -> "np.ndarray":
 
 
 def _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
-                           splits) -> None:
+                           splits, umap_cells: int = 150_000) -> None:
     """Where each donor sits, and a UMAP coloured by phase.
 
     Two things the significance test cannot give: a description of the layout
@@ -1062,13 +1062,29 @@ def _describe_donor_layout(meta, mu_gauss, circ, names, study_id, run_dir,
         return
     try:
         _plot_phase_umap(mu_gauss[ok], circ[ok], np.asarray(phase)[ok],
-                         run_dir, splits)
+                         run_dir, splits, umap_cells=umap_cells)
     except Exception as exc:                                   # noqa: BLE001
         logger.warning("   phase UMAP skipped (%s: %s)", type(exc).__name__, exc)
 
 
-def _plot_phase_umap(gauss, circ, phase, run_dir, splits) -> None:
-    """Both halves of the latent, coloured by menstrual phase."""
+def _plot_phase_umap(gauss, circ, phase, run_dir, splits,
+                     umap_cells: int = 150_000, seed: int = 24) -> None:
+    """Both halves of the latent, coloured by menstrual phase.
+
+    TWO THINGS JOB 58380379 EXPOSED, both in section 7, which is where it ran
+    out of its twelve hours with every table already written.
+
+    IT UMAPPED A ZERO-WIDTH ARRAY. Every p1 arm has n_circular 0, so the
+    circular half is (n, 0) and UMAP refuses it: "Found array with 0
+    feature(s) (shape=(466176, 0))". Caught and logged as a warning, so it
+    cost time rather than the run, and drew a panel saying "UMAP unavailable"
+    for a branch that does not exist. A Gaussian-only model gets one panel.
+
+    AND IT DID NOT SUBSAMPLE. --umap-cells caps the figure writer's UMAPs at
+    150,000 and this function never saw the number, so it was handed all
+    466,176 phase-labelled cells. The cap is passed in now and the sample size
+    goes on the figure, as it does elsewhere.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1076,9 +1092,21 @@ def _plot_phase_umap(gauss, circ, phase, run_dir, splits) -> None:
 
     from endo_model.viz.latent_panels import safe_umap
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
-    for ax, lat, title in ((axes[0], gauss, "Gaussian half"),
-                           (axes[1], circ, "circular half")):
+    available = len(gauss)
+    if umap_cells and available > umap_cells:
+        keep = np.random.default_rng(seed).choice(available, umap_cells,
+                                                  replace=False)
+        gauss, phase = gauss[keep], np.asarray(phase)[keep]
+        circ = circ[keep] if circ.shape[1] else circ[:0]
+        logger.info("   phase UMAP on %s of %s cells (seed %d)",
+                    f"{umap_cells:,}", f"{available:,}", seed)
+
+    panels = [(gauss, "Gaussian half")]
+    if circ.shape[1]:
+        panels.append((circ, "circular half"))
+    fig, axes = plt.subplots(1, len(panels), figsize=(6.5 * len(panels), 6),
+                             squeeze=False)
+    for ax, (lat, title) in zip(axes[0], panels):
         coords = safe_umap(lat, seed=24)
         if coords is None:      # umap absent, or too few cells to embed
             ax.text(0.5, 0.5, "UMAP unavailable", ha="center", va="center")

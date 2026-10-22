@@ -113,3 +113,108 @@ so eight allocated cores ran one thread. See `472ebd7`. The same commit
 collapses three searches per label into one and writes the free tables before
 any search begins, so a future kill costs the outstanding searches rather than
 everything.
+
+---
+
+# Second attempt: 58380379 and 58380381, 22 October 2026
+
+Both hit the wall again. **The outcome is not the same and the distinction
+matters:** 58380379 finished every measurement and was killed drawing
+pictures.
+
+## 58380379 (validate) — scientifically complete
+
+    03:26:01  Written to outputs/validate/p1_dab168_kl1_full/validation.csv
+    03:26:02  wrote level_statistics.csv   (4,388 rows)
+    03:26:02  wrote centroid_distances.csv (4,248 rows)
+    03:26:02  wrote neighbour_counts.csv   (4,248 rows)
+    03:26:02  wrote donor_adjacency.csv  (109,266 rows)
+    03:26:02  wrote donor_levels.csv       (767 rows)
+    03:26:02  wrote grouped_distances.csv   (35 rows)
+    03:26:02  wrote grouped_agreement.csv   (21 rows)
+    03:43:28  CANCELLED DUE TO TIME LIMIT
+
+Killed seventeen minutes into section 7. Nothing of substance was lost, and
+the two structural changes from `472ebd7` both did what they were for:
+
+  * `neighbour search: 18 threads (SLURM_CPUS_PER_TASK=18)` — the allocation
+    is now used.
+  * section 4a wrote the free tables **38 seconds** after it began, so they
+    existed from 20:49 and every later flush only added to them.
+
+Only the figures are missing. They are not worth a twelve-hour GPU job on
+their own and will come from wave B, whose run needs to happen anyway.
+
+### Where the twelve hours went
+
+| section | span | cost |
+|---|---|---:|
+| embedding, 3 splits | 15:46 → 16:31 | 45 min |
+| 3. kNN for labels 4b misses | 16:32 → 19:05 | 2h33 |
+| 4. cross-donor | 19:05 → 20:49 | 1h44 |
+| **4a. free tables** | 20:49:20 → 20:49:58 | **38 s** |
+| 4b. one search per label | 20:49 → 01:47 | 4h58 |
+| 5. scIB | 01:47 → 03:14 | 1h27 |
+| 6. donor layout | 03:14 → 03:26 | 12 min |
+| 7. figures | 03:26 → killed | 17 min+ |
+
+Eighteen threads bought less than the core count suggests — `patient_id` at
+1,161,472 cells and 269 levels went from 171 minutes to roughly 75. A kd-tree
+query parallelises over query points, and the tree build does not.
+
+## 58380381 (benchmark) — two rows short, and the table unwritten
+
+It reached PCA's `disease xdonor duempelmann_2026` at 02:07 and was killed at
+02:19, needing about forty more minutes. `benchmark.csv` is written at the end
+of each method's loop iteration, so again there is no table — but every row is
+in the log and is parsed into `bench_58380381_recovered.csv`.
+
+Both latents are on disk again, written seconds after the work that produced
+them:
+
+    outputs/latents/pca_train/elaj__native__train   16:57:36
+    outputs/latents/pca_train/pca__all              22:05:13
+
+So the remaining scoring needs **no GPU**: `--external-latent` reads these and
+the battery is CPU work anyway. The GPU was only ever for the embedding.
+
+### The matched train comparison, which is what this job was for
+
+Same 1,161,472 cells, same corpus, ELAJ's checkpoint against a 16-component
+PCA fitted on the same split.
+
+| | ELAJ | PCA | |
+|---|---:|---:|---|
+| cell family | 0.981 | 0.986 | tie |
+| **menstrual phase** | **0.820** | 0.785 | ELAJ |
+| cell cycle phase | 0.415 | 0.411 | tie, both below chance |
+| AnnotationRefined | 0.562 | 0.572 | tie |
+| **patient identity** ↓ | **0.367** | 0.565 | **ELAJ by 0.198** |
+| **study separation** ↓ | **47.1%** | 78.0% | **ELAJ by 30.9 pts** |
+
+ELAJ is better on biology *and* on both nuisance axes at once, on identical
+cells. This is the comparison that was missing when the train numbers were
+first read, and it closes that gap.
+
+### And the disease control answers its question
+
+| within-study, cross-donor | ELAJ | PCA |
+|---|---|---|
+| marecko_2024, 42 donors | 0.379, **p=0.005** | 0.315, **p=0.005** |
+| duempelmann_2026, 42 donors | 0.027, p=0.264 | −0.004, p=0.433 |
+
+**PCA finds the marecko signal too.** So control-versus-eutopic in marecko is a
+property of the expression data at 42 donors, not an ELAJ-specific finding —
+ELAJ's excess is higher, but a 16-component linear projection clears the same
+null. The honest claim is that the signal exists and is recoverable by simple
+means; what ELAJ adds there is nothing. Both are flat on duempelmann.
+
+## Two figure bugs this run exposed
+
+Section 7 logged, twice, `Found array with 0 feature(s)`. Every p1 arm has
+`n_circular` 0, so the circular half is `(n, 0)` and UMAP refuses it — caught
+as a warning, so it cost time rather than the run, and drew a panel labelled
+"UMAP unavailable" for a branch that does not exist. And `_plot_phase_umap`
+never saw `--umap-cells`, so it was handed all 466,176 phase-labelled cells
+rather than the 150,000 cap the figure writer honours. Both fixed: a
+Gaussian-only model gets one panel, and the sample is capped and reported.

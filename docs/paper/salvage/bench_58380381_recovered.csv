@@ -1,0 +1,29 @@
+method,test,label,n_cells,excess,p_value,n_groups,detail
+elaj,knn,cell family,463803,0.981,,,excess= 0.981
+elaj,knn,menstrual phase,512101,0.82,,,excess= 0.820
+elaj,knn,cell cycle phase,222208,0.415,,,excess= 0.415
+elaj,knn,AnnotationRefined,333508,0.562,,,excess= 0.562
+elaj,knn,patient_id,1161472,0.367,,,excess= 0.367
+elaj,scib,cell family,463803,,,,ilisi_knn=0.000  clisi_knn=1.000  silhouette_batch=0.825  silhouette_bio=0.597  kbet=0.009  graph_connectivity=0.983  isolated_labels=0.596  pcr_batch=0.913  nmi=0.068  ari=0.011
+elaj,scib,AnnotationRefined,333508,,,,clisi_knn=0.998  silhouette_bio=0.478  graph_connectivity=0.482  isolated_labels=0.478  pcr_batch=1.000  nmi=0.377  ari=0.053
+elaj,study,all studies,19998,,,,"separated= 47.1% (purity 0.519 of floor 0.091, 16d)"
+elaj,disease,xdonor tan_2022,40527,0.144,0.274,10,"excess= 0.144 p=0.274 (10 groups) FEW GROUPS, excess is unreadable, read p"
+elaj,disease,xdonor lin_2023,116908,0.132,0.179,11,"excess= 0.132 p=0.179 (11 groups) FEW GROUPS, excess is unreadable, read p"
+elaj,disease,xdonor marecko_2024,119483,0.379,0.005,42,excess= 0.379 p=0.005 (42 groups)
+elaj,disease,xdonor li_2025,32653,-0.108,1.0,4,"excess=-0.108 p=1.000 (4 groups) FEW GROUPS, excess is unreadable, read p"
+elaj,disease,xdonor duempelmann_2026,332903,0.027,0.264,42,excess= 0.027 p=0.264 (42 groups)
+elaj,disease,xdonor all studies (pooled),651593,0.033,0.303,109,excess= 0.033 p=0.303 (109 groups)
+elaj,disease,xstudy all studies (pooled),386333,-0.08,0.368,5,excess=-0.080 p=0.368 (5 groups)
+pca,knn,cell family,463803,0.986,,,excess= 0.986
+pca,knn,menstrual phase,512101,0.785,,,excess= 0.785
+pca,knn,cell cycle phase,222208,0.411,,,excess= 0.411
+pca,knn,AnnotationRefined,333508,0.572,,,excess= 0.572
+pca,knn,patient_id,1161472,0.565,,,excess= 0.565
+pca,scib,cell family,463803,,,,ilisi_knn=0.000  clisi_knn=1.000  silhouette_batch=0.526  silhouette_bio=0.637  kbet=0.000  graph_connectivity=0.715  isolated_labels=0.621  pcr_batch=0.605  nmi=0.287  ari=0.251
+pca,scib,AnnotationRefined,333508,,,,clisi_knn=0.998  silhouette_bio=0.466  graph_connectivity=0.512  isolated_labels=0.473  pcr_batch=1.000  nmi=0.378  ari=0.056
+pca,study,all studies,19998,,,,"separated= 78.0% (purity 0.800 of floor 0.091, 16d)"
+pca,disease,xdonor tan_2022,37139,0.119,0.383,10,"excess= 0.119 p=0.383 (10 groups) FEW GROUPS, excess is unreadable, read p"
+pca,disease,xdonor lin_2023,109884,0.164,0.164,11,"excess= 0.164 p=0.164 (11 groups) FEW GROUPS, excess is unreadable, read p"
+pca,disease,xdonor marecko_2024,108053,0.315,0.005,42,excess= 0.315 p=0.005 (42 groups)
+pca,disease,xdonor li_2025,32103,-0.172,1.0,4,"excess=-0.172 p=1.000 (4 groups) FEW GROUPS, excess is unreadable, read p"
+pca,disease,xdonor duempelmann_2026,328825,-0.004,0.433,42,excess=-0.004 p=0.433 (42 groups)

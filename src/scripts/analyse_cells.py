@@ -203,9 +203,17 @@ def disease_by_family(latent, meta, out: Path) -> pd.DataFrame:
             r = pair_rows(groups, label="case_vs_control",
                           stratum=f"{st} / {family}")[0]
             rows.append({**r, "study": st, "family": family})
+            # NAME THE GROUPS FROM THE ROW, do not assume the order.
+            # `pair_rows` sorts alphabetically, so `from` is "case" and `to`
+            # is "control" -- the first version of this line printed them the
+            # other way round and reported marecko's endothelial split as
+            # 1,214 control against 6,708 case when it is the reverse. The
+            # distance is symmetric so no measurement moved, but the counts
+            # quoted from this log were wrong.
             logger.info("   %-22s %-13s  d=%.3f  /scatter %.3f  "
-                        "(%s control, %s case)", st, family, r["distance"],
-                        r["over_scatter"], f"{r['n_from']:,}", f"{r['n_to']:,}")
+                        "(%s %s, %s %s)", st, family, r["distance"],
+                        r["over_scatter"], f"{r['n_from']:,}", r["from"],
+                        f"{r['n_to']:,}", r["to"])
 
     # And the three-level form, for the families where disease shows at all.
     fine = []

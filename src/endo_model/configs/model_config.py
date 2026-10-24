@@ -18,6 +18,16 @@ class TokenConfig:
                   every gene; "gene_direction" and "gene_table" give each gene
                   its own direction, which is the form a principal component
                   takes. See model/embeddings/values/.
+    dns_embedding True, every run to date: a gene the study never measured
+                  takes a reserved learned vector instead of the embedding of
+                  its count, so absence is distinguishable from a measured
+                  zero at the input. FALSE IS THE C-2 ABLATION and nothing
+                  else -- an unmeasured gene then enters as the embedding of
+                  a zero count, which is what every other single-cell model
+                  does. The reconstruction mask is NOT touched by this flag:
+                  an unmeasured gene is still unscored either way, because
+                  there is no observation to score against. See
+                  model/encoders/token_constructor.py.
     """
 
     count_scale: str = "raw"
@@ -25,6 +35,7 @@ class TokenConfig:
     value_part: str = "linear"
     n_frequencies: int = 8      # read only by value_part "fourier"
     mlp_hidden: int = 64        # read only by value_part "mlp"
+    dns_embedding: bool = True
 
     @classmethod
     def from_dict(cls, d: dict) -> "TokenConfig":
@@ -34,6 +45,7 @@ class TokenConfig:
             value_part=str(d.get("value_part", "linear")),
             n_frequencies=int(d.get("n_frequencies", 8)),
             mlp_hidden=int(d.get("mlp_hidden", 64)),
+            dns_embedding=bool(d.get("dns_embedding", True)),
         )
 
 

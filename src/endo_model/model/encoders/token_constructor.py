@@ -39,6 +39,12 @@ class TokenConstructor(nn.Module):
         value_part:      ValuePart mapping scaled counts to token vectors.
         dsbn:            Domain-Specific Batch Normalisation.
         d_token:         Token embedding dimension.
+        use_dns:         True keeps step 4. False is the C-2 ablation: a gene
+                         the study never measured enters as the embedding of a
+                         zero count, indistinguishable from a measured zero.
+                         The parameter is still allocated so a checkpoint
+                         written either way loads either way; it simply
+                         receives no gradient.
     """
 
     def __init__(
@@ -48,6 +54,7 @@ class TokenConstructor(nn.Module):
         value_part: ValuePart,
         dsbn: DSBN,
         d_token: int,
+        use_dns: bool = True,
     ) -> None:
         super().__init__()
         self.group_embedding = group_embedding
@@ -55,6 +62,7 @@ class TokenConstructor(nn.Module):
         self.value_part = value_part
         self.dsbn = dsbn
         self.d_token = d_token
+        self.use_dns = use_dns
 
         # DNS embedding: learned representation for did-not-sample genes
         self.dns_embedding = nn.Parameter(torch.empty(d_token))
@@ -112,13 +120,19 @@ class TokenConstructor(nn.Module):
             # DNS genes: identity + dns_embedding (preserves gene identity).
             # Measured genes: identity + value_part(scaled count).
             # torch.where avoids in-place modification of autograd nodes.
-            dns_emb = self.dns_embedding.view(1, 1, -1).expand(B, G_k, -1)  # (B, G_k, D)
-            value_or_dns = torch.where(
-                dns_mask.unsqueeze(-1),   # (B, G_k, 1)
-                dns_emb,
-                value_enc,
-            )
-            tokens = identity + value_or_dns          # (B, G_k, D)
+            #
+            # use_dns False is C-2 and it is exactly this branch: counts_safe
+            # already set the DNS positions to 0.0 above, so skipping the
+            # substitution leaves an unmeasured gene carrying the embedding
+            # of a zero count. Nothing else in the model changes.
+            if self.use_dns:
+                dns_emb = self.dns_embedding.view(1, 1, -1).expand(B, G_k, -1)
+                value_enc = torch.where(
+                    dns_mask.unsqueeze(-1),   # (B, G_k, 1)
+                    dns_emb,
+                    value_enc,
+                )
+            tokens = identity + value_enc             # (B, G_k, D)
 
             # Apply DSBN (study-level affine correction)
             tokens = self.dsbn(tokens, study_id)       # (B, G_k, D)

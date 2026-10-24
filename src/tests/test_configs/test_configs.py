@@ -623,14 +623,23 @@ def test_p1_shares_one_horizon_and_one_seed():
 # kl30 -- cross-donor phase 0.7346 against 0.6033, cross-donor family 0.9820
 # against 0.9565, disease pooled 0.3364 against 0.3045 -- while kl30's only
 # advantage is on the two cost axes, where kl1 already beats the field.
+#
+# a1_circ is the ONE arm allowed two keys, and the exemption is written here
+# rather than left to a reader of the YAML: a circular dimension occupies two
+# Cartesian components, so adding four circles without reducing d_gauss would
+# widen the latent from 16 to 24 and confound the geometry with capacity.
+# 8 + 2x4 = 16 is the same budget spent differently.
 A1_ABLATIONS = {
-    "a1_nophase":  ("model.loss.w_cls", "0.0"),
-    "a1_clsonly":  ("model.group_encoder.readout", "cls"),
+    "a1_nophase":    {"model.loss.w_cls": "0.0"},
+    "a1_clsonly":    {"model.group_encoder.readout": "cls"},
+    "a1_nodns":      {"model.tokens.dns_embedding": "False"},
+    "a1_randgroups": {"data.vocabulary_path": None},   # value is a host path
+    "a1_circ":       {"model.d_gauss": "8", "model.n_circular": "4"},
 }
 A1_BASE = "p1_dab168_kl1"
 
 
-def test_a1_each_ablation_differs_from_the_base_on_exactly_one_key():
+def test_a1_each_ablation_differs_from_the_base_on_its_declared_keys():
     import yaml
 
     root = Path(__file__).resolve().parents[2]
@@ -643,20 +652,42 @@ def test_a1_each_ablation_differs_from_the_base_on_exactly_one_key():
 
     base_raw = overrides(A1_BASE)
     base = base_raw["overrides"]
-    for name, (key, value) in A1_ABLATIONS.items():
+    for name, expected in A1_ABLATIONS.items():
         raw = overrides(name)
         arm = raw["overrides"]
         differing = {
             k for k in set(arm) | set(base)
             if str(arm.get(k, "<absent>")) != str(base.get(k, "<absent>"))
         }
-        assert differing == {key}, (
-            f"{name} should differ from {A1_BASE} on {key} alone; it differs "
-            f"on {sorted(differing)}. An ablation that moves two keys cannot "
-            f"attribute its result to either."
+        assert differing == set(expected), (
+            f"{name} should differ from {A1_BASE} on {sorted(expected)}; it "
+            f"differs on {sorted(differing)}. An ablation that moves an "
+            f"undeclared key cannot attribute its result to the declared one."
         )
-        assert str(arm[key]) == value, (name, key, arm[key])
+        for key, value in expected.items():
+            if value is not None:
+                assert str(arm[key]) == value, (name, key, arm[key])
         # The seed is not a variable here any more than it was in p1.
         assert int(raw["seed"]) == int(base_raw["seed"]) == 24, name
         # Its own output directory, or the base's run is overwritten.
         assert raw["output_dir"] != base_raw["output_dir"], name
+        # And the arms must not collide with each other either.
+    dirs = [overrides(n)["output_dir"] for n in A1_ABLATIONS]
+    assert len(set(dirs)) == len(dirs), dirs
+
+
+def test_a1_circ_holds_the_latent_width_at_the_base():
+    """The exemption above is only sound if the arithmetic works out. Each
+    circular dimension is (cos, sin), so d_z = d_gauss + 2 * n_circular."""
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    over = yaml.safe_load(
+        (root / "configs" / "experiment" / "a1_circ.yaml").read_text("utf-8")
+    )["overrides"]
+    cfg = ModelConfig(d_gauss=int(over["model.d_gauss"]),
+                      n_circular=int(over["model.n_circular"]))
+    base = yaml.safe_load(
+        (root / "configs" / "experiment" / f"{A1_BASE}.yaml").read_text("utf-8")
+    )["overrides"]
+    assert cfg.d_z == int(base["model.d_gauss"]) == 16, cfg.d_z

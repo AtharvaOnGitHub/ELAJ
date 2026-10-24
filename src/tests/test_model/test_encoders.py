@@ -207,3 +207,77 @@ class TestAggregationEncoder:
             assert not torch.allclose(baseline, enc(perturbed)), (
                 f"CELL_CLS ignored group {name}"
             )
+
+
+class TestDnsAblation:
+    """C-2: `model.tokens.dns_embedding: false`.
+
+    The flag has to do exactly one thing — stop substituting the sentinel —
+    and nothing else. These run on the HPC, because the local machine has no
+    torch, so they are the only check this code path gets before five GPU
+    jobs depend on it.
+    """
+
+    @staticmethod
+    def _pair():
+        """Two constructors sharing every weight, differing only in use_dns.
+
+        Sharing the modules rather than seeding twice means a difference in
+        the output cannot come from initialisation.
+        """
+        ge = ModuleGroupEmbedding(GROUP_SIZES, D_TOKEN)
+        ve = SharedDirectionValue(LinearMap(D_TOKEN))
+        dsbn = DSBN(n_studies=2, d_token=D_TOKEN)
+        on = TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN, use_dns=True)
+        off = TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN, use_dns=False)
+        off.dns_embedding = on.dns_embedding
+        return on, off
+
+    def test_off_still_runs_and_keeps_the_shape(self):
+        _, off = self._pair()
+        batch = _make_fake_batch()
+        batch["group_dns_mask"]["group_a"][:, 0] = True
+        out = off(batch)
+        assert out["group_a"].shape == (B, GROUP_SIZES["group_a"], D_TOKEN)
+        assert torch.isfinite(out["group_a"]).all()
+
+    def test_a_measured_gene_is_unaffected_by_the_flag(self):
+        """The ablation must not perturb the genes it is not about."""
+        on, off = self._pair()
+        batch = _make_fake_batch()
+        batch["group_dns_mask"]["group_a"][:] = False
+        batch["group_dns_mask"]["group_a"][:, 0] = True
+        a, b = on(batch), off(batch)
+        torch.testing.assert_close(a["group_a"][:, 1:], b["group_a"][:, 1:])
+        torch.testing.assert_close(a["group_b"], b["group_b"])
+
+    def test_an_unmeasured_gene_becomes_a_measured_zero(self):
+        """With the flag off, a DNS gene must equal what that same gene would
+        be if the study had measured it and found nothing. That is the precise
+        content of the ablation, and asserting it here is what stops the run
+        from measuring some third thing."""
+        _, off = self._pair()
+        dns = _make_fake_batch()
+        dns["group_dns_mask"]["group_a"][:] = False
+        dns["group_dns_mask"]["group_a"][:, 0] = True
+
+        zero = _make_fake_batch()
+        zero["group_dns_mask"]["group_a"][:] = False
+        zero["counts"] = dns["counts"].clone()
+        zero["counts"][:, 0] = 0.0          # group_a's gene 0 is global idx 0
+
+        torch.testing.assert_close(off(dns)["group_a"], off(zero)["group_a"])
+
+    def test_the_sentinel_still_moves_the_token_when_the_flag_is_on(self):
+        """The negative control for the test above: if the two constructors
+        agreed everywhere, the flag would be inert and the ablation vacuous."""
+        on, off = self._pair()
+        batch = _make_fake_batch()
+        batch["group_dns_mask"]["group_a"][:] = False
+        batch["group_dns_mask"]["group_a"][:, 0] = True
+        assert not torch.allclose(on(batch)["group_a"][:, 0],
+                                  off(batch)["group_a"][:, 0])
+
+    def test_the_parameter_survives_so_checkpoints_stay_loadable(self):
+        _, off = self._pair()
+        assert "dns_embedding" in dict(off.named_parameters())

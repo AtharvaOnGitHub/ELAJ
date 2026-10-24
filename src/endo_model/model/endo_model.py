@@ -83,7 +83,8 @@ class EndoFoundationModel(nn.Module):
         # ── Encoders ────────────────────────────────────────────────────────
         self.token_constructor = TokenConstructor(
             self.gene_embedding, self.count_scaler, self.value_encoder,
-            self.dsbn, config.d_token
+            self.dsbn, config.d_token,
+            use_dns=config.tokens.dns_embedding,
         )
         # Same 45 independent encoders as before, executed as grouped matmuls
         # rather than 45 Python calls.  Identical parameters and outputs — see

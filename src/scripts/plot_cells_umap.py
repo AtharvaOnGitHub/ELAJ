@@ -1,9 +1,14 @@
 """One UMAP of the whole corpus, cropped to each cell type's own region.
 
     python -m scripts.plot_cells_umap --cells outputs/cells/p1_dab168_kl1 \
-        --out outputs/analysis/umaps
+        --out outputs/analysis/umaps/p1_dab168_kl1
 
 CPU, laptop. Reads the `--dump-cells` pair and nothing else.
+
+ONE ARM PER `--out`, AND THE DIRECTORY MUST NAME IT. The UMAP is cached under
+`--out/_umap_cache/global_<n>.npy` keyed on the sample size alone, so two arms
+sharing an `--out` would silently plot the second arm's metadata on the first
+arm's embedding. Both frontier models get their own directory.
 
 THE IDEA, AND WHY IT BEATS A UMAP PER CELL TYPE. The first version of this
 script ran a separate UMAP over each cell family's cells. That can only ever
@@ -268,6 +273,7 @@ def main() -> int:
     import matplotlib.pyplot as plt
 
     cells, out = Path(args.cells), Path(args.out)
+    arm = cells.name
     out.mkdir(parents=True, exist_ok=True)
     cache = out / "_umap_cache"
     latent = np.load(cells / "latent.npy")
@@ -336,11 +342,15 @@ def main() -> int:
                 # PER PANEL, because a shared legend's counts belong to
                 # whichever panel supplied it and reading them as global was
                 # the first version's mistake.
-                n_c, own, unlab = composition[name]
+                # NO PURITY FIGURE, and no "placed by the model" fraction
+                # either. A region is an approximation of where one cell type
+                # sits; the claim the figure supports is that the model groups
+                # cells largely by cell type, and a percentage printed on a
+                # panel invites a reader to draw a sharper conclusion than an
+                # approximate boundary can carry.
+                n_c, _, _ = composition[name]
                 shown = int(pd.Series(lab).isin(order).sum())
-                dress(ax, f"{name} region",
-                      f"{n_c:,} cells · {unlab:.0%} placed here by the model "
-                      f"· {shown:,} coloured")
+                dress(ax, f"{name} region", f"{n_c:,} cells · {shown:,} coloured")
                 h = ax.get_legend_handles_labels()
                 if handles is None or len(h[0]) > len(handles[0]):
                     handles = h
@@ -355,7 +365,10 @@ def main() -> int:
             cb = fig.colorbar(mappable, cax=cax)
             cb.set_label(continuous["column"], fontsize=10)
             cb.outline.set_visible(False)
-        save(fig, out / f"{key}.png", title, subtitle, handles,
+        # The arm belongs ON the figure. The first nine were written to a
+        # flat directory with no arm in the path or the title, and nothing in
+        # the saved files said which of the two frontier models made them.
+        save(fig, out / f"{key}.png", f"{title}  ·  {arm}", subtitle, handles,
              ncol=min(len(order) + 1, 6) if order else 4,
              adjust=continuous is None)
         plt.close(fig)

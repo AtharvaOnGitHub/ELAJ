@@ -609,3 +609,54 @@ def test_p1_shares_one_horizon_and_one_seed():
     assert all(h is not None for h in horizons.values()), horizons
     assert len(set(horizons.values())) == 1, horizons
     assert {int(raw["seed"]) for raw in raws.values()} == {24}
+
+
+# ── a1: the ablation wave against p1_dab168_kl1 ───────────────────────────────
+# Each arm removes ONE component from the headline model and changes nothing
+# else. That is the whole content of an ablation: if a second key moves, the
+# run measures a pair of changes and attributes them to one name. p1 had a
+# test for this because a factorial needs it; an ablation wave needs it more,
+# because there is no second cell to catch the drift.
+#
+# THE BASE IS p1_dab168_kl1 AND THAT IS A DECISION, recorded here so a later
+# reader does not have to infer it. kl1 wins every biology axis against
+# kl30 -- cross-donor phase 0.7346 against 0.6033, cross-donor family 0.9820
+# against 0.9565, disease pooled 0.3364 against 0.3045 -- while kl30's only
+# advantage is on the two cost axes, where kl1 already beats the field.
+A1_ABLATIONS = {
+    "a1_nophase":  ("model.loss.w_cls", "0.0"),
+    "a1_clsonly":  ("model.group_encoder.readout", "cls"),
+}
+A1_BASE = "p1_dab168_kl1"
+
+
+def test_a1_each_ablation_differs_from_the_base_on_exactly_one_key():
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+
+    def overrides(name):
+        path = root / "configs" / "experiment" / f"{name}.yaml"
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert raw["name"] == name, f"{path} names itself {raw['name']!r}"
+        return raw
+
+    base_raw = overrides(A1_BASE)
+    base = base_raw["overrides"]
+    for name, (key, value) in A1_ABLATIONS.items():
+        raw = overrides(name)
+        arm = raw["overrides"]
+        differing = {
+            k for k in set(arm) | set(base)
+            if str(arm.get(k, "<absent>")) != str(base.get(k, "<absent>"))
+        }
+        assert differing == {key}, (
+            f"{name} should differ from {A1_BASE} on {key} alone; it differs "
+            f"on {sorted(differing)}. An ablation that moves two keys cannot "
+            f"attribute its result to either."
+        )
+        assert str(arm[key]) == value, (name, key, arm[key])
+        # The seed is not a variable here any more than it was in p1.
+        assert int(raw["seed"]) == int(base_raw["seed"]) == 24, name
+        # Its own output directory, or the base's run is overwritten.
+        assert raw["output_dir"] != base_raw["output_dir"], name

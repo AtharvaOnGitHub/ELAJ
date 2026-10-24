@@ -624,20 +624,20 @@ def test_p1_shares_one_horizon_and_one_seed():
 # against 0.9565, disease pooled 0.3364 against 0.3045 -- while kl30's only
 # advantage is on the two cost axes, where kl1 already beats the field.
 #
-# a1_circ is the ONE arm allowed two keys, and the exemption is written here
-# rather than left to a reader of the YAML: a circular dimension occupies two
-# Cartesian components, so adding four circles without reducing d_gauss would
-# widen the latent from 16 to 24 and confound the geometry with capacity.
-# 8 + 2x4 = 16 is the same budget spent differently.
+# EVERY ARM MOVES EXACTLY ONE KEY. There was briefly an a1_circ with two, on
+# the argument that d_z = d_gauss + 2*n_circular keeps 8 + 2x4 at the base's
+# 16. That argument was wrong and the arm is deleted: d_z is the REPRESENTATION
+# WIDTH, not the degrees of freedom. A point on a circle has one degree of
+# freedom carried in two unit-norm numbers, so 8 Gaussian plus 4 circles is
+# TWELVE intrinsic dimensions against the base's sixteen -- and four of the
+# twelve are compact, with no scale direction, so they do not even carry a
+# Gaussian coordinate's worth each. See docs/paper/ABLATIONS.md.
 A1_ABLATIONS = {
     "a1_nophase":    {"model.loss.w_cls": "0.0"},
     "a1_noecs":      {"model.ecs.enabled": "False"},
     "a1_clsonly":    {"model.group_encoder.readout": "cls"},
     "a1_nodns":      {"model.tokens.dns_embedding": "False"},
     "a1_randgroups": {"data.vocabulary_path": None},   # value is a host path
-    # Built and checked, but not in the launcher's default set: its outcome
-    # changes nothing in the manuscript. Still held to the same rule.
-    "a1_circ":       {"model.d_gauss": "8", "model.n_circular": "4"},
 }
 A1_BASE = "p1_dab168_kl1"
 
@@ -667,6 +667,12 @@ def test_a1_each_ablation_differs_from_the_base_on_its_declared_keys():
             f"differs on {sorted(differing)}. An ablation that moves an "
             f"undeclared key cannot attribute its result to the declared one."
         )
+        assert len(expected) == 1, (
+            f"{name} declares {len(expected)} keys. One arm, one key: an arm "
+            f"needing two is an arm whose question is confounded, which is "
+            f"what retired a1_circ. If a genuine exception ever arises, say "
+            f"here why the two keys cannot be separated."
+        )
         for key, value in expected.items():
             if value is not None:
                 assert str(arm[key]) == value, (name, key, arm[key])
@@ -679,18 +685,3 @@ def test_a1_each_ablation_differs_from_the_base_on_its_declared_keys():
     assert len(set(dirs)) == len(dirs), dirs
 
 
-def test_a1_circ_holds_the_latent_width_at_the_base():
-    """The exemption above is only sound if the arithmetic works out. Each
-    circular dimension is (cos, sin), so d_z = d_gauss + 2 * n_circular."""
-    import yaml
-
-    root = Path(__file__).resolve().parents[2]
-    over = yaml.safe_load(
-        (root / "configs" / "experiment" / "a1_circ.yaml").read_text("utf-8")
-    )["overrides"]
-    cfg = ModelConfig(d_gauss=int(over["model.d_gauss"]),
-                      n_circular=int(over["model.n_circular"]))
-    base = yaml.safe_load(
-        (root / "configs" / "experiment" / f"{A1_BASE}.yaml").read_text("utf-8")
-    )["overrides"]
-    assert cfg.d_z == int(base["model.d_gauss"]) == 16, cfg.d_z

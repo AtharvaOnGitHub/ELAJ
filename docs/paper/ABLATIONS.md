@@ -53,12 +53,59 @@ nothing to pay for in biology.
 Base for every row: x-donor phase **0.7346**, x-donor family **0.9820**,
 donor kNN **0.5188**, study mixing **0.6043**, 1,873,220 parameters.
 
-### Built, not queued
+### Retired: C-3, the circular latent
 
-| arm | change | why it is not in the default set |
+**There is no configuration in which this ablation is interpretable, so it
+was deleted rather than deprioritised.** The reasoning is kept because the
+question is a reasonable one to ask again later.
+
+It was briefly built as `d_gauss` 16→8, `n_circular` 0→4, on the argument
+that `d_z = d_gauss + 2 × n_circular` keeps the latent at the base's 16.
+**That argument was wrong.** `d_z` is the representation *width*, not the
+degrees of freedom: a point on a circle has one degree of freedom carried in
+two unit-norm numbers.
+
+| | width | **intrinsic dimensions** |
 |---|---|---|
-| `a1_circ` (C-3) | `d_gauss` 16→8, `n_circular` 0→4 | It is **not** a latent-width experiment — each circle is two Cartesian components, so `8 + 2×4 = 16` holds `d_z` at the base's exactly, and the contrast is the same budget spent on a different geometry. But it is the only arm whose outcome changes nothing in the manuscript. Name it on the command line to run it. |
-| `a1_nomask` | `training.gene_mask_target` 12500→0 | Not built. Masking measured a very small effect, so the Methods will describe it as a detail rather than claim it, and a run is not needed to say that. |
+| `p1_dab168_kl1` | 16 | **16** |
+| the proposed arm | 16 | **12** |
+
+The thesis counts it the same way — *"four of ELAJ's twelve latent
+dimensions are angles"*, with eight Gaussian and four circles.
+
+And the squeeze is worse than 16 → 12, for three reasons measured or
+observed in earlier series:
+
+1. The circular branch behaves unlike the Gaussian branch; this has shown up
+   across multiple arms, not once.
+2. A circular latent tends to produce **redundancy** of information rather
+   than separation of it — two numbers carrying one fact.
+3. Per variable a circle carries **less** than a Gaussian coordinate, because
+   it is compact and has no scale direction: its divergence from the prior is
+   a function of concentration alone.
+
+So four of the twelve remaining dimensions are not worth a Gaussian
+coordinate each, and the arm is a capacity cut dressed as a geometry change.
+The alternatives do not rescue it:
+
+- `16G + 4C` → 20 intrinsic. Confounded the other way, with more capacity.
+- `12G + 4C` → 16 intrinsic, matched — but width 20, so the adversarial
+  classifier, ECS's cosine and every other consumer of the vector see
+  something wider.
+
+A circle cannot be swapped for a Gaussian dimension at matched capacity
+because the two are not commensurable on either axis. Whichever way the run
+came back, it could not be attributed to geometry.
+
+**What survives for the Methods:** §4.2 now states that a circular dimension
+is not interchangeable with a Gaussian one, which is a stronger and more
+useful sentence than the ablation would have produced.
+
+### Not built
+
+| arm | change | why |
+|---|---|---|
+| `a1_nomask` | `training.gene_mask_target` 12500→0 | Masking measured a very small effect, so the Methods describes it as a detail rather than claiming it. No run is needed to say that. |
 
 ### Deliberately not ablated
 
@@ -80,8 +127,9 @@ in anyone's memory.
 `tests/test_configs/test_configs.py::test_a1_each_ablation_differs_from_the_base_on_its_declared_keys`
 asserts every arm differs from the base on its declared keys and no others.
 An ablation wave needs that check more than the `p1` factorial did — there is
-no second cell to catch the drift. `a1_circ` is the one arm allowed two keys,
-and a second test checks that `d_gauss + 2 × n_circular` still comes to 16.
+no second cell to catch the drift. The test additionally refuses any arm
+declaring **more than one** key: an arm that needs two is an arm whose
+question is confounded, which is exactly what retired C-3.
 
 ### What each arm deliberately leaves alone
 

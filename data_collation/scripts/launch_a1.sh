@@ -43,17 +43,19 @@ ARMS_DEFAULT=(
     a1_nodns        # C-2  tokens.dns_embedding true -> false
     a1_randgroups   # C-1  genes reassigned to groups at random
 )
-# NOT IN THE DEFAULT SET, and each for its own reason. Name one on the
-# command line to run it anyway.
+# NOT HERE, and each for its own reason.
 #
-#   a1_circ      C-3. Built and tested, deliberately not queued. It is NOT a
-#                latent-width experiment -- d_z is held at 16 either way --
-#                but it is the only arm whose outcome changes nothing in the
-#                manuscript, so it goes last or not at all.
+#   a1_circ      C-3, RETIRED, not merely deprioritised. d_z = d_gauss +
+#                2*n_circular is the representation WIDTH, not the degrees of
+#                freedom: a circle carries one of those in two unit-norm
+#                numbers, so 8 + 4 circles is TWELVE intrinsic dimensions
+#                against the base's sixteen, and the four are compact with no
+#                scale direction so they are not worth a Gaussian coordinate
+#                each. No choice of widths makes the swap capacity-neutral,
+#                so no version of the run is interpretable.
 #   a1_nomask    NOT BUILT. training.gene_mask_target 12500 -> 0. Masking
-#                measured a very small effect, so it is a curiosity rather
-#                than an architectural claim, and the Methods will describe
-#                it as one.
+#                measured a very small effect, so it is a detail the Methods
+#                describes rather than a claim it makes.
 #
 # AND THREE THAT ARE DELIBERATELY NOT ABLATED AT ALL. A reviewer will ask,
 # so the reasons live here and in docs/paper/ABLATIONS.md rather than in
@@ -170,6 +172,8 @@ Queued. Nothing else needs doing until they land.
             run logs, and do not edit a prediction after a run has started.
 
 First thing to read in each log is the split coverage table, then the
-parameter count: a1_clsonly and a1_circ should both differ from the base's
-1,873,220 and the other three should match it exactly.
+parameter count. a1_clsonly is the only arm that should differ from the
+base's 1,873,220 -- it hands the aggregation fewer tokens. The other four
+must match it EXACTLY: nophase zeroes a weight, noecs a term, nodns a
+branch, randgroups a partition, and none of those is a parameter.
 EOF

@@ -631,9 +631,12 @@ def test_p1_shares_one_horizon_and_one_seed():
 # 8 + 2x4 = 16 is the same budget spent differently.
 A1_ABLATIONS = {
     "a1_nophase":    {"model.loss.w_cls": "0.0"},
+    "a1_noecs":      {"model.ecs.enabled": "False"},
     "a1_clsonly":    {"model.group_encoder.readout": "cls"},
     "a1_nodns":      {"model.tokens.dns_embedding": "False"},
     "a1_randgroups": {"data.vocabulary_path": None},   # value is a host path
+    # Built and checked, but not in the launcher's default set: its outcome
+    # changes nothing in the manuscript. Still held to the same rule.
     "a1_circ":       {"model.d_gauss": "8", "model.n_circular": "4"},
 }
 A1_BASE = "p1_dab168_kl1"

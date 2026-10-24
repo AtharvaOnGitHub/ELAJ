@@ -38,11 +38,36 @@ set -euo pipefail
 # the phase axis of the frontier cannot be described either way.
 ARMS_DEFAULT=(
     a1_nophase      # C-6  w_cls 40 -> 0
+    a1_noecs        # C-7  ecs.enabled true -> false. Largest weight in the model.
     a1_clsonly      # C-4  group readout cls+pool8 -> cls
     a1_nodns        # C-2  tokens.dns_embedding true -> false
     a1_randgroups   # C-1  genes reassigned to groups at random
-    a1_circ         # C-3  d_gauss 16 -> 8, n_circular 0 -> 4. Curiosity.
 )
+# NOT IN THE DEFAULT SET, and each for its own reason. Name one on the
+# command line to run it anyway.
+#
+#   a1_circ      C-3. Built and tested, deliberately not queued. It is NOT a
+#                latent-width experiment -- d_z is held at 16 either way --
+#                but it is the only arm whose outcome changes nothing in the
+#                manuscript, so it goes last or not at all.
+#   a1_nomask    NOT BUILT. training.gene_mask_target 12500 -> 0. Masking
+#                measured a very small effect, so it is a curiosity rather
+#                than an architectural claim, and the Methods will describe
+#                it as one.
+#
+# AND THREE THAT ARE DELIBERATELY NOT ABLATED AT ALL. A reviewer will ask,
+# so the reasons live here and in docs/paper/ABLATIONS.md rather than in
+# anyone's memory:
+#
+#   DAB         the p1 factorial already varies lambda_dab over 7, 168, 336
+#               at two latent prices. That IS the sensitivity analysis, and
+#               a sixth point at 0 would restate it.
+#   CONDITIONING a conditional VAE conditions its decoder by definition.
+#               Ablating it tests the class of model, not this one.
+#   DSBN        no clean switch exists -- dsbn_learn_affine freezes the
+#               affine but leaves per-study statistics in place -- so the
+#               run would measure something we could not name. The Methods
+#               claim is softened to match instead.
 NEEDS_VOCAB="a1_randgroups"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

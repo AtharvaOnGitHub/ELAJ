@@ -58,20 +58,28 @@ class TestCheckpointManagerRehydrate:
     def test_adopts_existing_checkpoints(self, tmp_path):
         """A fresh manager must adopt every checkpoint ON DISK and rank them.
 
-        The count is 2 and not 3 because the Trainer's manager carries
-        `RetentionPolicy(every=5)`: of epochs 0, 1 and 2, epoch 1 survives as
-        the best and epoch 2 as the last, and epoch 0 is on no schedule
-        because `scheduled` excludes it by design. This asserted 3 from
-        before retention replaced top-k, so it was testing a pruning rule
-        that no longer exists rather than the rehydration it is named for.
-        Counted off the filesystem so the two can never disagree again.
+        THE COUNT IS 3, AND IT HAS NOW BEEN WRONG IN BOTH DIRECTIONS. It
+        asserted 3 when retention was top-k, was corrected to 2 on the
+        reasoning that `scheduled` excludes epoch 0, and `RetentionPolicy`
+        has since been changed to KEEP epoch 0 deliberately -- "as a
+        diagnostic and not as a candidate", with the correlation figures in
+        retention.py explaining why an undertrained epoch 0 must be visible
+        but never selectable. So of epochs 0, 1 and 2: epoch 0 survives as
+        the diagnostic, epoch 1 as the best, epoch 2 as the last.
+
+        The code is right and the test was stale. Counted off the filesystem
+        rather than hard-coded, so the assertion names what retention
+        actually did rather than what someone expected it to do.
         """
         trainer, model, optimizer = _setup(0, 3, tmp_path)
         for epoch, val in ((0, 0.9), (1, 0.4), (2, 0.6)):
             trainer.ckpt_manager.save(model, optimizer, epoch, epoch * 10, val)
         on_disk = sorted(p.name for p in tmp_path.glob("epoch_*.pt"))
-        assert len(on_disk) == 2, on_disk
+        assert len(on_disk) == 3, on_disk
+        assert on_disk[0].startswith("epoch_0000_"), on_disk
         fresh = CheckpointManager(str(tmp_path))
+        # Epoch 0 is kept but must never be chosen: epoch 1 has the best
+        # metric and it is epoch 1 the manager has to rank first.
         assert fresh.best_path.name.startswith("epoch_0001_")
         assert len(fresh._history) == len(on_disk)
 

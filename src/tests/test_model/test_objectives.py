@@ -202,9 +202,17 @@ class TestCompositeLoss:
         # have been returned since early October 2026. Nothing caught it
         # because this whole module is skipped wherever torch is absent,
         # which is the laptop the configs are written on.
+        # AND STALE A SECOND TIME, for the same reason. The phase head's
+        # three keys were added when the note above was written; the two
+        # blanking counters arrived later (66beb48) and this set was not
+        # touched again. A torch-skipped module cannot catch its own drift,
+        # so the fix is not another manual edit -- it is that the suite now
+        # runs on the HPC before any wave is queued, which is what surfaced
+        # this.
         expected = {"elbo", "nb", "kl_gauss", "kl_circ", "beta_kl",
                     "dab", "cce", "ecs", "ecs_studies",
                     "cls", "cls_cells", "cls_correct",
+                    "blanked_covariates", "blanked_drain",
                     "mu_gauss_norm", "total"}
         assert expected == set(out.keys())
 

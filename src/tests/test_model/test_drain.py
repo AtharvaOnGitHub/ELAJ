@@ -127,16 +127,54 @@ class TestBlanking:
         both = sum(d.covariates and d.drain for d in draws)
         assert 90 < both < 210, both
 
-    def test_the_drain_rate_does_not_perturb_the_covariate_sequence(self):
-        """Short-circuiting p <= 0 keeps the two streams separable, so an arm
-        with the drain blanking off sees the same covariate steps as one with
-        it on."""
-        a = [d.covariates for d in
-             (ProvenanceBlanking(covariates_p=0.5, drain_p=0.0, seed=4)
-              .draw(True) for _ in range(40))]
-        policy = ProvenanceBlanking(covariates_p=0.5, drain_p=0.0, seed=4)
-        b = [policy.draw(True).covariates for _ in range(40)]
-        assert a == b
+    def test_the_covariate_sequence_is_reproducible_from_the_seed(self):
+        """Two identically configured policies agree step for step.
+
+        THIS TEST WAS BROKEN AND IT NEVER TESTED WHAT IT CLAIMED. It built
+        its first list as
+
+            [ProvenanceBlanking(...).draw(True) for _ in range(40)]
+
+        inside a generator expression, which constructs FORTY policies and
+        takes the first draw from each -- forty copies of one value -- and
+        compared that against one policy drawn forty times. The two can only
+        match by luck, and on the HPC they diverged at index 2.
+        """
+        def stream(drain_p):
+            policy = ProvenanceBlanking(covariates_p=0.5, drain_p=drain_p,
+                                        seed=4)
+            return [policy.draw(True).covariates for _ in range(40)]
+
+        assert stream(0.0) == stream(0.0)
+
+    def test_a_live_drain_rate_DOES_shift_the_covariate_sequence(self):
+        """Pins a real defect rather than asserting it away.
+
+        `ProvenanceBlanking._fires` says short-circuiting `p <= 0` "keeps the
+        two independent", and that is not what the code does. ONE generator
+        serves both draws: with `drain_p` 0 a step consumes one value, with
+        `drain_p` above 0 it consumes two. So the covariate stream an arm
+        sees depends on whether the drain knob is on, which is precisely the
+        coupling the short-circuit was meant to remove.
+
+        WHAT IT AFFECTS. Only a comparison between two drain RATES, where the
+        covariate blanking is then not held fixed across the pair. The drain
+        is out of the main paper (C-5 in docs/paper/OUTSTANDING.md, repo and
+        supplement only), and no arm in the p1 or a1 waves enables blanking
+        at all, so nothing reported depends on it.
+
+        THE FIX IS A SECOND GENERATOR, deliberately not applied here: it
+        changes the random stream of every drain run ever done, and this
+        test is the record that makes that a decision rather than an
+        accident. If the two streams are ever separated, this test should
+        start failing and be replaced by the one above it, generalised.
+        """
+        def stream(drain_p):
+            policy = ProvenanceBlanking(covariates_p=0.5, drain_p=drain_p,
+                                        seed=4)
+            return [policy.draw(True).covariates for _ in range(40)]
+
+        assert stream(0.0) != stream(0.3)
 
     def test_it_is_reproducible_from_the_seed(self):
         def run():
@@ -380,16 +418,36 @@ class TestCircularFreeBitsIsSeparate:
 
     def test_the_floor_is_what_the_circular_kl_receives(self):
         """A floored KL cannot fall below free_bits per dimension, so a
-        near-uniform posterior reads as n_circular * floor rather than ~0."""
+        near-uniform posterior reads as n_circular * floor rather than ~0.
+
+        KAPPA 1 IS NOT UNIFORM, and this test used to say it was. It passed
+        `kappa = 1.0001` as "essentially uniform" and asserted the bare KL
+        was below 0.5; on the HPC it came back 1.2275. The implementation is
+        right and the premise was wrong -- `power_spherical_kl_uniform` is
+        zero at kappa = 0, and at kappa = 1 each circular dimension already
+        carries 0.3069 nats, so four of them carry 1.2275. Checked against
+        the closed form independently of the code under test.
+
+        Worth keeping in view: the model's own `kappa_floor` is 1.0, so the
+        SMALLEST circular KL any arm can emit is that 0.3069 per dimension.
+        A free-bits floor of 1.0 per dimension therefore binds on every step
+        of every circular run, rather than only on collapsed ones.
+        """
         from endo_model.model.objectives.kl_divergence import (
             PowerSphericalKLLoss,
         )
 
-        kappa = torch.full((16, 4), 1.0001)      # essentially uniform
-        bare = float(PowerSphericalKLLoss()(kappa, 0.0))
-        floored = float(PowerSphericalKLLoss()(kappa, 1.0))
-        assert bare < 0.5
+        near_uniform = torch.full((16, 4), 0.01)     # kappa -> 0 is uniform
+        bare = float(PowerSphericalKLLoss()(near_uniform, 0.0))
+        floored = float(PowerSphericalKLLoss()(near_uniform, 1.0))
+        assert bare < 0.5, bare
         assert floored == pytest.approx(4.0, abs=1e-3)
+
+        # And at the floor the model actually imposes, the bare value is a
+        # long way above zero -- the number the old premise got wrong.
+        at_kappa_floor = torch.full((16, 4), 1.0)
+        assert float(PowerSphericalKLLoss()(at_kappa_floor, 0.0)) == \
+            pytest.approx(1.2274, abs=1e-3)
 
 
 class TestWithinStudyShare:

@@ -200,3 +200,49 @@ observation goes to Discussion marked as requiring data we do not have.
   failing to help supports no claim about whether the mechanism can work.
 - **Width-matched baselines.** A 16-component PCA companion row is an
   appendix item, not an ablation.
+
+---
+
+## The test gate fired, 25 October 2026
+
+`launch_a1.sh` submitted the suite, it failed 5 of 1,937, and no arm started.
+Working as designed. One failure was the new code; four were drift.
+
+| test | verdict |
+|---|---|
+| `TestDnsAblation::test_a_measured_gene_is_unaffected_by_the_flag` | **Mine, and the test was wrong, not the flag.** DSBN normalises by the statistics of the batch in front of it, so changing one position's value changes every token's. 320 of 320 elements differed. The unit tests now pin the batch statistics with `.eval()`; a new test asserts the train-mode coupling so the reason is recorded rather than forgotten. |
+| `TestCompositeLoss::test_output_keys` | Stale. `blanked_covariates` and `blanked_drain` were added by `66beb48` and the expected set was never updated. Its own comment already said it had gone stale once before, for the phase head. |
+| `TestCheckpointManagerRehydrate::test_adopts_existing_checkpoints` | Stale, and wrong in both directions over its life. `RetentionPolicy` was changed to keep epoch 0 "as a diagnostic and not as a candidate"; the test still asserted the older rule that pruned it. The code is right. |
+| `TestCircularFreeBitsIsSeparate::test_the_floor_is_what_the_circular_kl_receives` | False premise. It passed `kappa = 1.0001` as "essentially uniform"; the KL is zero at kappa **0**, and at kappa 1 each circular dimension already carries 0.3069 nats. Verified against the closed form independently: 4 × 0.306882 = 1.227527 against the 1.2275257 the run reported. The implementation was correct to six digits. |
+| `test_the_drain_rate_does_not_perturb_the_covariate_sequence` | **A real defect, now pinned rather than asserted away.** See below. |
+
+### The one real defect
+
+`ProvenanceBlanking._fires` claims that short-circuiting `p <= 0` "keeps the
+two independent". It does not. **One generator serves both draws**: a step
+consumes one value with `drain_p` at 0 and two with it above 0, so the
+covariate blanking sequence an arm sees depends on whether the drain knob is
+on — exactly the coupling the short-circuit was meant to remove.
+
+The test that should have caught it was itself broken: it built one side
+inside a generator expression that constructed a *new policy per iteration*,
+comparing forty copies of one draw against a real forty-step sequence. Those
+can only match by luck, and they stopped matching at index 2.
+
+**Scope:** only a comparison between two drain *rates*, where covariate
+blanking is then not held fixed across the pair. The drain is out of the main
+paper (C-5, repository and supplement only) and no `p1` or `a1` arm enables
+blanking at all, so nothing reported depends on it.
+
+**Not fixed, deliberately.** A second generator would change the random
+stream of every drain run ever done. The test now asserts the coupling
+exists, so separating the streams becomes a decision someone makes rather
+than a silent change.
+
+### What this says about the suite
+
+The drift traces to commits of 6–8 October. The suite has therefore not
+passed since roughly 6 October, and nothing noticed because the module that
+holds these tests is skipped wherever torch is absent — which is the laptop
+everything is written on. The gate is what surfaced two and a half weeks of
+it, before five GPU jobs ran against it rather than after.

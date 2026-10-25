@@ -224,6 +224,24 @@ class TestDnsAblation:
 
         Sharing the modules rather than seeding twice means a difference in
         the output cannot come from initialisation.
+
+        BOTH IN EVAL MODE, AND THE REASON IS THE WHOLE POINT OF THESE TESTS.
+        DSBN is a batch normalisation: in training mode it normalises by the
+        statistics OF THE BATCH IN FRONT OF IT. The sentinel changes one
+        position's value, which changes those statistics, which changes every
+        other token in the batch -- so in train mode the flag perturbs 100%
+        of the output and no per-gene claim can be isolated at all. The first
+        version of this file asserted measured genes were untouched, ran on
+        the HPC, and failed on 320 of 320 elements for exactly that reason.
+        Eval mode uses the running statistics instead, which are identical
+        across the shared module, so what remains between `on` and `off` is
+        the DNS branch and nothing else.
+
+        That coupling is a true property of training and is recorded in
+        docs/paper/ABLATIONS.md: a1_nodns changes one key, and DSBN then
+        carries that change to every token in the batch. It is a consequence
+        of the ablation, not a confound -- but it is the reason the unit
+        tests must pin the batch statistics to say anything precise.
         """
         ge = ModuleGroupEmbedding(GROUP_SIZES, D_TOKEN)
         ve = SharedDirectionValue(LinearMap(D_TOKEN))
@@ -231,7 +249,25 @@ class TestDnsAblation:
         on = TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN, use_dns=True)
         off = TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN, use_dns=False)
         off.dns_embedding = on.dns_embedding
-        return on, off
+        return on.eval(), off.eval()
+
+    def test_train_mode_couples_the_batch_which_is_why_the_rest_use_eval(self):
+        """The negative control for the eval-mode decision above. If this ever
+        starts passing, DSBN has stopped normalising by batch statistics and
+        the other tests here could be run in train mode."""
+        ge = ModuleGroupEmbedding(GROUP_SIZES, D_TOKEN)
+        ve = SharedDirectionValue(LinearMap(D_TOKEN))
+        dsbn = DSBN(n_studies=2, d_token=D_TOKEN)
+        on = TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN, use_dns=True)
+        off = TokenConstructor(ge, RawCounts(), ve, dsbn, D_TOKEN, use_dns=False)
+        off.dns_embedding = on.dns_embedding
+        on.train(), off.train()
+        batch = _make_fake_batch()
+        batch["group_dns_mask"]["group_a"][:] = False
+        batch["group_dns_mask"]["group_a"][:, 0] = True
+        # Measured genes, which the flag does not address, still move.
+        assert not torch.allclose(on(batch)["group_a"][:, 1:],
+                                  off(batch)["group_a"][:, 1:])
 
     def test_off_still_runs_and_keeps_the_shape(self):
         _, off = self._pair()

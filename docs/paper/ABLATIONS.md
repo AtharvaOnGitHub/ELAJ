@@ -51,7 +51,7 @@ nothing to pay for in biology.
 | **`a1_randgroups`**<br>C-1 | Does the pathway grouping carry biology, or only cost? | `data.vocabulary_path` → shuffled | same | val_nb clearly worse<br>x-donor family **0.93–0.97**<br>x-donor phase 0.62–0.72 | |
 
 Base for every row: x-donor phase **0.7346**, x-donor family **0.9820**,
-donor kNN **0.5188**, study mixing **0.6043**, 1,873,220 parameters.
+donor kNN **0.5188**, study mixing **0.6043**, 1,883,986 parameters.
 
 ### Retired: C-3, the circular latent
 
@@ -147,6 +147,28 @@ question is confounded, which is exactly what retired C-3.
   `global_idx`, so parameter count, bucketing, padding, attention cost and
   effective gene space are identical and the count matrices are untouched.
 - **Seed 24** on all of them, as on all six `p1` arms.
+
+### Correction, 26 October 2026 — `a1_nodns`'s rationale was wrong
+
+The registered prediction stands as written (**"study mixing worse than
+0.6043"**) because a prediction edited after its run has started is not a
+prediction. But the reasoning behind it was mine and it was wrong, so the
+error is recorded rather than quietly fixed.
+
+I argued the sentinel suppresses a study signal: that folding "unmeasured"
+into "zero" hands the encoder a readable panel signature. **The sentinel
+cannot do that, and arguably does the opposite** — marking unmeasured genes
+explicitly makes the panel *more* legible, not less. Panel-as-signature is
+removed by **masking every cell to 12,500 genes regardless of its study's
+panel size**, which is a different mechanism entirely.
+
+What the sentinel actually buys is biological correctness: the model never
+learns that a gene is silent in a cell type when nobody looked at it. The
+defensible expectation is therefore movement in **reconstruction and
+cross-donor cell family**, with study mixing roughly flat — possibly
+*better* with the sentinel off.
+
+Read the arm against that when it lands, not against the registered line.
 
 ### The falsifiers worth naming now
 

@@ -172,8 +172,11 @@ Queued. Nothing else needs doing until they land.
             run logs, and do not edit a prediction after a run has started.
 
 First thing to read in each log is the split coverage table, then the
-parameter count. a1_clsonly is the only arm that should differ from the
-base's 1,873,220 -- it hands the aggregation fewer tokens. The other four
-must match it EXACTLY: nophase zeroes a weight, noecs a term, nodns a
-branch, randgroups a partition, and none of those is a parameter.
+parameter count. ALL FIVE SHOULD READ 1,883,986, the base's own figure.
+An earlier version of this note expected a1_clsonly to differ because it
+hands the aggregation fewer tokens; that was wrong. MeanPool, StdPool,
+QuantilePool and TopKMeanPool hold no parameters and ConcatReadout has no
+projection, so the pooled statistics are COMPUTED, not learned, and
+dropping them frees none. A differing count on any arm means something
+moved that should not have.
 EOF

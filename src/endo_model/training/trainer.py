@@ -308,7 +308,8 @@ class Trainer:
             self._set_sampler_epoch(epoch)
             train_metrics = self._train_epoch()
             history["train_loss"].append(train_metrics["total"])
-            _record(history, "train", train_metrics)
+            _record(history, "train", train_metrics,
+                    rows=len(history["train_loss"]) - 1)
 
             if epoch % self.config.val_check_interval == 0:
                 wants = (
@@ -335,7 +336,8 @@ class Trainer:
                     continue
                 val_loss = val_metrics["total"]
                 history["val_loss"].append(val_loss)
-                _record(history, "val", val_metrics)
+                _record(history, "val", val_metrics,
+                        rows=len(history["val_loss"]) - 1)
 
                 # Before checkpointing and before the figures: the one number
                 # that says whether this run is worth continuing.
@@ -572,14 +574,48 @@ class Trainer:
 
 
 def _record(
-    history: dict[str, list[float]], prefix: str, metrics: dict[str, float]
+    history: dict[str, list[float]], prefix: str, metrics: dict[str, float],
+    rows: int | None = None,
 ) -> None:
     """Append one epoch's metric breakdown into `history` under `prefix_<name>`.
 
     "total" is skipped — it is already recorded as `train_loss` / `val_loss`,
     and a duplicate column reads as though the two could disagree.
+
+    `rows` IS THE ROW THIS EPOCH OCCUPIES, and passing it is what keeps an
+    intermittent metric aligned to its own epoch. Not every metric is
+    produced every epoch: BlockProbe scores the latent's blocks on a cadence
+    (`block_probe_every`) and simply omits those keys in between. Appending
+    blindly then puts a value computed at epoch 2k into row k, and the column
+    silently reads as a different epoch's number from the one beside it.
+
+    That is not hypothetical. Every arm of the p and a series carries a
+    `val_phase_knn_gauss_xdonor` column holding half as many values as it has
+    epochs, written consecutively, so a reader taking "the value at the best
+    epoch" took whatever had landed in that slot. It surfaced only because
+    a1_randgroups ran long enough for the tail to show as NaN; the shorter
+    arms looked complete and were not.
+
+    Padding with NaN up to `rows` means a skipped epoch leaves a hole rather
+    than a shift, which pandas reads as missing and a plot skips.
     """
+    present = {f"{prefix}_{n}" for n in metrics if n != "total"}
     for name, value in metrics.items():
         if name == "total":
             continue
-        history.setdefault(f"{prefix}_{name}", []).append(value)
+        history.setdefault(f"{prefix}_{name}", [])
+    if rows is not None:
+        # Pad EVERY column under this prefix, not only the ones reporting
+        # now. A metric that is absent from the final epoch would otherwise
+        # leave a column short of the run, and a ragged table is read
+        # differently by whatever assembles the CSV.
+        target = rows + 1
+        for key, column in history.items():
+            if not key.startswith(f"{prefix}_"):
+                continue
+            while len(column) < (rows if key in present else target):
+                column.append(float("nan"))
+    for name, value in metrics.items():
+        if name == "total":
+            continue
+        history[f"{prefix}_{name}"].append(value)

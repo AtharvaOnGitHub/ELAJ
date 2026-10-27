@@ -184,6 +184,109 @@ decorating it:
   nothing, and the term gets dropped. Not remote: `w_ecs` came down from 1400
   to 50 during the drain work and was never re-examined at the frontier.
 
+
+---
+
+## What the runs showed, 27 October 2026
+
+All five finished. Early stopping fired on each, none reached the 20-epoch
+wall, and every arm reports **1,883,986** parameters — including
+`a1_clsonly`, because the pooled statistics are computed rather than learned
+and dropping them frees none.
+
+**These are VALIDATION numbers and the registered predictions are in
+BENCHMARK terms.** The two disagree for the same checkpoint (phase reads
+0.8406 here against the benchmark's 0.7346), so the results column stays
+empty until the scoring pass returns. What follows is direction, not value.
+
+| arm | best ep | epochs | val_nb | family | phase | donor ↓ | study ↓ |
+|---|---|---|---|---|---|---|---|
+| **BASE** | 4 | 10 | 0.4024 | 0.9835 | 0.8406 | 0.4757 | 0.6961 |
+| `a1_nophase` | **0** | 8 | 0.4083 | 0.9786 | **0.4977** | 0.3554 | 0.5940 |
+| `a1_noecs` | 4 | 10 | 0.4004 | 0.9850 | 0.8561 | 0.4971 | 0.7558 |
+| `a1_clsonly` | 4 | 10 | 0.3979 | 0.9809 | **0.7086** | 0.4499 | 0.6769 |
+| `a1_nodns` | 5 | 11 | 0.4005 | 0.9805 | 0.8488 | 0.4736 | 0.7072 |
+| `a1_randgroups` | 12 | 18 | **0.3911** | **0.9582** | 0.7278 | 0.4696 | 0.6772 |
+
+### THE SCALARS UNDERSTATE EVERY ARM. READ THE UMAPs.
+
+Three of the five readings below were wrong when taken from the table alone
+and right when taken from `figures/latent_umap_epoch*.png`. The by-study
+panel is the one that matters: in the base it is a connected mass with
+studies intermixed, and an ablation that breaks it into single-colour
+islands has lost donor-blindness however little the kNN scalar moved.
+
+### C-6, the phase head: a regulariser, and the loss curves say so
+
+Not an undertrained model — an **overfitting** one. Train reconstruction
+falls 0.418 → 0.380 and keeps falling; validation rises monotonically from
+epoch 1, 0.412 → 0.430. The adversarial panel agrees: val DAB climbs to 2.0
+against train's 1.64, so the discriminator reads held-out studies better
+every epoch. Epoch 0 is the reported checkpoint because every later epoch
+was worse on data the model had not seen.
+
+So the head is not only supplying phase. It is **the only thing holding the
+train/val gap closed**, and removing it opens that gap immediately and
+permanently. That is a stronger claim than the one the arm was built to
+test, and it is visible in `losses.png` rather than in any column.
+
+### C-7, ECS: buys donor- and study-blindness, and the UMAP is blunt about it
+
+Donor 0.476 → 0.497 and study 0.696 → 0.756, both worse. The by-study UMAP
+fragments into discrete single-colour islands where the base has a
+continuum: **the study is readable off the latent despite DAB at
+$\lambda=168$.** Phase and reconstruction improve slightly, so ECS is
+paying for mixing with a little of both.
+
+### C-4, the attention statistics: they carry phase
+
+Phase 0.8406 → 0.7086, the second-largest drop in the wave, while cell
+family moves 0.003. Reconstruction improves. If the scoring pass confirms
+the magnitude, the statistics earn their place on phase alone regardless of
+what the other axes say — phase is a property of the distribution's shape
+within a pathway, which is exactly what an average discards.
+
+### C-2, the sentinel: NOT the null result the scalars suggest
+
+Every column moves by less than 0.012, and on that basis this looked like a
+component doing nothing. The UMAP disagrees: the left of the by-study panel
+breaks into clean single-study islands where the base has a continuum, with
+the phase head, DAB and DSBN all still running. kNN recovery is insensitive
+to that kind of structure. **The scalar was measuring the wrong thing.**
+
+### C-1, random grouping: the strongest result in the wave
+
+Cell family 0.9835 → **0.9582**, the largest biological drop of any arm,
+with phase down 0.113 — and the **best reconstruction of any model
+including the base**, reached over the longest run (18 epochs) with the
+healthiest curves in the wave: train and validation descending together,
+converging smoothly, the gap small and stable.
+
+A reader shown only that loss curve would say the model had converged well
+and was well regularised. The latent says otherwise: disease status smeared
+where the base has structured regions, tissue type blurred. **The arm that
+reconstructs best and trains most cleanly learned the least biology.**
+
+That is the inductive-bias claim demonstrated rather than asserted. The
+pathway partition costs reconstruction and buys structure, and the two
+point in opposite directions in the same run.
+
+### A metrics bug, found through the NaN
+
+`val_phase_knn_gauss_xdonor` was written to consecutive rows rather than to
+its own epoch. `BlockProbe` scores the latent's blocks every
+`block_probe_every` epochs and omits the keys in between; `_record` appended
+to whichever keys were present, so the column held half as many values as
+the run had epochs and row *k* carried epoch *2k*'s number.
+
+**It affects every arm of the p and a series, including the base.** It
+surfaced only because `a1_randgroups` ran long enough for the tail to read
+NaN. Any earlier analysis quoting a `_gauss` column at a named epoch is
+suspect. Fixed in `trainer.py`; the correctly-aligned
+`val_phase_knn_xdonor` is used throughout the table above, and it changed
+two numbers — `a1_clsonly`'s phase loss is −0.132 rather than −0.106, and
+`a1_randgroups` has a phase number (0.7278) rather than a hole.
+
 ---
 
 ## What the figures could not settle

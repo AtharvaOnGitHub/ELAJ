@@ -243,3 +243,47 @@ class TestLossStateSurvivesAResume:
         fresh, model2, optimizer2 = _setup(4, 2, tmp_path / "fresh_no_ls")
         CheckpointManager.load(str(path), model2, optimizer2,
                                loss=fresh.composite_loss)
+
+
+class TestIntermittentMetricAlignment:
+    """A metric produced on a cadence must land on ITS epoch, not the next
+    free slot.
+
+    `BlockProbe` scores the latent's blocks every `block_probe_every` epochs
+    and omits those keys in between. Before the fix, `_record` appended to
+    whichever keys were present, so a column that skipped an epoch stayed
+    short and every later value landed one row early. Every p- and a-series
+    run carries a `val_phase_knn_gauss_xdonor` column with half as many
+    values as epochs, written consecutively; reading "the value at the best
+    epoch" read a different epoch's number.
+    """
+
+    @staticmethod
+    def _run(per_epoch):
+        from endo_model.training.trainer import _record
+        history = {"val_loss": []}
+        for i, metrics in enumerate(per_epoch):
+            history["val_loss"].append(float(i))
+            _record(history, "val", metrics, rows=len(history["val_loss"]) - 1)
+        return history
+
+    def test_a_skipped_epoch_leaves_a_hole_not_a_shift(self):
+        import math
+        h = self._run([{"nb": 1.0, "blocky": 10.0},
+                       {"nb": 2.0},
+                       {"nb": 3.0, "blocky": 30.0}])
+        assert h["val_nb"] == [1.0, 2.0, 3.0]
+        assert len(h["val_blocky"]) == 3, h["val_blocky"]
+        assert h["val_blocky"][0] == 10.0
+        assert math.isnan(h["val_blocky"][1])
+        assert h["val_blocky"][2] == 30.0, "30.0 belongs to epoch 2, not epoch 1"
+
+    def test_every_column_is_as_long_as_the_run(self):
+        h = self._run([{"nb": 1.0, "blocky": 10.0}, {"nb": 2.0}, {"nb": 3.0}])
+        assert {len(v) for v in h.values()} == {3}
+
+    def test_a_metric_appearing_late_is_padded_from_the_start(self):
+        import math
+        h = self._run([{"nb": 1.0}, {"nb": 2.0, "late": 99.0}])
+        assert math.isnan(h["val_late"][0])
+        assert h["val_late"][1] == 99.0

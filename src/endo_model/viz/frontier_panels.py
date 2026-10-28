@@ -72,6 +72,10 @@ FAMILIES: dict[str, tuple[str, str, str]] = {
     "elaj": ("ELAJ m-series — earlier", "primary_faded", r"ELAJ\ prior"),
     "baseline": ("Fitted baseline", "secondary", r"Fitted"),
     "foundation": ("Foundation model (zero-shot)", "muted", r"Foundation"),
+    # A1: the base with one component removed. Drawn as its own family
+    # because these are counterfactuals, not candidates -- a reader should
+    # not be able to mistake an ablation for a model we would report.
+    "ablation": ("A1 ablation — one component removed", "ablation", r"Ablation"),
 }
 
 #: Markers assigned within a family, in the order points are declared. Nine,

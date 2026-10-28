@@ -44,11 +44,11 @@ nothing to pay for in biology.
 
 | arm | claim under test | change against `p1_dab168_kl1` | params | predicted | result |
 |---|---|---|---|---|---|
-| **`a1_nophase`**<br>C-6 | Is the phase axis the architecture or the head? | `model.loss.w_cls`&nbsp;40&nbsp;→&nbsp;**0** | same | x-donor phase **0.45–0.62**<br>x-donor family 0.975–0.985<br>donor kNN 0.48–0.56 | |
-| **`a1_noecs`**<br>C-7 | What does the largest weight in the model buy? | `model.ecs.enabled`<br>true&nbsp;→&nbsp;**false** | same | x-donor family **0.94–0.975**<br>val_nb better, or inside the band<br>donor kNN 0.48–0.58 | |
-| **`a1_clsonly`**<br>C-4 | Do attention statistics beat one learned query? | `model.group_encoder.readout`<br>`cls+pool8`&nbsp;→&nbsp;**`cls`** | ↓ | x-donor family **0.955–0.978**<br>x-donor phase 0.66–0.73<br>val_nb worse than the 4% band | |
-| **`a1_nodns`**<br>C-2 | Is "never measured" different from "measured zero"? | `model.tokens.dns_embedding`<br>true&nbsp;→&nbsp;**false** | same | study mixing **worse than 0.6043**<br>donor kNN 0.50–0.58<br>x-donor family 0.96–0.98 | |
-| **`a1_randgroups`**<br>C-1 | Does the pathway grouping carry biology, or only cost? | `data.vocabulary_path` → shuffled | same | val_nb clearly worse<br>x-donor family **0.93–0.97**<br>x-donor phase 0.62–0.72 | |
+| **`a1_nophase`**<br>C-6 | Is the phase axis the architecture or the head? | `model.loss.w_cls`&nbsp;40&nbsp;→&nbsp;**0** | same | x-donor phase **0.45–0.62**<br>x-donor family 0.975–0.985<br>donor kNN 0.48–0.56 | x-donor phase **0.4812** HIT<br>family 0.9794 HIT<br>donor 0.3754 miss |
+| **`a1_noecs`**<br>C-7 | What does the largest weight in the model buy? | `model.ecs.enabled`<br>true&nbsp;→&nbsp;**false** | same | x-donor family **0.94–0.975**<br>val_nb better, or inside the band<br>donor kNN 0.48–0.58 | family **0.9837** miss<br>donor 0.5520 HIT<br>mixing 0.6829 |
+| **`a1_clsonly`**<br>C-4 | Do attention statistics beat one learned query? | `model.group_encoder.readout`<br>`cls+pool8`&nbsp;→&nbsp;**`cls`** | ↓ | x-donor family **0.955–0.978**<br>x-donor phase 0.66–0.73<br>val_nb worse than the 4% band | family 0.9798 miss<br>x-donor phase **0.6384** miss<br>val_nb better, not worse |
+| **`a1_nodns`**<br>C-2 | Is "never measured" different from "measured zero"? | `model.tokens.dns_embedding`<br>true&nbsp;→&nbsp;**false** | same | study mixing **worse than 0.6043**<br>donor kNN 0.50–0.58<br>x-donor family 0.96–0.98 | mixing **0.6260** HIT<br>donor 0.5207 HIT<br>family 0.9816 miss |
+| **`a1_randgroups`**<br>C-1 | Does the pathway grouping carry biology, or only cost? | `data.vocabulary_path` → shuffled | same | val_nb clearly worse<br>x-donor family **0.93–0.97**<br>x-donor phase 0.62–0.72 | family **0.9606** HIT<br>x-donor phase 0.6780 HIT<br>val_nb better, not worse |
 
 Base for every row: x-donor phase **0.7346**, x-donor family **0.9820**,
 donor kNN **0.5188**, study mixing **0.6043**, 1,883,986 parameters.
@@ -286,6 +286,137 @@ suspect. Fixed in `trainer.py`; the correctly-aligned
 `val_phase_knn_xdonor` is used throughout the table above, and it changed
 two numbers — `a1_clsonly`'s phase loss is −0.132 rather than −0.106, and
 `a1_randgroups` has a phase number (0.7278) rather than a hole.
+
+
+---
+
+## Scored, 28 October 2026
+
+The benchmark pass is in. **Six of eleven banded predictions landed**, and the
+misses carry more than the hits.
+
+| arm | family | phase | disease | donor ↓ | mixing ↓ | purity ↓ |
+|---|---|---|---|---|---|---|
+| **BASE** | 0.9820 | 0.7346 | 0.3364 | 0.5188 | 0.6043 | 0.6403 |
+| `-phase head` | 0.9794 | **0.4812** | 0.3170 | 0.3754 | 0.5305 | 0.5732 |
+| `-ECS` | 0.9837 | 0.7397 | 0.3638 | 0.5520 | **0.6829** | **0.7117** |
+| `-statistics` | 0.9798 | **0.6384** | 0.3225 | 0.4943 | 0.5955 | 0.6323 |
+| `-sentinel` | 0.9816 | 0.7308 | 0.3615 | 0.5207 | **0.6260** | 0.6600 |
+| `random groups` | **0.9606** | 0.6780 | **0.2698** | 0.5323 | 0.6327 | 0.6661 |
+
+Cross-donor family and phase are significant at the permutation floor
+(p = 0.005) in every arm. Stage and grade are not significant anywhere
+(p = 0.12 to 0.63) and grade is negative in all six — see below.
+
+**Figures:** `Outputs/figures/frontier_a1/`. The ablations are drawn as their
+own family, in their own colour, because they are counterfactuals rather than
+candidate models and must not read as points we would report.
+
+### C-6, the phase head: it supplies 70% of the margin, and the rest is real
+
+Chance on this label is 0.370.
+
+| | value | margin over chance |
+|---|---|---|
+| base | 0.7346 | 0.3646 |
+| without the head | 0.4812 | 0.1112 |
+
+**The head supplies 69.5% of the margin; the architecture supplies the other
+30.5%.** Inside the registered 0.45–0.62 band, and cell family moves −0.0026,
+so this is not a broken model reporting a broken number.
+
+What the paper may say: not "phase emerges", and not "phase is supervised"
+either. **A supervised head on 44% of training cells supplies about seventy
+per cent of the cross-donor phase signal; the remainder is carried by the
+architecture.** That is a measurement, and it is the honest form of the claim.
+
+Donor kNN at 0.3754 missed its band badly (0.48–0.56), and the training curves
+say why: this arm overfits from epoch 1, so the reported checkpoint is epoch 0
+and an under-converged model is donor-blind because it has encoded little of
+anything. The phase number survives that objection — cell family does not fall
+with it — but the donor number does not, and should not be quoted.
+
+### C-7, ECS traverses the frontier, it does not expand it
+
+Removing it moves **every axis in the same direction**: biology up, cost up.
+
+| | without ECS |
+|---|---|
+| family | +0.0017 |
+| phase | +0.0051 |
+| disease | +0.0274 |
+| donor | +0.0332 worse |
+| study mixing | +0.0786 worse |
+| study purity | +0.0714 worse |
+
+My registered band for family (0.94–0.975) assumed ECS was holding cell family
+together. It is not — family *improves* slightly without it. What ECS buys is
+study mixing, and it pays in biology on every axis.
+
+**That makes it the same kind of knob as `w_kl_gauss`: it moves the model
+along the frontier rather than pushing the frontier outward.** Worth saying
+plainly, because a term carrying the largest weight in the objective reads as
+though it ought to be doing something else.
+
+### C-4, the statistics are a phase mechanism
+
+Phase 0.7346 → **0.6384**, below the registered 0.66–0.73 band, so they matter
+*more* than predicted. Family −0.0022. Mixing and donor both slightly better
+without them.
+
+So the order statistics carry phase and a little donor signal, and almost no
+cell-family signal. If they are to be defended, phase is the axis to defend
+them on.
+
+### C-2, the sentinel: THE PREDICTION WAS RIGHT AND MY CORRECTION WAS WRONG
+
+The registered prediction was "study mixing worse than 0.6043". It is:
+**0.6260**, with purity 0.6403 → 0.6600. Both worse without the sentinel.
+
+On 26 October I filed a dated correction saying that prediction's rationale
+was wrong. **That correction is withdrawn.** The reconciliation, which is
+sharper than either position:
+
+- A gene a study never measured, recorded as zero, is zero in *every cell of
+  that study*. That constant is a fact about the study.
+- The model can learn it as though it were biology, because nothing marks it
+  as absent.
+- The sentinel does not hide the panel — it is an explicit flag, so the panel
+  is if anything more visible. What it does is **stop the panel being read as
+  expression**: sentinel positions are excluded from the reconstruction loss,
+  and zeros are not.
+
+So the mechanism is not "the sentinel conceals the study". It is "the sentinel
+denies the study a route into the latent through counterfeit biology". Same
+direction, different cause, and the measurement agrees.
+
+### C-1, random grouping: the largest loss is DISEASE
+
+Both bands landed (family 0.9606, phase 0.6780). The number not predicted is
+the one that matters:
+
+**disease 0.3364 → 0.2698, a 20% loss — the largest biological loss of any
+arm on any axis.**
+
+And it is the arm with the **best reconstruction in the project** (val_nb
+0.3911), reached over the longest run with the most stable curves. The
+`frontier_val_nb` panel shows it alone at the bottom-left: lowest
+reconstruction error, lowest cell-family agreement, every other arm clustered
+at 0.98.
+
+The pathway partition costs reconstruction and buys biology, and it buys most
+of it on the axis the paper is about.
+
+### Stage and grade carry nothing, in any configuration
+
+| | base | best arm | worst arm | p range |
+|---|---|---|---|---|
+| Endometriosis stage | 0.1313 | 0.2190 | 0.0799 | 0.12 – 0.33 |
+| Endometriosis grade | −0.0414 | −0.0227 | −0.0723 | 0.44 – 0.63 |
+
+Never significant, and grade is negative everywhere. This is not an ablation
+finding — it is a property of the labels, and the paper should state it as a
+limitation rather than leave a reader to notice the absence.
 
 ---
 

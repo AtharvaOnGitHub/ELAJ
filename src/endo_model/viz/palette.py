@@ -55,6 +55,14 @@ class Palette:
     # a grey-blue and names a different family entirely.
     primary_faded: str = "#86c9bf"
 
+    # Ablations: the same model with one component removed. A hue of its own
+    # because an ablation is neither "ours, current" nor "ours, superseded" --
+    # it is a counterfactual, and plotting it in either ELAJ colour invites a
+    # reader to take it for a candidate model. Reddish purple from the
+    # Okabe-Ito set, so it stays colour-blind safe beside primary and
+    # secondary.
+    ablation: str = "#CC79A7"
+
     # ── Categorical scale — Okabe–Ito, colour-blind safe ────────────────────
     # Order is load-bearing: corpus_panels maps disease status onto the first
     # four and training_panels uses 0 and 1 for train and val.

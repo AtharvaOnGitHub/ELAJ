@@ -58,6 +58,15 @@ SOURCES = [
     ("axis_m6_drain",        "pca",    "PCA",        "baseline", None,   16),
     ("axis_m6_drain",        "scvi",   "scVI",       "baseline", None,   16),
     ("axis_m6_drain",        "scanvi", "scANVI",     "baseline", None,   16),
+    # ── Wave A1: p1_dab168_kl1 with one component removed, scored the same
+    # way. val_nb is each arm's own best epoch from its metrics.csv -- the
+    # epoch the benchmark scored. The base is already above as p1 dab168/kl1,
+    # so every ablation is read against that point and not against each other.
+    ("a_series/a1_nophase",    "elaj", "-phase head",  "ablation", 0.4083, 16),
+    ("a_series/a1_noecs",      "elaj", "-ECS",         "ablation", 0.4004, 16),
+    ("a_series/a1_clsonly",    "elaj", "-statistics",  "ablation", 0.3979, 16),
+    ("a_series/a1_nodns",      "elaj", "-sentinel",    "ablation", 0.4005, 16),
+    ("a_series/a1_randgroups", "elaj", "random groups", "ablation", 0.3911, 16),
 ]
 
 #: Foundation-model rows. SEVERAL CANDIDATE DIRECTORIES PER MODEL, because

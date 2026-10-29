@@ -1268,9 +1268,17 @@ So adenomyosis, myometrium, and one study of four patients are the same set of
 Four consequences, none of them a bug and all of them things a reviewer will
 find:
 
-1. **No adenomyosis-specific claim is supportable.** Any such claim is a claim
-   about a single study of four donors, and cannot be distinguished from a
-   batch effect.
+1. **An adenomyosis-specific claim cannot be separated from a study effect.**
+   Any such claim is also a claim about a single study of four donors.
+   *Revised 28 October 2026, AW's ruling, and the earlier wording of this
+   item --- "no adenomyosis-specific claim is supportable" --- is withdrawn.*
+   That wording was a guardrail against over-claiming and got read back as a
+   finding about what is knowable, which it is not. The confound licenses
+   uncertainty in both directions, not a prohibition: we cannot show that an
+   adenomyosis observation is real, and we equally cannot show that it is an
+   artefact. So a claim may be made where it carries the confound and the
+   uncertainty with it, and the reader is told that it may or may not be
+   relevant. What stays forbidden is an unqualified one.
 2. **The decoder's tissue conditioning for myometrium is study conditioning.**
    Tissue level 3 exists only in wang_2022's cells.
 3. **`c1_dab` is in direct tension with it.** The adversarial term removes

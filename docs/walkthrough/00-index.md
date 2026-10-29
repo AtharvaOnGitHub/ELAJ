@@ -41,6 +41,7 @@ defects and fragilities found while writing this.
 | 12 | [Validating the latent](12-validation.md) | What can honestly be tested, the scoreboard, the donor confound |
 | 13 | [Comparing against other methods](13-baselines.md) | `benchmark_baselines.py` — scVI, scANVI, Harmony, Scanorama, PCA on the same cells with the same scorer |
 | 14 | [Where along the encoder is the biology lost?](14-stage-probe.md) | `probe_stages.py` — every encoder stage, and every group encoder's input and output, under the benchmark scorer |
+| 15 | [How reconstruction works, end to end](15-flow-reconstruction.md) | The 16-number latent and the gene identity embedding to the NB loss. Every variable with its shape and whether it is per cell, per gene, per group or per study |
 
 ## The five entry points
 

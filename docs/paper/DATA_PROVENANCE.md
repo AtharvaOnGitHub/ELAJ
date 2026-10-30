@@ -64,8 +64,40 @@ Genome-phenome Archive under `EGAD00001007909`, which is controlled access.
 (ArrayExpress `E-MTAB-10287`), not the EGA component.** The paper should say
 so explicitly so no reviewer assumes otherwise.
 
-**li_2025 (GSE276193) is the one real problem, and it is not about
-licensing.** The statement reads *"The **bulk** RNA-seq data generated in
+**li_2025: RESOLVED 30 October 2026. Read the paper; the instruction below
+was carried out and the answer is worse than a wrong accession.** The
+scRNA-seq is a single-cell atlas of PRE-OVULATORY FOLLICULAR FLUID collected
+at IVF/ICSI oocyte retrieval, n=3 ovarian endometriosis against n=3
+male-factor infertility controls. Paper: *Advanced Science*,
+10.1002/advs.202417528, section 2.3 "Single-cell Atlas of Follicular Fluid
+from OEI Patients Decoded by scRNA-seq". The words "endometrium" and
+"endometrial tissue" appear ZERO times in it; "granulosa" appears 75. Our
+own metadata agrees independently: the cell types are Granulosa2 (10,270),
+Granulosa3 (3,445) and 24,155 neutrophils, and granulosa cells have no
+endometrial existence.
+
+  ACCESSION: CNGBdb **CNP0006183** for the scRNA-seq (CNP0006170 is the
+  mouse Stereo-seq). GSE276193 is the bulk RNA-seq, which we did not use.
+
+  WHAT IS IN THE CORPUS: 45,312 cells, 2.87% of 1,577,728, 6 of 269 donors,
+  all carrying `tissue = endometrium` and `disease_status` eutopic (23,346)
+  or control (21,966). It contributes NO cell-family and NO phase labels, so
+  the cycle and cell-type results are untouched. It does carry 2.87% of the
+  disease axis, and there `eutopic`/`control` marks follicular fluid from an
+  OE patient against a male-factor infertility control -- not what those
+  words mean in the other nine studies.
+
+  AW'S RULING: option 1 of three. KEEP the study, CORRECT IT IN THE PAPER,
+  LEAVE THE TRAINED MODEL ALONE. Tissue is a decoder covariate, so
+  relabelling the data means retraining, and a corrected CSV would
+  desynchronise the config from the reported arm. Declared in Study
+  selection and in the Discussion's limitations instead. The study is
+  legitimately endometriosis research -- ovarian endometriosis is 17-44% of
+  cases -- and ovary is already a corpus tissue via fonseca_2023 (154,295)
+  and tan_2022 (25,724); what is wrong is one label in one column, plus a
+  sample type (fluid aspirate) that no other study contributes.
+
+**The original note, kept because it is what prompted the check:** The statement reads *"The **bulk** RNA-seq data generated in
 this study have been deposited to the GEO (GSE276193). The raw data of
 scRNA-seq and Stereo-seq data have been deposited to **CNGBdb** under
 accession number CNP0006183."* The accession we record is for bulk RNA-seq;

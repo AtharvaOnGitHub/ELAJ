@@ -502,3 +502,90 @@ passed since roughly 6 October, and nothing noticed because the module that
 holds these tests is skipped wherever torch is absent — which is the laptop
 everything is written on. The gate is what surfaced two and a half weeks of
 it, before five GPU jobs ran against it rather than after.
+
+---
+
+## The whole-corpus validation runs, and what they accidentally proved
+
+**30 October 2026.** Five `validate_latent.sh --dump-cells` jobs on the A1
+arms. All five were killed on the twelve-hour limit — four inside stage 5
+(NMI/ARI), one in stage 7 (figures). Every one of them had written its
+per-cell dump at ~51 minutes and 52–59 CSVs before dying, so the exercise
+produced everything it was kicked off for. Logs and outputs in
+`Outputs/validate/a_series/`.
+
+These numbers are **whole corpus — train+val+test, 1,577,728 cells, with
+same-donor neighbours retained**. They are NOT comparable with the benchmark
+and must never be quoted beside it.
+
+### The finding: whole-corpus agreement on a donor-constant label is a donor-memorisation readout
+
+`random groups` scores **best of six** on disease here (0.6899 against the
+base's 0.6540) and **worst of six** on the benchmark's cross-donor disease
+(0.2698 against 0.3364). A complete reversal, in the arm whose grouping was
+destroyed.
+
+Rank the six arms by whole-corpus agreement and by the benchmark's donor-kNN
+recovery and you get nearly the same order:
+
+| label, whole corpus | Spearman rho vs donor kNN | spread |
+|---|---:|---:|
+| `disease_status` | **+0.943** | 0.128 |
+| `menstrual phase` | +0.829 | 0.212 |
+| `cell family` | +0.371 | **0.003** |
+
+The cross-donor estimator cuts disease's correlation with donor recovery from
+**+0.943 to +0.429**.
+
+**The split is exactly what the design predicts.** Every label constant
+within a donor — disease, stage, grade, severity, and phase, because each
+donor was biopsied once — tracks donor memorisation. **Cell family is the
+only label that varies within a donor and the only one that does not track
+it**, flat at 0.9913–0.9943 across all six arms including the randomised
+grouping.
+
+**WHERE THIS GOES: Methods, _Cross-donor agreement_** (subsection 16, not yet
+written). That subsection has to argue that discarding same-donor neighbours
+is necessary. This is a worked demonstration on six models rather than an
+assertion, and it is the strongest evidence the project holds for the
+paper's central measurement.
+
+### Whole-corpus agreement, all six arms, fine labels
+
+| arm | cell family | phase | disease | stage | grade | severity |
+|---|---:|---:|---:|---:|---:|---:|
+| chance | 0.6384 | 0.2440 | 0.3385 | 0.5366 | 0.3401 | 0.2198 |
+| **BASE** p1_dab168_kl1 | 0.9938 | 0.8551 | 0.6540 | 0.8729 | 0.5200 | 0.6079 |
+| −phase head | 0.9927 | 0.6519 | 0.5820 | 0.7767 | 0.4402 | 0.5043 |
+| −ECS | 0.9943 | 0.8640 | 0.7102 | 0.8835 | 0.5195 | 0.6145 |
+| −statistics | 0.9928 | 0.7997 | 0.6546 | 0.8569 | 0.4877 | 0.5633 |
+| −sentinel | 0.9936 | 0.8534 | 0.6608 | 0.8767 | 0.5141 | 0.6081 |
+| random groups | 0.9913 | 0.8550 | 0.6899 | 0.8904 | 0.5305 | 0.5915 |
+
+### Secondary readings
+
+- **Cell family is robust to every ablation on the whole corpus**, 0.99
+  throughout. The grouping's effect appears only cross-donor, 0.9820 to
+  0.9606 for random groups.
+- **`−phase head` is bottom on every single label.** It also holds the least
+  donor information of any arm (0.3754), which accounts for part of it, but
+  it confirms the regulariser reading from a second direction.
+- **Stage's raw 0.87–0.89 is nothing**: chance is 0.5366. Grade sits at
+  0.44–0.53 against chance 0.3401. Both remain what the benchmark said —
+  no signal in any configuration.
+
+### Incomplete
+
+`AnnotationMain`, `AnnotationRefined` and the 3-level `phase` grouping are
+blank for every arm except `−ECS`. `grouped_agreement.csv` is written
+part-way through the run and those labels are scored after it; only `−ECS`
+survived long enough. Recoverable by parsing the logs, which carry the lines.
+
+### The process failure, fixed
+
+Only the forward pass touches CUDA. Five jobs reserved an A100 for twelve
+hours each and used it for fifty-one minutes: **60 A100-hours reserved,
+about 4 used.** Measured stage costs — stage 3 2h33m, stage 4 1h44m, stage
+4b **4h57m (41% of the job)**, stage 5 1h30m. Fixed in `cf75b4a` with
+`--dump-only` and `dump_cells.sh` (GPU, two-hour wall), not with another
+note to remember.

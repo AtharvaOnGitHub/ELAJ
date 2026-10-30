@@ -162,6 +162,16 @@ def parse_args() -> argparse.Namespace:
                         "which that class of question is a local read.")
     p.add_argument("--no-figures", action="store_true",
                    help="Measure and write the CSV only.")
+    p.add_argument("--dump-only", action="store_true",
+                   help="Exit as soon as --dump-cells has written, before any "
+                        "measurement. THIS IS THE FLAG THAT KEEPS A GPU "
+                        "RESERVATION HONEST. The forward pass is the only "
+                        "stage that touches CUDA; everything after it is numpy "
+                        "and sklearn. Five jobs on 28 October 2026 reserved an "
+                        "A100 for twelve hours each, dumped at fifty-one "
+                        "minutes, and spent the remaining eleven hours doing "
+                        "CPU work on a held card -- then died on the time "
+                        "limit anyway. Use dump_cells.sh, which passes this.")
     return p.parse_args()
 
 
@@ -423,6 +433,18 @@ def main() -> None:
     if args.dump_cells:
         _dump_cells(Path(args.dump_cells), mu_gauss, mu_angle, kappa, meta,
                     study_id, names, split_of)
+
+    # The GPU's work is finished at this line and nothing below it opens a
+    # CUDA context. Exiting here hands the card back in under two hours
+    # instead of holding it through a battery that is numpy and sklearn.
+    if args.dump_only:
+        if not args.dump_cells:
+            logger.error("--dump-only needs --dump-cells; nothing would be "
+                         "written and nothing measured")
+            sys.exit(2)
+        logger.info("--dump-only: the embedding is written, so the GPU is "
+                    "done. Run the measurement battery as a CPU job.")
+        return
 
     # The number that decides whether the cross-donor test can answer anything.
     donors = {str(v) for v, ph in zip(meta["patient_id"],

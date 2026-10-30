@@ -10,6 +10,23 @@
 #SBATCH --job-name=elaj_validate
 #SBATCH --output=logs/validate_%j.log
 
+# THIS SCRIPT HOLDS AN A100 FOR UP TO TWELVE HOURS AND NEEDS IT FOR ABOUT ONE.
+# Only the forward pass touches CUDA. Stages 3, 4 and 4b are neighbour
+# searches in numpy and sklearn and account for roughly nine of those hours
+# -- 4b alone was 4h57m on 1.58 M cells. If all you want is the per-cell
+# latent, use dump_cells.sh: two-hour wall, GPU released when the embedding
+# is done. Reach for THIS script only when the measurement battery is the
+# point, and pass --no-figures; figures are drawn locally.
+#
+# Measured, 28 October 2026, five arms at --splits train val test:
+#   dump written        00:51
+#   stage 3             02:33
+#   stage 4             01:44
+#   stage 4b            04:57   <- 41% of the job
+#   stage 5 NMI/ARI     01:30   <- retired metric, pass --skip-nmi when it exists
+#   stages 6, 7         00:26
+# Total beyond the twelve-hour wall: four of the five died in stage 5.
+
 # Does the latent carry anything the model was never given?
 #
 #   sbatch data_collation/scripts/validate_latent.sh r8_direction

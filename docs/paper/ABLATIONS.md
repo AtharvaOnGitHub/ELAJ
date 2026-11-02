@@ -312,23 +312,55 @@ Cross-donor family and phase are significant at the permutation floor
 own family, in their own colour, because they are counterfactuals rather than
 candidate models and must not read as points we would report.
 
-### C-6, the phase head: it supplies 70% of the margin, and the rest is real
+### C-6, the phase head: it supplies a third of the signal, not seventy per cent
 
-Chance on this label is 0.370.
+> **CORRECTED 2 November 2026. The earlier version of this section subtracted
+> chance from numbers chance had already been removed from, and the error
+> propagated into the Results draft and the figures plan.**
+>
+> `endo_model/evaluation/sufficient_stats.py:297` computes every cross-donor
+> value as `excess = (observed - chance) / (1 - chance)`. Zero is chance, one
+> is perfect, and a negative value is possible — which is why
+> `EndometriosisGrade` reads **-0.0414**, a figure no raw agreement rate could
+> produce. Subtracting a chance rate from an excess is subtracting it twice.
+>
+> The 0.370 used here was not even this measurement's chance rate. It is the
+> chance rate of the *plain whole-corpus* three-level phase grouping, from
+> `grouped_agreement.csv`. The cross-donor test computes its own chance as
+> `sum p_j^2` over the label's shares **across donors**, and divides it out
+> before reporting.
+>
+> Superseded text, kept so the number can be traced if it appears anywhere
+> else: *"Chance on this label is 0.370 … the head supplies 69.5% of the
+> margin; the architecture supplies the other 30.5%."*
 
-| | value | margin over chance |
-|---|---|---|
-| base | 0.7346 | 0.3646 |
-| without the head | 0.4812 | 0.1112 |
+Both values below are already chance-corrected, so the split is the **ratio of
+the two excesses**, not a difference from a chance rate.
 
-**The head supplies 69.5% of the margin; the architecture supplies the other
-30.5%.** Inside the registered 0.45–0.62 band, and cell family moves −0.0026,
-so this is not a broken model reporting a broken number.
+| | cross-donor phase (excess) |
+|---|---|
+| base | 0.7346 |
+| without the head | 0.4812 |
+
+0.4812 / 0.7346 = **0.6551**.
+
+**65.5% of the chance-corrected phase signal survives removing the head, so
+the head accounts for 34.5% and the architecture for the rest.** Still inside
+the registered 0.45–0.62 band, and cell family moves −0.0026, so this is not a
+broken model reporting a broken number.
 
 What the paper may say: not "phase emerges", and not "phase is supervised"
-either. **A supervised head on 44% of training cells supplies about seventy
-per cent of the cross-donor phase signal; the remainder is carried by the
-architecture.** That is a measurement, and it is the honest form of the claim.
+either. **A supervised head on 44% of training cells accounts for about a
+third of the cross-donor phase signal; the remaining two-thirds is carried by
+the architecture.** That is a measurement, and it is the honest form of the
+claim. It is also a stronger result than the superseded one: the architecture
+is the larger half, not the smaller.
+
+**The comparator for a cross-donor value is its own permutation null, not a
+chance rate.** The benchmark `note` column carries the null's 95th percentile
+per row: 0.18 for menstrual phase, 0.06 for cell family, 0.12 for grade, 0.42
+for stage. Stage's 0.1313 sits below its own 0.42, which is why its p is
+0.303.
 
 Donor kNN at 0.3754 missed its band badly (0.48–0.56), and the training curves
 say why: this arm overfits from epoch 1, so the reported checkpoint is epoch 0

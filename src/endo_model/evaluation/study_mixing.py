@@ -72,6 +72,11 @@ def balanced_rows(study_id: np.ndarray, max_cells: int,
     """
     rng = np.random.default_rng(seed)
     studies = np.unique(study_id)
+    if max_cells <= 0:
+        # Every cell. `excess` divides the corpus's own share term out, so an
+        # unbalanced draw is not an unfair one, and the whole split is the
+        # only sample nobody has to be talked into.
+        return np.arange(len(study_id))
     quota = max(1, max_cells // max(len(studies), 1))
     keep = []
     for study in studies:

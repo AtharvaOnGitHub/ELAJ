@@ -94,6 +94,13 @@ def parse_args() -> argparse.Namespace:
                         "mismatch making them pending, which is how a "
                         "1.16M-cell fit corpus got built for nobody. A method "
                         "whose package is missing is skipped and reported.")
+    p.add_argument("--study-mixing-cells", type=int, default=0,
+                   help="Cells for the study neighbour search, drawn evenly "
+                        "across studies. 0, the default, uses every cell: "
+                        "`excess` divides the corpus's own share term out, so "
+                        "the imbalance an even draw was protecting against is "
+                        "already handled, and a figure measured on the whole "
+                        "split is the only one worth quoting.")
     p.add_argument("--gene-policies", nargs="+", default=["all"],
                    help="all | intersection | hvg<N>. Each is a separate pass.")
     p.add_argument("--external-latent", nargs="+", default=[],
@@ -403,6 +410,7 @@ def main() -> None:
     scorer = EmbeddingScorer(ScorerSettings(
         k=args.k, k_cross_donor=args.k_cross_donor,
         permutations=args.permutations, seed=args.seed,
+        study_mixing_max_cells=args.study_mixing_cells,
     ))
     report = (BenchmarkReport.read_csv(args.reuse_baselines, exclude_methods=("elaj",))
               if args.reuse_baselines else BenchmarkReport())

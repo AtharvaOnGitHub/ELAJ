@@ -157,13 +157,29 @@ class ScorerSettings:
     # switch to be controllable the same way.
     study_mixing: bool = True
     # Cells for the study neighbour search, drawn evenly across studies.
-    # 20,000 is what the training loop's per-epoch report uses, so the two
-    # purities are the same quantity: an even draw of eleven studies has a
-    # floor of 1/11 = 0.091 where a proportional draw of this corpus has
-    # about 0.24, dominated by the one study holding 46% of the cells.
-    # It is also the difference between a one-second neighbour search and a
-    # quarter-hour one at 380,000 cells in 16 dimensions, per method.
-    study_mixing_max_cells: int = 20000
+    #
+    # WAS 20,000, WHICH REPORTED THE HELD-OUT SET ON 4.8% OF ITSELF. Changed
+    # 4 November 2026. The old value gave 20000 // 11 = 1,818 cells per study,
+    # 19,998 in total, out of 416,256 held-out cells. Two reasons were given
+    # for it and neither holds.
+    #
+    # The first was balance: a proportional draw has a chance floor of
+    # sum(p^2) = 0.1824 on this split, dominated by duempelmann_2026's 31.8%,
+    # against 1/11 = 0.091 for an even one. But `excess` is
+    # (purity - floor) / (1 - floor), so the floor is already divided out.
+    # Balancing protects a quantity that was never exposed.
+    #
+    # The second was cost, quoted as a quarter-hour at 380,000 cells against a
+    # second at 20,000. That is a real cost and it buys a number measured on
+    # the whole test split instead of a twentieth of it, which is the only
+    # version anyone can be asked to believe.
+    #
+    # A balanced draw also cannot exceed the smallest study: garcia_alonso_2021_b
+    # contributes 3,072 held-out cells, so the ceiling on an even draw is
+    # 3,072 x 11 = 33,792. The old cap sat 41% below even that.
+    #
+    # 0 means every cell, which is now the default.
+    study_mixing_max_cells: int = 0
     knn_labels: tuple[str, ...] = KNN_LABELS
     cross_donor_labels: tuple[str, ...] = CROSS_DONOR_LABELS
     scib_labels: tuple[str, ...] = SCIB_LABELS

@@ -33,11 +33,24 @@
 
 set -euo pipefail
 
+# THE SAME ENVIRONMENT AS validate_latent.sh, BECAUSE IT RUNS THE SAME SCRIPT.
+# This block used to load `scikit-learn/1.9.0-gfbf-2024a`, which does not exist
+# on BEAR, and it never activated the venv. sklearn comes from the venv, not
+# from a module, which is why validate_latent.sh loads no scikit-learn module
+# and then prints its version to prove the import works. Keep the two blocks
+# identical: if one needs a module, so does the other.
 module purge
-module load bluebear
 module load bear-apps/2024a
 module load PyTorch/2.7.1-foss-2024a-CUDA-12.6.0
-module load scikit-learn/1.9.0-gfbf-2024a
+module load PyYAML/6.0.2-GCCcore-13.3.0
+module load SciPy-bundle/2024.05-gfbf-2024a
+module load tqdm/4.66.5-GCCcore-13.3.0
+module load anndata/0.10.9-foss-2024a
+module load h5py/3.12.1-foss-2024a
+module load matplotlib/3.9.2-gfbf-2024a
+
+export PYTHONNOUSERSITE=1
+source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
 
 ARMS=()
 PASSTHRU=()
@@ -79,6 +92,11 @@ if [[ ${OUT_GIVEN} -eq 0 ]]; then
     PASSTHRU+=(--out "outputs/validate/${ARM}")
 fi
 
+# Fail here, in one line, rather than inside the measurement battery.
+python -u -c "import sklearn, torch; print('sklearn', sklearn.__version__, \
+'| torch', torch.__version__, '| cuda', torch.cuda.is_available())"
+
+export PYTHONUNBUFFERED=1
 python -u -m scripts.validate_latent \
     --run "${ARM}" --root . \
     --dump-cells "outputs/cells/${ARM}" \

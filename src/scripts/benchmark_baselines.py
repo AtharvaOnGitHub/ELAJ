@@ -153,6 +153,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--include-elaj", action="store_true",
                    help="Embed the checkpoint on the same cells and score it "
                         "alongside. Needs --runs-dir to find it.")
+    p.add_argument("--dump-only", action="store_true",
+                   help="Write the embedding with --dump-latent and exit "
+                        "before scoring anything. Measured 6 November 2026: a "
+                        "1:15 GPU pass over the held-out split spends about 27 "
+                        "minutes loading the corpus and embedding, then 45 "
+                        "minutes in sklearn at 14% CPU efficiency while "
+                        "holding an A100. bbgpu allows two GPUs per user and "
+                        "the shared CPU QOS allows 1344 cores, so the battery "
+                        "belongs on bbdefault. Embed here, score there with "
+                        "--external-latent, and the card is free in a third "
+                        "of the time. Needs --dump-latent; refuses without "
+                        "it, because a dump-only pass that dumps nowhere has "
+                        "done nothing at all.")
     p.add_argument("--only-labels", nargs="+", default=None,
                    help="Score ONLY these cross-donor labels and nothing "
                         "else: no kNN, no scIB, no study mixing, no disease "
@@ -425,6 +438,11 @@ def main() -> None:
         permutations=args.permutations, seed=args.seed,
         study_mixing_max_cells=args.study_mixing_cells,
     )
+    if args.dump_only and not args.dump_latent:
+        raise SystemExit("--dump-only needs --dump-latent: there would be "
+                         "nothing to show for the embedding.")
+    if args.dump_only and not args.include_elaj:
+        raise SystemExit("--dump-only with --no-elaj has nothing to embed.")
     if args.only_labels:
         from endo_model.evaluation.baselines.scorer import CROSS_DONOR_LABELS
         unknown = [c for c in args.only_labels if c not in CROSS_DONOR_LABELS]
@@ -493,8 +511,12 @@ def main() -> None:
         # for a table we may not even want. Writing first costs nothing and
         # makes the embedding survivable on its own.
         dump_latent(args, emb, corpus, "elaj__native__train")
-        report.add(scorer.score(emb, corpus, gene_policy="native"))
-        report.record_settings("elaj", "native", emb.settings, fit_on="train")
+        if args.dump_only:
+            logger.info("--dump-only: embedding written, skipping the battery")
+        else:
+            report.add(scorer.score(emb, corpus, gene_policy="native"))
+            report.record_settings("elaj", "native", emb.settings,
+                                   fit_on="train")
 
     # ── latents computed elsewhere, in their own environments ──────────────
     # Scored against `corpus` rather than `baseline_corpus`: the labels are

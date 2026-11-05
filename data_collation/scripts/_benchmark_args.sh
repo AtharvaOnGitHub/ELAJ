@@ -19,9 +19,10 @@ while [ $# -gt 0 ]; do
         --k|--k-cross-donor|--permutations|--seed|--scvi-epochs|--scanvi-label|\
         --fit-split|--pca-components|--scvi-latent|--harmony-pcs|--scanorama-dimred|\
         --reuse-baselines|--checkpoint|--baseline-vocabulary|--dump-latent|\
+        --study-mixing-cells|\
         --out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
-        --splits|--methods|--gene-policies|--external-latent)
+        --splits|--methods|--gene-policies|--external-latent|--only-labels)
             # nargs="+": take every following bare word.
             EXTRA+=("$1"); shift
             while [ $# -gt 0 ] && [[ "$1" != -* ]]; do

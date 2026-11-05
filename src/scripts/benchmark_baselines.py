@@ -153,6 +153,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--include-elaj", action="store_true",
                    help="Embed the checkpoint on the same cells and score it "
                         "alongside. Needs --runs-dir to find it.")
+    p.add_argument("--only-labels", nargs="+", default=None,
+                   help="Score ONLY these cross-donor labels and nothing "
+                        "else: no kNN, no scIB, no study mixing, no disease "
+                        "contrast. For adding a label to a table that is "
+                        "otherwise already computed. A label added to "
+                        "CROSS_DONOR_LABELS otherwise costs a full battery "
+                        "re-run per method, which on 5 November 2026 meant "
+                        "proposing to cancel five running jobs to avoid a "
+                        "second pass. The cross-donor stage is minutes: "
+                        "measured 15 for Geneformer's four labels at 256 "
+                        "dims, against 53 for kNN and 45 for scIB. Nothing "
+                        "about how a label is measured changes; this only "
+                        "decides which stages run.")
     p.add_argument("--k", type=int, default=30)
     p.add_argument("--k-cross-donor", type=int, default=100)
     p.add_argument("--permutations", type=int, default=200)
@@ -407,11 +420,26 @@ def main() -> None:
                     baseline_corpus.n_cells, baseline_corpus.n_genes,
                     corpus.n_genes)
 
-    scorer = EmbeddingScorer(ScorerSettings(
+    scorer_settings = dict(
         k=args.k, k_cross_donor=args.k_cross_donor,
         permutations=args.permutations, seed=args.seed,
         study_mixing_max_cells=args.study_mixing_cells,
-    ))
+    )
+    if args.only_labels:
+        from endo_model.evaluation.baselines.scorer import CROSS_DONOR_LABELS
+        unknown = [c for c in args.only_labels if c not in CROSS_DONOR_LABELS]
+        if unknown:
+            raise SystemExit(
+                f"--only-labels: not cross-donor labels: {unknown}. "
+                f"Known: {list(CROSS_DONOR_LABELS)}")
+        scorer_settings.update(
+            cross_donor_labels=tuple(args.only_labels),
+            knn_labels=(), scib_labels=(),
+            study_mixing=False, disease_contrast=False,
+        )
+        logger.info("--only-labels: scoring %s and nothing else",
+                    ", ".join(args.only_labels))
+    scorer = EmbeddingScorer(ScorerSettings(**scorer_settings))
     report = (BenchmarkReport.read_csv(args.reuse_baselines, exclude_methods=("elaj",))
               if args.reuse_baselines else BenchmarkReport())
     already = set(report.methods())

@@ -56,7 +56,7 @@ HARMONISED_CELL_CYCLE = "cell cycle phase"
 # groups as rASRM I-II and III-IV, and marecko_2024 records rASRM I-IV, so the
 # two are the same scale written two ways.
 HARMONISED_SEVERITY = "severity"
-HARMONISED_SEVERITY_CASES = "severity, patients only"
+HARMONISED_SEVERITY_CASES = "severity (patients only)"
 # Every harmonised name, for the places that must not request these from the
 # Dataset as obs columns: they are built by add_harmonised_labels, not loaded.
 HARMONISED_NAMES = (HARMONISED_LINEAGE, HARMONISED_PHASE,

@@ -47,6 +47,21 @@ SEED = 24
 HARMONISED_LINEAGE = "cell family"
 HARMONISED_PHASE = "menstrual phase"
 HARMONISED_CELL_CYCLE = "cell cycle phase"
+# The two severity labels, added 5 November 2026. Distinct from
+# validate_latent's `severity (study vocabularies)`, which is a UNION whose
+# levels are study-prefixed (`stage_0`, `grade_mild`) and therefore readable
+# off study identity alone. These two are MERGES onto one clinical scale, and
+# both cohorts contribute every level, so study does not determine the label.
+# The merge is not an assumption: duempelmann_2026 defines its mild and severe
+# groups as rASRM I-II and III-IV, and marecko_2024 records rASRM I-IV, so the
+# two are the same scale written two ways.
+HARMONISED_SEVERITY = "severity"
+HARMONISED_SEVERITY_CASES = "severity, patients only"
+# Every harmonised name, for the places that must not request these from the
+# Dataset as obs columns: they are built by add_harmonised_labels, not loaded.
+HARMONISED_NAMES = (HARMONISED_LINEAGE, HARMONISED_PHASE,
+                    HARMONISED_CELL_CYCLE, HARMONISED_SEVERITY,
+                    HARMONISED_SEVERITY_CASES)
 
 # Labels scored by plain kNN agreement. Patient identity is included as the
 # thing that should NOT score: a latent that groups patients has learned the
@@ -55,7 +70,8 @@ KNN_LABELS = (HARMONISED_LINEAGE, HARMONISED_PHASE, HARMONISED_CELL_CYCLE,
               "AnnotationRefined", "patient_id")
 # Labels that are constant within a donor and so need the cross-donor test.
 CROSS_DONOR_LABELS = (HARMONISED_LINEAGE, HARMONISED_PHASE,
-                      "EndometriosisGrade", "Endometriosis_stage")
+                      "EndometriosisGrade", "Endometriosis_stage",
+                      HARMONISED_SEVERITY, HARMONISED_SEVERITY_CASES)
 # Labels the scIB battery is run against, with study as the batch.
 SCIB_LABELS = (HARMONISED_LINEAGE, "AnnotationRefined")
 MIN_SCIB_CELLS = 100
@@ -75,6 +91,7 @@ def required_obs_columns() -> list[str]:
     """
     from endo_model.evaluation.label_harmonisation import (
         CELL_CYCLE_SOURCE_COLUMNS, LINEAGE_SOURCE_COLUMNS, PHASE_SOURCE_COLUMNS,
+        SEVERITY_SOURCE_COLUMNS,
     )
 
     from endo_model.evaluation.disease_contrast import (
@@ -82,11 +99,10 @@ def required_obs_columns() -> list[str]:
     )
 
     direct = [c for c in KNN_LABELS + CROSS_DONOR_LABELS + SCIB_LABELS
-              if c not in (HARMONISED_LINEAGE, HARMONISED_PHASE,
-                           HARMONISED_CELL_CYCLE, "patient_id")]
+              if c not in HARMONISED_NAMES + ("patient_id",)]
     seen: dict[str, None] = {}
     for c in (*LINEAGE_SOURCE_COLUMNS, *PHASE_SOURCE_COLUMNS,
-              *CELL_CYCLE_SOURCE_COLUMNS, *direct,
+              *CELL_CYCLE_SOURCE_COLUMNS, *SEVERITY_SOURCE_COLUMNS, *direct,
               DISEASE_COLUMN, TISSUE_COLUMN):
         seen.setdefault(c, None)
     return list(seen)
@@ -202,13 +218,16 @@ def add_harmonised_labels(corpus: CorpusMatrix) -> None:
     """
     from endo_model.evaluation.label_harmonisation import (
         CELL_CYCLE, CELL_CYCLE_SOURCE_COLUMNS, LINEAGE, LINEAGE_SOURCE_COLUMNS,
-        MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS, merge_columns,
+        MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS, SEVERITY, SEVERITY_CASES,
+        SEVERITY_SOURCE_COLUMNS, merge_columns,
     )
 
     for name, harmoniser, columns in (
         (HARMONISED_LINEAGE, LINEAGE, LINEAGE_SOURCE_COLUMNS),
         (HARMONISED_PHASE, MENSTRUAL_PHASE, PHASE_SOURCE_COLUMNS),
         (HARMONISED_CELL_CYCLE, CELL_CYCLE, CELL_CYCLE_SOURCE_COLUMNS),
+        (HARMONISED_SEVERITY, SEVERITY, SEVERITY_SOURCE_COLUMNS),
+        (HARMONISED_SEVERITY_CASES, SEVERITY_CASES, SEVERITY_SOURCE_COLUMNS),
     ):
         if name in corpus.meta:
             continue

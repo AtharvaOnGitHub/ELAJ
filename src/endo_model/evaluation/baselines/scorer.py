@@ -197,6 +197,16 @@ class ScorerSettings:
     # 0 means every cell, which is now the default.
     study_mixing_max_cells: int = 0
     knn_labels: tuple[str, ...] = KNN_LABELS
+    # WHICH STAGES RUN AT ALL, added 6 November 2026. scIB is absent from the
+    # default and that is deliberate. Its batch half is degenerate on this
+    # corpus -- ilisi_knn reads exactly 0.0000 and pcr_batch exactly 1.0000
+    # for PCA, scVI, scANVI and ELAJ alike -- so the paper cites none of it,
+    # and the existing files already hold the rows that document that. On 5
+    # November it also OOM-killed a fifteen-hour scFoundation job inside
+    # silhouette_batch, and because study mixing runs after it, the one row
+    # that job existed to produce was the one it never reached. A stage we do
+    # not read should not be able to destroy a stage we do.
+    stages: tuple[str, ...] = ("knn", "cross-donor", "mixing", "disease")
     cross_donor_labels: tuple[str, ...] = CROSS_DONOR_LABELS
     scib_labels: tuple[str, ...] = SCIB_LABELS
     # Control against eutopic endometrium, the one disease contrast that is
@@ -260,11 +270,15 @@ class EmbeddingScorer:
                      width=embedding.width, fit_seconds=embedding.fit_seconds,
                      supervised_on=supervised_on, fit_on=embedding.fit_on)
         rows: list[ScoreRow] = []
-        rows += self._knn(embedding.latent, corpus, stamp)
-        rows += self._cross_donor(embedding.latent, corpus, stamp)
-        rows += self._scib(embedding.latent, corpus, stamp)
-        rows += self._study_mixing(embedding.latent, corpus, stamp)
-        rows += self._disease(embedding.latent, corpus, stamp)
+        for name, stage in (("knn", self._knn),
+                            ("cross-donor", self._cross_donor),
+                            ("scib", self._scib),
+                            ("mixing", self._study_mixing),
+                            ("disease", self._disease)):
+            if name not in self.settings.stages:
+                logger.info("   %-8s skipped, not in --stages", name)
+                continue
+            rows += stage(embedding.latent, corpus, stamp)
         return rows
 
     # ── the four batteries ────────────────────────────────────────────────

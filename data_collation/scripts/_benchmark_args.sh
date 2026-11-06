@@ -22,7 +22,7 @@ while [ $# -gt 0 ]; do
         --study-mixing-cells|\
         --out|--root|--config-dir|--runs-dir)
             EXTRA+=("$1" "${2:?"$1 needs a value"}"); shift 2 ;;
-        --splits|--methods|--gene-policies|--external-latent|--only-labels)
+        --splits|--methods|--gene-policies|--external-latent|--only-labels|--stages)
             # nargs="+": take every following bare word.
             EXTRA+=("$1"); shift
             while [ $# -gt 0 ] && [[ "$1" != -* ]]; do

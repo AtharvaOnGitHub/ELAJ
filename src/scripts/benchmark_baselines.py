@@ -153,6 +153,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--include-elaj", action="store_true",
                    help="Embed the checkpoint on the same cells and score it "
                         "alongside. Needs --runs-dir to find it.")
+    p.add_argument("--stages", nargs="+", default=None,
+                   choices=["knn", "cross-donor", "scib", "mixing", "disease"],
+                   help="Which scoring stages to run. Default: knn, "
+                        "cross-donor, mixing and disease. scIB is OPT-IN: the "
+                        "paper cites none of it, the existing files already "
+                        "hold the rows that show its batch half is degenerate "
+                        "here, and on 5 November it OOM-killed a fifteen-hour "
+                        "scFoundation job inside silhouette_batch before the "
+                        "mixing stage that job existed to produce. Name only "
+                        "the stages you need: the cost of a scoring pass is "
+                        "almost entirely the stages, not the corpus.")
     p.add_argument("--dump-only", action="store_true",
                    help="Write the embedding with --dump-latent and exit "
                         "before scoring anything. Measured 6 November 2026: a "
@@ -443,6 +454,9 @@ def main() -> None:
                          "nothing to show for the embedding.")
     if args.dump_only and not args.include_elaj:
         raise SystemExit("--dump-only with --no-elaj has nothing to embed.")
+    if args.stages:
+        scorer_settings["stages"] = tuple(args.stages)
+        logger.info("--stages: %s", ", ".join(args.stages))
     if args.only_labels:
         from endo_model.evaluation.baselines.scorer import CROSS_DONOR_LABELS
         unknown = [c for c in args.only_labels if c not in CROSS_DONOR_LABELS]
@@ -450,11 +464,8 @@ def main() -> None:
             raise SystemExit(
                 f"--only-labels: not cross-donor labels: {unknown}. "
                 f"Known: {list(CROSS_DONOR_LABELS)}")
-        scorer_settings.update(
-            cross_donor_labels=tuple(args.only_labels),
-            knn_labels=(), scib_labels=(),
-            study_mixing=False, disease_contrast=False,
-        )
+        scorer_settings.update(cross_donor_labels=tuple(args.only_labels),
+                               stages=("cross-donor",))
         logger.info("--only-labels: scoring %s and nothing else",
                     ", ".join(args.only_labels))
     scorer = EmbeddingScorer(ScorerSettings(**scorer_settings))

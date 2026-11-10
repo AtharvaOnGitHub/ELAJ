@@ -60,6 +60,30 @@ regulariser is `PowerSphericalKLLoss`.  See `endo_model/model/latent/power_spher
 | Patient-held-out splits | Generalisation to new patients, not new cells from known patients |
 | No softmax in decoder | z_proj is a single vector; softmax of one score is identically 1.0 |
 
+### Study keys name the depositor, not the paper's first author
+
+`src/configs/data/study_platform.csv` keys every study by the author name
+**as given on the archive record** (GEO, ArrayExpress, CELLxGENE, CNGBdb).
+For four studies that is not the first author of the paper the data belongs
+to, so the key and the citation disagree:
+
+| key in this repo | accession | paper's first author |
+|---|---|---|
+| `ferrero_2024` | GSE247695 | Sarsenova |
+| `lin_2023` | GSE214411 | Huang |
+| `wang_2022` | GSE218044 | Chen |
+| `marecko_2024` | E-MTAB-14039 | Marečková |
+
+**The keys are deliberately NOT renamed.** Every scored table, cached
+embedding and figure cache is keyed on them, so renaming would mean
+re-deriving the lot for a cosmetic gain. Anything a reader sees instead maps
+key to published name at the point of display: the paper's figures do it
+through `STUDY_NAME` in `Paper_writing/figures/scripts/figure1.py`, and
+Methods, Data availability pairs each accession with its citation.
+
+If you add a study, key it however the archive names it and add the display
+name to that map.
+
 ## Project structure
 
 ```

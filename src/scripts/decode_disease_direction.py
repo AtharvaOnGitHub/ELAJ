@@ -155,7 +155,7 @@ def main() -> None:
         idx_all = rng.choice(idx_all, args.cells_per_study, replace=False)
     z = torch.from_numpy(Z[idx_all]).float()
     batch = {"study_id": torch.tensor([0]),
-             "is_dns": torch.zeros(1, len(vocab), dtype=torch.bool)}
+             "is_dns": torch.zeros(1, vocab.vocab_size, dtype=torch.bool)}
 
     with torch.no_grad():
         gq, gidx = model._build_gene_queries(batch)

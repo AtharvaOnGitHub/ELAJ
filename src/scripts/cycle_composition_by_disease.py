@@ -1,35 +1,29 @@
-"""X3b -- does immune composition track the menstrual cycle in controls only?
+"""X3b -- does cell composition track the cycle differently in disease?
 
 Huang 2023 (`lin_2023`) reports that the proportion of endometrial immune
 cells varies across the menstrual cycle in controls, and that this variation
-is ABSENT in endometriosis, from 13 donors. X3 tested a proxy for that in
-the latent; this tests the claim as Huang actually made it, as a statement
-about cell proportions.
+is ABSENT in endometriosis, from 13 donors. This tests the claim as Huang
+made it, as a statement about cell proportions, at 101 donors.
 
-**This script uses no model output.** Cell family, menstrual phase and
-disease status all arrived with the data, and the test is over donors. That
-is deliberate: it makes the result a statement about the corpus at 118
-donors against Huang's 13, which a reader cannot attribute to ELAJ being
-good or bad. The latent version of the same question is
-`cycle_by_disease.py`.
+**One pooled model over every donor.** AW's ruling, 12 November: our power
+comes from scale, so a pooled test beats per-study numbers. An earlier
+version standardised within study and compared the two arms separately,
+which left the study-by-phase imbalance in place -- Marecko contributes no
+periovulatory donors and only ten disease donors -- so its noise drove the
+pooled estimate. Study belongs IN the model as a covariate, not as a split.
 
-Design decisions, each load-bearing:
+    logit(fraction) ~ study + phase + disease + phase:disease
 
-* **duempelmann_2026 and marecko_2024 only.** They are the two studies
-  carrying cell family AND menstrual phase, and both disease arms exist
-  inside each, so an arm difference cannot be a study difference.
-* **Phase collapsed to three levels.** The nine fine levels leave single
-  donors in several cells. Menstrual is dropped: 625 cells corpus-wide.
-* **Composition standardised within study before pooling.** Marecko's cells
-  are 9.8% immune and Duempelmann's 2.6%, an offset that would otherwise
-  dominate any pooled variance. This is a composition analysis and not a
-  per-study reading of the latent, so the standing rule on per-study latent
-  numbers does not apply.
-* **eta squared, the share of between-donor variance that phase explains.**
-  Huang's claim is that this is large in controls and near zero in cases.
-* **The null permutes disease status across donors within study**, keeping
-  each donor's phase and composition together. That is the right null for a
-  claim about which arm carries the phase structure.
+The interaction is Huang's claim as arithmetic: does the effect of cycle
+phase depend on disease status. The test is whether adding that term
+explains more variance than chance, with the null built by permuting
+disease status across donors within study, which keeps each donor's phase,
+study and composition together.
+
+**This script uses no model output.** Cell family, phase and disease status
+all arrived with the data, so the result is a statement about the corpus and
+cannot be attributed to ELAJ being good or bad. The latent version of the
+same question is `cycle_by_disease.py`.
 """
 from pathlib import Path
 import sys
@@ -37,9 +31,9 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
-ARM, NPERM, SEED, MIN_CELLS = "p1_dab168_kl1", 2000, 24, 200
+ARM, NPERM, SEED, MIN_CELLS = "p1_dab168_kl1", 5000, 24, 200
 STUDIES = ["duempelmann_2026", "marecko_2024"]
-FAMILIES = ["immune", "stromal", "epithelial", "endothelial"]
+EPS = 1e-3
 
 
 def coarse(p: str):
@@ -49,18 +43,35 @@ def coarse(p: str):
         return "secretory"
     if p == "periovulatory":
         return "periovulatory"
-    return None                     # menstrual, 625 cells corpus-wide
+    return None                       # menstrual, 625 cells corpus-wide
 
 
-def eta_sq(values: np.ndarray, groups: np.ndarray) -> float:
-    """Share of variance in `values` explained by `groups`. 0 means none."""
-    grand = values.mean()
-    total = ((values - grand) ** 2).sum()
-    if total == 0:
+def design(d: pd.DataFrame, status: np.ndarray, interaction: bool) -> np.ndarray:
+    """Dummy-coded design matrix, first level of each factor dropped."""
+    parts = [np.ones((len(d), 1))]
+    parts.append(pd.get_dummies(d["study"], drop_first=True).to_numpy(float))
+    ph = pd.get_dummies(d["phase3"], drop_first=True).to_numpy(float)
+    di = (status == "eutopic").astype(float)[:, None]
+    parts += [ph, di]
+    if interaction:
+        parts.append(ph * di)
+    return np.hstack(parts)
+
+
+def rss(X: np.ndarray, y: np.ndarray) -> float:
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    return float(((y - X @ beta) ** 2).sum())
+
+
+def f_stat(d: pd.DataFrame, y: np.ndarray, status: np.ndarray) -> float:
+    """F for the phase:disease term, over the model without it."""
+    Xr, Xf = design(d, status, False), design(d, status, True)
+    rr, rf = rss(Xr, y), rss(Xf, y)
+    dfd = len(y) - np.linalg.matrix_rank(Xf)
+    dfn = np.linalg.matrix_rank(Xf) - np.linalg.matrix_rank(Xr)
+    if dfn <= 0 or dfd <= 0 or rf <= 0:
         return np.nan
-    between = sum(len(values[groups == g]) * (values[groups == g].mean() - grand) ** 2
-                  for g in np.unique(groups))
-    return float(between / total)
+    return ((rr - rf) / dfn) / (rf / dfd)
 
 
 def main(family: str = "immune") -> None:
@@ -73,53 +84,46 @@ def main(family: str = "immune") -> None:
     m = m[m["phase3"].notna()]
 
     g = m.groupby("patient_id")
-    d = pd.DataFrame({
-        "study": g["study"].first(),
-        "phase3": g["phase3"].first(),
-        "status": g["disease_status"].first(),
-        "n_cells": g.size(),
-        "frac": g["cell family"].apply(lambda s: (s == family).mean()),
-    })
+    d = pd.DataFrame({"study": g["study"].first(), "phase3": g["phase3"].first(),
+                      "status": g["disease_status"].first(), "n_cells": g.size(),
+                      "frac": g["cell family"].apply(lambda s: (s == family).mean())})
     assert g["phase3"].nunique().max() == 1, "phase is not donor-constant"
-    d = d[d["n_cells"] >= MIN_CELLS]
+    d = d[d["n_cells"] >= MIN_CELLS].reset_index()
 
-    # remove each study's own offset and scale, so the two can be pooled
-    d["z"] = d.groupby("study")["frac"].transform(
-        lambda s: (s - s.mean()) / (s.std() or 1.0))
+    y = np.log((d["frac"] + EPS) / (1 - d["frac"] + EPS)).to_numpy()
+    status = d["status"].to_numpy()
 
-    print(f"family: {family}   donors: {len(d)}   "
-          f"(min {MIN_CELLS} labelled cells each)\n")
+    print(f"family: {family}   donors: {len(d)}   min {MIN_CELLS} labelled cells\n")
     print(pd.crosstab(d["phase3"], [d["study"], d["status"]]).to_string())
-    print("\nmean proportion by phase and arm:")
+    print(f"\nmean {family} proportion by phase and arm:")
     print(d.pivot_table(index="phase3", columns="status", values="frac",
-                        aggfunc="mean").round(4).to_string())
+                        aggfunc=["mean", "size"]).round(4).to_string())
 
-    obs = {s: eta_sq(d.z[d.status == s].to_numpy(), d.phase3[d.status == s].to_numpy())
-           for s in ("control", "eutopic")}
-    diff = obs["control"] - obs["eutopic"]
-    print(f"\nvariance explained by phase (eta squared)")
-    print(f"  control {obs['control']:.4f}   eutopic {obs['eutopic']:.4f}   "
-          f"difference {diff:+.4f}")
+    obs = f_stat(d, y, status)
 
-    # null: reassign disease status among donors, within study
+    # null: reassign disease among donors within study, keeping phase attached
+    idx_by_study = [np.flatnonzero((d["study"] == s).to_numpy()) for s in STUDIES]
     null = np.empty(NPERM)
     for i in range(NPERM):
-        perm = d.groupby("study")["status"].transform(
-            lambda s: rng.permutation(s.to_numpy()))
-        null[i] = (eta_sq(d.z[perm == "control"].to_numpy(),
-                          d.phase3[perm == "control"].to_numpy())
-                   - eta_sq(d.z[perm == "eutopic"].to_numpy(),
-                            d.phase3[perm == "eutopic"].to_numpy()))
-    p_one = float((null >= diff).mean())
-    print(f"  null mean {null.mean():+.4f}  sd {null.std():.4f}  "
-          f"95% [{np.percentile(null, 2.5):+.4f}, {np.percentile(null, 97.5):+.4f}]")
-    print(f"  one-sided p (Huang predicts control > eutopic) = {p_one:.4f}")
+        perm = status.copy()
+        for ix in idx_by_study:
+            perm[ix] = rng.permutation(status[ix])
+        null[i] = f_stat(d, y, perm)
+
+    p = float((null >= obs).mean())
+    print(f"\npooled model: logit({family} fraction) ~ study + phase + disease"
+          f" + phase:disease")
+    print(f"  F for the phase:disease interaction = {obs:.4f}")
+    print(f"  null mean {np.nanmean(null):.4f}  "
+          f"95th percentile {np.nanpercentile(null, 95):.4f}")
+    print(f"  p = {p:.4f}   ({NPERM} permutations)")
+    print("\nHuang predicts a real interaction: phase should matter in controls"
+          "\nand not in disease. A large F supports that, whatever its sign.")
 
     out = Path(__file__).resolve().parents[2] / "docs" / "paper" / "x3b_results.csv"
-    pd.DataFrame([{"family": family, "n_donors": len(d),
-                   "eta2_control": obs["control"], "eta2_eutopic": obs["eutopic"],
-                   "difference": diff, "null_mean": null.mean(),
-                   "null_sd": null.std(), "p_one_sided": p_one,
+    pd.DataFrame([{"family": family, "n_donors": len(d), "model": "pooled_interaction",
+                   "F_interaction": obs, "null_mean": np.nanmean(null),
+                   "null_p95": np.nanpercentile(null, 95), "p": p,
                    "n_permutations": NPERM}]).to_csv(
         out, mode="a", header=not out.exists(), index=False)
     print(f"\nappended to {out}")

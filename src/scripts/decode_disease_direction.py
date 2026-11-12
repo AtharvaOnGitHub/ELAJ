@@ -88,6 +88,12 @@ def main() -> None:
     ap.add_argument("--cells-per-study", type=int, default=4000)
     ap.add_argument("--transferred", action="store_true",
                     help="use transferred cell families, so all studies take part")
+    ap.add_argument("--vocab", default=None,
+                    help="local vocabulary_v1.json; the config points at an HPC path")
+    ap.add_argument("--n-studies", type=int, default=11)
+    ap.add_argument("--outputs-root", default=str(ROOT),
+                    help="holds Outputs/cells/<arm>/; differs on the HPC")
+    ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 
     from endo_model.configs import load_experiment
@@ -96,19 +102,22 @@ def main() -> None:
     from endo_model.training.checkpointing import CheckpointManager
 
     exp, mcfg, tcfg, dcfg = load_experiment(args.config, root=args.root)
-    vocab = GeneVocabulary(str(Path(args.root) / dcfg.vocabulary_path))
+    vocab = GeneVocabulary(args.vocab or str(Path(args.root) / dcfg.vocabulary_path))
     mcfg.n_groups = len(vocab.group_names)
-    mcfg.n_studies = len(dcfg.resolve_studies(args.root))
+    # studies.csv lives on the HPC. Only the count matters here: the study
+    # embedding is blanked below, and the gene layout comes from `is_dns`.
+    mcfg.n_studies = args.n_studies
 
     model = EndoFoundationModel(vocab, mcfg)
     CheckpointManager.load(args.checkpoint, model, map_location="cpu")
     model.eval()
     print(f"loaded {args.checkpoint}")
 
-    Z = np.load(ROOT / f"Outputs/cells/{ARM}/latent.npy")
-    m = pd.read_csv(ROOT / f"Outputs/cells/{ARM}/metadata.csv.gz", low_memory=False)
+    data = Path(args.outputs_root) / "Outputs" / "cells" / ARM
+    Z = np.load(data / "latent.npy")
+    m = pd.read_csv(data / "metadata.csv.gz", low_memory=False)
     if args.transferred:
-        t = pd.read_csv(ROOT / f"Outputs/cells/{ARM}/cell_family_transferred.csv.gz")
+        t = pd.read_csv(data / "cell_family_transferred.csv.gz")
         m["family"] = t["cell_family_transferred"].to_numpy()
     else:
         m["family"] = m["cell family"]
@@ -123,47 +132,36 @@ def main() -> None:
         f"latent is {Z.shape[1]} wide, z_proj expects "
         f"{model.latent_space.z_proj.in_features}")
 
-    study_to_id = {s.name: s.id for s in dcfg.resolve_studies(args.root)}
     rng = np.random.default_rng(24)
     per_eps: dict[float, pd.Series] = {}
 
-    for eps in EPS:
-        acc: dict[str, float] = {}
-        wt: dict[str, float] = {}
-        for study, sub in m.groupby("study"):
-            sid = study_to_id.get(study)
-            if sid is None:
-                print(f"  skipping {study}: not in the study config")
-                continue
-            idx = sub.index.to_numpy()
-            if len(idx) > args.cells_per_study:
-                idx = rng.choice(idx, args.cells_per_study, replace=False)
-            z = torch.from_numpy(Z[idx]).float()
+    # No dataset is loaded, so `_gene_layouts` is empty and `_build_gene_queries`
+    # falls back to the batch's own `is_dns`. All-False means every gene counts
+    # as measured, which is what an attribution wants: one pass, whole
+    # vocabulary, no per-study gene layout to get wrong.
+    idx_all = np.arange(len(m))
+    if len(idx_all) > args.cells_per_study:
+        idx_all = rng.choice(idx_all, args.cells_per_study, replace=False)
+    z = torch.from_numpy(Z[idx_all]).float()
+    batch = {"study_id": torch.tensor([0]),
+             "is_dns": torch.zeros(1, len(vocab), dtype=torch.bool)}
 
-            batch = {"study_id": torch.tensor([sid]),
-                     "is_dns": torch.zeros(1, len(vocab), dtype=torch.bool)}
-            with torch.no_grad():
-                gq, gidx = model._build_gene_queries(batch)
-                zp = model.latent_space.z_proj(z)
-                zp_pert = model.latent_space.z_proj(
-                    z + eps * torch.from_numpy(w).float())
-                B = z.shape[0]
-                zeros = lambda d: torch.zeros(B, d) if d else None
-                base = model.decoder(gq, zp, zeros(mcfg.d_tissue),
-                                     zeros(mcfg.d_platform), None,
-                                     zeros(mcfg.d_study))
-                pert = model.decoder(gq, zp_pert, zeros(mcfg.d_tissue),
-                                     zeros(mcfg.d_platform), None,
-                                     zeros(mcfg.d_study))
-                delta = (pert - base).mean(0).numpy()
-
-            names = [vocab.index_to_gene(int(i)) for i in gidx.tolist()]
-            for g, d in zip(names, delta):
-                acc[g] = acc.get(g, 0.0) + d * len(idx)
-                wt[g] = wt.get(g, 0.0) + len(idx)
-            print(f"  {study:22s} {len(idx):6d} cells, {len(names):6d} genes")
-
-        per_eps[eps] = pd.Series({g: acc[g] / wt[g] for g in acc}).sort_values()
+    with torch.no_grad():
+        gq, gidx = model._build_gene_queries(batch)
+        names = [vocab.index_to_gene(int(i)) for i in gidx.tolist()]
+        print(f"decoding {len(z):,} {FAMILY} cells against {len(names):,} genes")
+        B = z.shape[0]
+        zeros = lambda d: torch.zeros(B, d) if d else None
+        zp = model.latent_space.z_proj(z)
+        base = model.decoder(gq, zp, zeros(mcfg.d_tissue), zeros(mcfg.d_platform),
+                             None, zeros(mcfg.d_study))
+        for eps in EPS:
+            zp_p = model.latent_space.z_proj(
+                z + eps * torch.from_numpy(w).float())
+            pert = model.decoder(gq, zp_p, zeros(mcfg.d_tissue),
+                                 zeros(mcfg.d_platform), None, zeros(mcfg.d_study))
+            per_eps[eps] = pd.Series((pert - base).mean(0).numpy(),
+                                     index=names).sort_values()
 
     a, b = per_eps[EPS[0]], per_eps[EPS[1]]
     shared = a.index.intersection(b.index)
@@ -188,7 +186,9 @@ def main() -> None:
         else:
             print(f"  {g:7s} not in the measured gene set")
 
-    out = Path(__file__).resolve().parents[2] / "docs" / "paper"
+    out = Path(args.out_dir) if args.out_dir else (
+        Path(__file__).resolve().parents[2] / "docs" / "paper")
+    out.mkdir(parents=True, exist_ok=True)
     s.to_csv(out / "x12_gene_shifts.csv")
     print(f"\nwrote {out / 'x12_gene_shifts.csv'}")
 

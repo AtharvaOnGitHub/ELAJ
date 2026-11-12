@@ -1,0 +1,2 @@
+arm,n_donors,auc_heldout,auc_null,share_null_above,cosine_stability
+p1_dab168_kl1,207,0.5360319100584086,0.48199714757037276,0.28,0.8526163041464194

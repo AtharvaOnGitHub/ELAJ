@@ -1,0 +1,4 @@
+test,accuracy,balanced,majority_baseline
+marecko_2024 -> duempelmann_2026,0.9862,0.9596,0.8805
+duempelmann_2026 -> marecko_2024,0.9845,0.964,0.5252
+li_2025 immune recall (out of tissue),0.9966,,

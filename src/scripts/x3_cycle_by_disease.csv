@@ -1,0 +1,2 @@
+observed_difference,null_mean,null_sd,p_two_sided,n_control_donors,n_eutopic_donors,k,n_permutations,splits
+-0.0649546015548429,0.0018238027501970625,0.09613396974808215,0.505,61,51,100,2000,train+val+test

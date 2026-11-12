@@ -48,7 +48,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+# No absolute default anywhere: the repo is /rds/homes/a/axw1008/axw1008/src
+# on the HPC and .../ELAJ/axw1008/src on the Mac, and the dumps sit beside the
+# repo on one and two levels up on the other. Every sbatch wrapper in this
+# repo cds into the repo and passes `--root .`; this follows that.
 ARM = "p1_dab168_kl1"
 FAMILY = "immune"
 EPS = (0.5, 1.0)
@@ -84,15 +87,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", required=True)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--root", default=str(ROOT / "axw1008/src"))
+    ap.add_argument("--root", default=".",
+                    help="repo root holding configs/ and data/")
     ap.add_argument("--cells-per-study", type=int, default=4000)
     ap.add_argument("--transferred", action="store_true",
                     help="use transferred cell families, so all studies take part")
     ap.add_argument("--vocab", default=None,
                     help="local vocabulary_v1.json; the config points at an HPC path")
     ap.add_argument("--n-studies", type=int, default=11)
-    ap.add_argument("--outputs-root", default=str(ROOT),
-                    help="holds Outputs/cells/<arm>/; differs on the HPC")
+    ap.add_argument("--outputs-root", default=".",
+                    help="holds Outputs/ or outputs/ with cells/<arm>/")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 

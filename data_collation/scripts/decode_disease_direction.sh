@@ -62,6 +62,7 @@ export PYTHONUNBUFFERED=1
 python -u -m scripts.decode_disease_direction \
     --checkpoint "${CKPT}" \
     --config configs/experiment/p1_dab168_kl1.yaml \
+    --root . \
     --outputs-root "${REPO}" \
     --out-dir docs/paper \
     "$@"

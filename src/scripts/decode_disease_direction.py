@@ -98,6 +98,8 @@ def main() -> None:
     ap.add_argument("--outputs-root", default=".",
                     help="holds Outputs/ or outputs/ with cells/<arm>/")
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--orthogonalise", action="store_true",
+                    help="remove the cell-identity component from the direction")
     args = ap.parse_args()
 
     from endo_model.configs import load_experiment
@@ -139,6 +141,33 @@ def main() -> None:
     print(f"{FAMILY} cells: {len(m):,} from {m['patient_id'].nunique()} donors")
 
     w = disease_direction(Z, m)
+
+    if args.orthogonalise:
+        # The raw direction has a component along the cell-identity axes, and
+        # identity genes respond far more steeply to those axes than anything
+        # responds to disease, so they dominate the ranking without tracking
+        # disease at all. Project them out: Gram-Schmidt against each
+        # (other family - FAMILY) axis, using the FULL metadata, not the
+        # disease-restricted subset.
+        full = pd.read_csv(data / "metadata.csv.gz", low_memory=False)
+        full["family"] = (pd.read_csv(data / "cell_family_transferred.csv.gz")
+                          ["cell_family_transferred"].to_numpy()
+                          if args.transferred else full["cell family"])
+        Zfull = np.load(data / "latent.npy")
+        here = Zfull[(full["family"] == FAMILY).to_numpy()].mean(0)
+        for other in ("epithelial", "stromal", "endothelial"):
+            k = (full["family"] == other).to_numpy()
+            if not k.any():
+                continue
+            a = Zfull[k].mean(0) - here
+            a /= np.linalg.norm(a)
+            before = float(w @ a)
+            w = w - before * a
+            w /= np.linalg.norm(w)
+            print(f"  removed {FAMILY}->{other:12s} component, cosine was {before:+.4f}")
+        print(f"  residual cosines: " + ", ".join(
+            f"{o} {float(w @ ((Zfull[(full['family'] == o).to_numpy()].mean(0) - here) / np.linalg.norm(Zfull[(full['family'] == o).to_numpy()].mean(0) - here))):+.4f}"
+            for o in ("epithelial", "stromal", "endothelial")))
     assert Z.shape[1] == model.latent_space.z_proj.in_features, (
         f"latent is {Z.shape[1]} wide, z_proj expects "
         f"{model.latent_space.z_proj.in_features}")
@@ -200,8 +229,9 @@ def main() -> None:
     out = Path(args.out_dir) if args.out_dir else (
         Path(__file__).resolve().parents[2] / "docs" / "paper")
     out.mkdir(parents=True, exist_ok=True)
-    s.to_csv(out / "x12_gene_shifts.csv")
-    print(f"\nwrote {out / 'x12_gene_shifts.csv'}")
+    tag = "_orth" if args.orthogonalise else ""
+    s.to_csv(out / f"x12_gene_shifts{tag}.csv")
+    print(f"\nwrote {out / f'x12_gene_shifts{tag}.csv'}")
 
 
 if __name__ == "__main__":

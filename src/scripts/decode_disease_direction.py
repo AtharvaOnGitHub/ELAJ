@@ -113,7 +113,14 @@ def main() -> None:
     model.eval()
     print(f"loaded {args.checkpoint}")
 
-    data = Path(args.outputs_root) / "Outputs" / "cells" / ARM
+    # The dump directory is "Outputs" on the Mac and "outputs" on the HPC.
+    tried = [Path(args.outputs_root) / d / "cells" / ARM
+             for d in ("Outputs", "outputs")]
+    data = next((d for d in tried if (d / "latent.npy").exists()), None)
+    if data is None:
+        raise SystemExit("no latent.npy found. Looked in:\n  "
+                         + "\n  ".join(str(d) for d in tried))
+    print(f"data: {data}")
     Z = np.load(data / "latent.npy")
     m = pd.read_csv(data / "metadata.csv.gz", low_memory=False)
     if args.transferred:

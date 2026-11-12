@@ -48,15 +48,20 @@ python -u -c "import torch, yaml; print('torch', torch.__version__)" || {
     exit 1
 }
 
-cd /rds/homes/a/axw1008/axw1008/src
+REPO=/rds/homes/a/axw1008/axw1008/src
+cd "${REPO}"
 
-CKPT=$(ls -t "${BASE}"/Outputs/p_series/p1_dab168_kl1/checkpoints/*.pt | head -1)
+# Checkpoints and latent dumps live under the REPO as src/outputs (lowercase),
+# not under the RDS project directory. Corrected 12 November after the first
+# submission looked in ${BASE}/Outputs and found nothing.
+CKPT=$(ls -t "${REPO}"/outputs/p_series/p1_dab168_kl1/checkpoints/*.pt 2>/dev/null | head -1)
+[[ -n "${CKPT}" ]] || { echo "no checkpoint under ${REPO}/outputs/p_series/p1_dab168_kl1/checkpoints" >&2; exit 1; }
 echo "checkpoint: ${CKPT}"
 
 export PYTHONUNBUFFERED=1
 python -u -m scripts.decode_disease_direction \
     --checkpoint "${CKPT}" \
     --config configs/experiment/p1_dab168_kl1.yaml \
-    --outputs-root "${BASE}" \
+    --outputs-root "${REPO}" \
     --out-dir docs/paper \
     "$@"

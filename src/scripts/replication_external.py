@@ -31,10 +31,19 @@ N_VOCAB, TOP_N = 15496, 15
 
 
 def external_lists(path: Path):
+    """Their gene table, parsed out of the saved full text.
+
+    Returns the up and down sets plus each gene's reported fold change, so
+    the prose can quote a fold change without anyone retyping it.
+    """
     t = re.sub(r"\s+", " ", path.read_text())
-    up = set(re.findall(r"\b([A-Z0-9orf.-]{2,15})\b ENSG\d+ Upregulated", t))
-    dn = set(re.findall(r"\b([A-Z0-9orf.-]{2,15})\b ENSG\d+ Downregulated", t))
-    return up, dn
+    up, dn, fold = set(), set(), {}
+    for g, d, f in re.findall(
+            r"\b([A-Z0-9orf.-]{2,15})\b ENSG\d+ (Upregulated|Downregulated) "
+            r"([\d.]+)", t):
+        (up if d == "Upregulated" else dn).add(g)
+        fold[g] = float(f)
+    return up, dn, fold
 
 
 def hypergeom_at_least(k: int, n: int, K: int, N: int) -> float:
@@ -51,7 +60,7 @@ def main() -> None:
                  "/rds/homes/a/axw1008/axw1008/src/docs/paper/"
                  "x12_gene_shifts_orth.csv " + str(SHIFTS))
 
-    up, dn = external_lists(PAPER)
+    up, dn, fold = external_lists(PAPER)
     s = pd.read_csv(SHIFTS, index_col=0).iloc[:, 0].sort_values()
     case, ctrl = list(s.index[:TOP_N]), list(s.index[-TOP_N:])
 
@@ -63,7 +72,8 @@ def main() -> None:
         p = hypergeom_at_least(len(hits), TOP_N, len(target), N_VOCAB)
         rows.append({"end": name, "n_top": TOP_N, "external_list": tname,
                      "external_n": len(target), "hits": len(hits),
-                     "genes": ";".join(hits), "p_hypergeometric": p})
+                     "genes": ";".join(hits), "p_hypergeometric": p,
+                     **{f"fold_{g}": fold[g] for g in hits}})
         print(f"  our {name:13s} {len(hits)} of {TOP_N} in their {tname} list "
               f"{hits}  p = {p:.3g}")
 

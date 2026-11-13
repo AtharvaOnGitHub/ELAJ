@@ -88,12 +88,63 @@ def run(name, a, b, note=""):
     return pd.DataFrame(rows)
 
 
+SEVERITY = {"grade_mild": "low", "stage_1": "low", "stage_2": "low",
+            "grade_severe": "high", "stage_3": "high", "stage_4": "high"}
+
+
+def run_severity():
+    """X8e -- does composition track the surgeon's severity grade?
+
+    Patients only. Low is mild or rASRM stage 1-2, high is severe or stage
+    3-4; the merge is the one `groupings.py` justifies, since duempelmann
+    defines mild and severe as rASRM I-II and III-IV and marecko records
+    rASRM I-IV directly. Controls are excluded, which is the whole point:
+    merged severity INCLUDING controls is partly a disease-status readout.
+    """
+    rng = np.random.default_rng(SEED)
+    m = pd.read_csv(ROOT / f"Outputs/cells/{ARM}/metadata.csv.gz", low_memory=False)
+    t = pd.read_csv(ROOT / f"Outputs/cells/{ARM}/cell_family_transferred.csv.gz")
+    m["family"] = t["cell_family_transferred"].to_numpy()
+    m["sev"] = m["severity (study vocabularies)"].map(SEVERITY)
+    m = m[m["sev"].notna() & m["family"].notna()]
+
+    g = m.groupby("patient_id")
+    base = pd.DataFrame({"study": g["study"].first(), "status": g["sev"].first(),
+                         "n": g.size()})
+    print("\n=== X8e: composition against surgical severity, patients only ===")
+    print(pd.crosstab(base["study"], base["status"]).to_string())
+    rows = []
+    for fam in FAMILIES:
+        d = base.copy()
+        d["frac"] = g["family"].apply(lambda s, f=fam: (s == f).mean())
+        d = d[d["n"] >= MIN_CELLS].reset_index()
+        y = np.log((d["frac"] + EPS) / (1 - d["frac"] + EPS)).to_numpy()
+        grp = (d["status"] == "high").to_numpy()
+        obs = f_contrast(d, y, grp)
+        ix = [np.flatnonzero((d["study"] == s).to_numpy()) for s in d["study"].unique()]
+        null = np.empty(NPERM)
+        for i in range(NPERM):
+            q = grp.copy()
+            for j in ix:
+                q[j] = rng.permutation(grp[j])
+            null[i] = f_contrast(d, y, q)
+        pv = float((null >= obs).mean())
+        mu = d.groupby("status")["frac"].mean()
+        rows.append({"contrast": "severity_low_vs_high", "family": fam,
+                     "mean_low": mu.get("low"), "mean_high": mu.get("high"),
+                     "F": obs, "p": pv, "n_donors": len(d)})
+        print(f"  {fam:12s} low {mu.get('low'):.4f}  high {mu.get('high'):.4f}  "
+              f"F {obs:7.3f}  p {pv:.4f}  (n={len(d)})")
+    return pd.DataFrame(rows)
+
+
 def main():
     out = []
     out.append(run("X8", "control", "eutopic",
                    "endometrium both sides, clean"))
     out.append(run("X9", "eutopic", "ectopic",
                    "lesion arm may carry absorbed mesothelial cells"))
+    out.append(run_severity())
     dest = Path(__file__).resolve().parents[2] / "docs" / "paper" / "x8_x9_composition.csv"
     pd.concat(out).to_csv(dest, index=False)
     print(f"\nwrote {dest}")

@@ -5,7 +5,7 @@ immune disease direction. This asks whether the top of that ranking agrees
 with a differential-expression study that is NOT one of the eleven pooled
 here, which is the only way the gene list can be checked without circularity.
 
-**The external cohort.** Lin et al., *Biomedical Reports* 2017 (PMC5449958):
+**The external cohort.** Zhao et al., *Biomedical Reports* 2017 (PMC5449958):
 8 eutopic endometria from endometriosis against 5 controls, RNA-seq, 66 genes
 reported upregulated and 6 downregulated. Full text saved locally at
 `Atharva Papers/Validation/PMC5449958.txt`; the gene table is parsed from it

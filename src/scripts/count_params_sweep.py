@@ -79,7 +79,9 @@ def count(root, config, D: int, G: int, d: int) -> int:
     class _Vocab:
         def __init__(self, names, sizes):
             self.group_names = list(names)
-            self.group_sizes = list(sizes)
+            # group_sizes is a dict[str, int] keyed by group name, not a
+            # list. ModuleGroupEmbedding calls .items() on it.
+            self.group_sizes = dict(zip(names, sizes))
             self.vocab_size = int(sum(sizes))
             start, self._idx = 0, {}
             for n, k in zip(names, sizes):

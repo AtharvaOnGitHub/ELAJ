@@ -63,6 +63,13 @@ def parse_args() -> argparse.Namespace:
                    help="Where the run directory lives.")
     p.add_argument("--splits", nargs="+", default=["val", "test"],
                    choices=["train", "val", "test"])
+    p.add_argument("--only-groups", action="store_true",
+                   help="Score ONLY the 44 per-group stages, skipping every "
+                        "pipeline stage. The question 'which pathway groups "
+                        "carry which signal' needs the per-group stages and "
+                        "not the 12,672-wide concat of them, and that one "
+                        "stage consumed a whole sixteen-hour wall on 416,256 "
+                        "cells. Mutually exclusive with --no-groups.")
     p.add_argument("--no-groups", action="store_true",
                    help="Score the five pipeline stages only.")
     p.add_argument("--scib", action="store_true",
@@ -97,9 +104,22 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def build_readers(group_names: list[str], groups: bool):
+def build_readers(group_names: list[str], groups: bool, only_groups: bool = False):
+    """The stages to score.
+
+    ONLY_GROUPS EXISTS BECAUSE OF ONE STAGE. `groups/concat` is the 44 group
+    readouts side by side, and with the cls+pool8 readout that is 44 x 288 =
+    12,672 wide. The cross-donor search is brute force, so its cost is the
+    cell count squared times the width, and on 416,256 cells that single
+    stage took the whole sixteen-hour wall on job 61726249 without ever
+    reaching the per-group stages the question actually needs. The 44
+    individual stages are 288 wide each and get the shorter two-label
+    battery, so together they cost a fraction of the one concat stage.
+    """
     from endo_model.evaluation.stages import group_readers, pipeline_readers
 
+    if only_groups:
+        return group_readers(group_names)
     readers = pipeline_readers(group_names)
     if groups:
         readers += group_readers(group_names)
@@ -220,7 +240,11 @@ def main() -> None:
         CheckpointManager.load(str(ckpt), model, None, map_location=device)
         logger.info("Checkpoint: %s", ckpt)
 
-    readers = build_readers(list(vocab.group_names), groups=not args.no_groups)
+    if args.only_groups and args.no_groups:
+        logger.error("--only-groups and --no-groups cancel out; pick one")
+        return 2
+    readers = build_readers(list(vocab.group_names), groups=not args.no_groups,
+                            only_groups=args.only_groups)
     logger.info("%d stages to collect", len(readers))
     embeddings, orders = collect_all(
         model, root, exp_cfg, train_cfg, data_cfg, vocab, study_configs,

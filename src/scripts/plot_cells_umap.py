@@ -169,6 +169,37 @@ def embed(latent, cache: Path, key: str, seed: int = 24):
     return xy
 
 
+def sample_index(total: int, n: int, seed: int) -> np.ndarray:
+    """The same cells for every arm, pinned to a file rather than re-drawn.
+
+    EVERY ARM MUST BE DRAWN ON THE IDENTICAL SUBSET or a base-against-ablation
+    comparison compares two different sets of cells, which is the one defect
+    these panels exist to avoid. Seed, sample size and corpus size are the
+    same across all eleven arms, so `default_rng(seed).choice` already returns
+    the same indices -- but only within one numpy build. NEP 19 guarantees the
+    PCG64 bit stream, NOT that `Generator.choice`'s algorithm is fixed across
+    releases, and the two caches that already exist were computed on the
+    laptop (numpy 2.2.6, 24 October) while the remaining nine are computed in
+    the cluster's `elaj_cpu` venv.
+
+    So the index set is written once, committed, and read back here. The
+    fallback still works where no pin exists, and says so loudly.
+    """
+    pin = Path(__file__).resolve().parent / f"umap_sample_N{total}_n{n}_s{seed}.npy"
+    if pin.exists():
+        idx = np.load(pin)
+        if len(idx) == n and int(idx.max()) < total:
+            logger.info("   sample index pinned from %s", pin.name)
+            return idx.astype(np.int64)
+        logger.warning("   pinned index %s does not fit this corpus, ignoring",
+                       pin.name)
+    idx = np.sort(np.random.default_rng(seed).choice(total, n, replace=False))
+    logger.warning("   NO PINNED INDEX. Drawn with numpy %s; an arm drawn "
+                   "under a different numpy may not match this one.",
+                   np.__version__)
+    return idx
+
+
 def assign_regions(latent, family: np.ndarray, k: int = 25) -> np.ndarray:
     """Give every cell the family its nearest LABELLED neighbours carry.
 
@@ -282,8 +313,7 @@ def main() -> int:
                 meta.shape[1])
 
     n = min(args.sample, len(latent))
-    idx = np.sort(np.random.default_rng(args.seed).choice(
-        len(latent), n, replace=False))
+    idx = sample_index(len(latent), n, args.seed)
     logger.info("\nwhole-corpus UMAP on %s cells (%.0f%% of the corpus)",
                 f"{n:,}", 100 * n / len(latent))
     xy = embed(latent[idx], cache, f"global_{n}")

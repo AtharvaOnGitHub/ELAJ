@@ -98,11 +98,21 @@ cd /rds/homes/a/axw1008/axw1008/src
 # metric lives in; a missing scib would fail after the latent load.
 python -u - <<'PY'
 import importlib.util, sys
-missing = [p for p in ("scib", "scib_metrics", "scanpy", "numpy", "pandas")
-           if importlib.util.find_spec(p) is None]
+
+def has(n): return importlib.util.find_spec(n) is not None
+
+# scib_metrics OR scib, not both. evaluation/scib_metrics.py prefers
+# scib_metrics and falls back to scib, and silhouette_batch comes from
+# scib_metrics.silhouette_batch on the preferred path. Requiring both is
+# what made the first attempt exit when elaj_cpu has scib_metrics and no
+# scib, which is a working configuration.
+if not (has("scib_metrics") or has("scib")):
+    sys.exit("MISSING from elaj_cpu: neither scib_metrics nor scib")
+missing = [p for p in ("scanpy", "numpy", "pandas") if not has(p)]
 if missing:
     sys.exit(f"MISSING from elaj_cpu: {', '.join(missing)}")
-print("preflight ok")
+print(f"preflight ok (backend: "
+      f"{'scib_metrics' if has('scib_metrics') else 'scib'})")
 PY
 
 echo "scIB only, scFoundation only, from ${EMB}"

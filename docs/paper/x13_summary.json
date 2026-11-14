@@ -1,0 +1,9 @@
+{
+  "spearman_observed": 0.7889690713441638,
+  "spearman_null": 0.004235747356503028,
+  "overlap_observed": 68.75,
+  "overlap_null": 0.9375,
+  "top_k": 100,
+  "studies": 2,
+  "permutations": 20
+}

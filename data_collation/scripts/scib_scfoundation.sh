@@ -31,11 +31,14 @@
 # `--external-latent` scores an embedding that is ALREADY ON DISK. No GPU, no
 # re-embedding, no model load. This is why the job asks for no card.
 #
-# `--reuse-baselines` copies in the baseline rows from a finished run, so
-# pca, scVI, scANVI, harmony and scanorama are not refitted. Only methods
-# absent from that file are scored, and the only one absent is scFoundation.
+# `--methods none` fits nothing. The flag's own help names this exact case:
+# "Use 'none' for a pass that only scores --external-latent rows beside a
+# --reuse-baselines file". So pca, harmony, scanorama, scVI and scANVI are
+# copied in from the reuse file rather than refitted.
 #
-# `--no-elaj` keeps our own arms out of it; they already have the metric.
+# `--include-elaj` is OMITTED, which is how our own arms stay out of it. They
+# already have this metric. (The script's own line 456 mentions a `--no-elaj`
+# flag; it does not exist, and this script was briefly written against it.)
 #
 # ── 360 G, AND THAT IS THE POINT OF THE RERUN ──────────────────────────────
 #
@@ -105,11 +108,12 @@ PY
 echo "scIB only, scFoundation only, from ${EMB}"
 export PYTHONUNBUFFERED=1
 python -u -m scripts.benchmark_baselines \
+    --run p1_dab168_kl1 \
     --root . \
+    --methods none \
     --stages scib \
     --external-latent "${EMB}" \
     --reuse-baselines "${REUSE}" \
-    --no-elaj \
     --out outputs/benchmarks/scib_scfoundation_rerun
 
 echo

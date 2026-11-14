@@ -71,6 +71,28 @@ def count(root, config, D: int, G: int, d: int) -> int:
 
     model_cfg.d_token = d
     model_cfg.n_groups = K
+    # n_studies IS NOT IN THE YAML. benchmark_baselines.py sets it from the
+    # resolved study list, and the constructor reads it for the DSBN
+    # embedding tables; left None it reaches torch.zeros(None, d) and the
+    # error names zeros() rather than the field. Same for n_groups above.
+    model_cfg.n_studies = len(data_cfg.resolve_studies(root))
+
+    # FAIL ON THE FIELD, NOT INSIDE TORCH. Every attribute the constructor
+    # reads, checked before it is handed over, so a missing one is reported
+    # by name instead of surfacing as a tensor-shape error ten frames down.
+    required = ("d_token", "d_agg", "d_gauss", "d_dec", "d_platform",
+                "d_study", "d_tissue", "d_disease", "n_circular", "n_groups",
+                "n_studies", "kappa_floor", "dsbn_learn_affine",
+                "circular_parameterisation", "tokens", "group_encoder",
+                "aggregation_encoder", "classifier", "drain")
+    missing = [f for f in required
+               if getattr(model_cfg, f, None) is None]
+    if missing:
+        raise ValueError("model config fields are unset: "
+                         + ", ".join(missing)
+                         + ". benchmark_baselines.py sets n_studies and "
+                           "n_groups by hand; anything else here is a config "
+                           "the sweep must be given rather than invent.")
 
     # THE FOUR ATTRIBUTES THE MODEL READS, checked against
     # endo_model.py rather than assumed: group_names, group_sizes,
@@ -105,7 +127,7 @@ def main() -> int:
     D0, K0, d0, P0 = SHIPPED
     try:
         got = count(args.root, config, D0, round(D0 / K0), d0)
-    except TypeError as e:
+    except (TypeError, ValueError, AttributeError) as e:
         logger.error("the model's constructor does not take the arguments this "
                      "script assumes (%s). Read EndoFoundationModel.__init__ "
                      "and fix the call rather than the expectation.", e)

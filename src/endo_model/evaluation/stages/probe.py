@@ -34,12 +34,24 @@ def group_battery(base: ScorerSettings) -> ScorerSettings:
     """The short battery for per-group stages, derived from the full one so
     k and seed stay shared. kNN on family and phase only: with three
     references per group (raw PCA, log PCA, encoder) there are 135 group
-    stages, and the cross-donor search at k=100 would triple the job."""
+    stages, and the cross-donor search at k=100 would triple the job.
+
+    `stages` HAS TO BE NARROWED TOO, and leaving it at the default cost job
+    61809108 three quarters of its wall. Emptying `cross_donor_labels` and
+    `scib_labels` silences those two batteries, but `mixing` and `disease`
+    are dispatched from `settings.stages` and read `corpus.study_id` and
+    `disease_status` directly, so neither is disabled by an empty label
+    tuple. Every per-group stage was therefore running the full
+    study-purity sweep over eleven studies and the three-way disease
+    contrast: 25 rows where this function intends 2. Measured on that job,
+    the two kNN labels took 5.5 of each stage's 24 minutes and the two
+    unintended batteries took the other 18.5."""
     return replace(
         base,
         knn_labels=(HARMONISED_LINEAGE, HARMONISED_PHASE),
         cross_donor_labels=(),
         scib_labels=(),
+        stages=("knn",),
     )
 
 

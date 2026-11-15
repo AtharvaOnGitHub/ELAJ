@@ -117,9 +117,17 @@ def build_readers(group_names: list[str], groups: bool, only_groups: bool = Fals
     battery, so together they cost a fraction of the one concat stage.
     """
     from endo_model.evaluation.stages import group_readers, pipeline_readers
+    from endo_model.evaluation.stages.readers import LatentReader
 
     if only_groups:
-        return group_readers(group_names)
+        # THE LATENT ROW STAYS. It is this script's own integrity check --
+        # it must reproduce the benchmark's elaj/native row, and without it
+        # nothing says the probe's scorer agrees with the table the paper
+        # prints. It is 16 wide against the group stages' 288, so it costs
+        # a fraction of one group even on the full battery. Job 61809108
+        # ran without it and produced 950 rows that could not be checked
+        # against anything.
+        return group_readers(group_names) + [LatentReader()]
     readers = pipeline_readers(group_names)
     if groups:
         readers += group_readers(group_names)

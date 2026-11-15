@@ -1,7 +1,15 @@
 #!/bin/bash
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
-#SBATCH --time=16:00:00
+# 2 DAYS, RAISED FROM 16 HOURS AFTER JOB 61809108 TIMED OUT.
+# Measured on that job: 24.0 min median per per-group stage at width 32,
+# of which only 5.5 min was the two kNN labels this probe wants -- the
+# rest was the study-purity sweep and the disease contrast, which
+# group_battery now switches off (stages=("knn",)). The model's own group
+# stages are 288 wide against those references' 32, so the surviving kNN
+# work scales to roughly 50 min each: 44 of them is about 36 hours.
+# 16 would not have fitted even with the fix.
+#SBATCH --time=2-00:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

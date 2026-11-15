@@ -161,3 +161,28 @@ class TestStageTables:
         assert "no pipeline stages" in tables.pipeline_table()
         assert "no group stages" in tables.group_table()
         assert tables.summary() == ""
+
+
+def test_group_battery_runs_only_the_knn_stage():
+    """The per-group battery must narrow `stages`, not just the label tuples.
+
+    `mixing` and `disease` are dispatched from `ScorerSettings.stages` and
+    read `corpus.study_id` and `disease_status` directly, so emptying
+    `cross_donor_labels` and `scib_labels` does not disable them. Job
+    61809108 ran the full study-purity sweep and the disease contrast on
+    every one of its per-group stages and spent three quarters of a
+    sixteen-hour wall doing it. Two kNN labels is what this battery is for.
+    """
+    from endo_model.evaluation.baselines.scorer import ScorerSettings
+    from endo_model.evaluation.stages.probe import group_battery
+
+    base = ScorerSettings()
+    assert set(base.stages) == {"knn", "cross-donor", "mixing", "disease"}, (
+        "the default battery changed; group_battery's narrowing needs rereading"
+    )
+    g = group_battery(base)
+    assert g.stages == ("knn",), g.stages
+    assert g.cross_donor_labels == () and g.scib_labels == ()
+    assert len(g.knn_labels) == 2, g.knn_labels
+    # and the shared knobs must survive the narrowing
+    assert (g.k, g.seed, g.permutations) == (base.k, base.seed, base.permutations)

@@ -685,3 +685,48 @@ def test_a1_each_ablation_differs_from_the_base_on_its_declared_keys():
     assert len(set(dirs)) == len(dirs), dirs
 
 
+# ── a1_seed42: the one arm whose declared key is NOT an override ─────────────
+# Every other a1 arm removes a component and is checked by the test above,
+# which asserts one differing override key and seed 24 throughout. This arm
+# inverts both halves of that contract: ZERO overrides differ and the seed is
+# the thing that moves. It is kept out of A1_ABLATIONS for exactly that
+# reason -- folding it in would mean loosening the one-key assertion that
+# protects the other five.
+#
+# WHAT IT MEASURES AND WHAT IT DOES NOT. `seed` sets model initialisation,
+# batch order and the UMAP fit. It does not set `data.splits.seed`, so the
+# donor split and the scored cells are the base's. That is the point: the
+# run measures the variance of the MODEL at a fixed dataset, so that the
+# ablation deltas can be read against a seed band rather than against
+# nothing. A split-varying arm would confound the two and is not this.
+A1_SEED_ARM = "a1_seed42"
+
+
+def test_a1_seed_arm_differs_from_the_base_on_the_seed_alone():
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    def raw(name):
+        return yaml.safe_load(
+            (root / "configs" / "experiment" / f"{name}.yaml").read_text(encoding="utf-8"))
+
+    base, arm = raw(A1_BASE), raw(A1_SEED_ARM)
+    assert arm["name"] == A1_SEED_ARM
+
+    differing = {
+        k for k in set(arm["overrides"]) | set(base["overrides"])
+        if str(arm["overrides"].get(k, "<absent>")) != str(base["overrides"].get(k, "<absent>"))
+    }
+    assert differing == set(), (
+        f"{A1_SEED_ARM} must differ from {A1_BASE} on NOTHING but the seed; it "
+        f"also differs on {sorted(differing)}. A seed arm that moves a second "
+        f"key measures that key and the seed together, which is the one thing "
+        f"it exists to rule out."
+    )
+    assert int(base["seed"]) == 24 and int(arm["seed"]) == 42, (base["seed"], arm["seed"])
+    assert arm["output_dir"] != base["output_dir"], arm["output_dir"]
+    # It must not collide with the five ablations either.
+    others = [raw(n)["output_dir"] for n in A1_ABLATIONS]
+    assert arm["output_dir"] not in others, arm["output_dir"]
+
+

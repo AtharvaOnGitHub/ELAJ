@@ -1,0 +1,20 @@
+quantity,value,p,n
+"cycle axis vs cycle day, donor medians",0.7565156527719847,2.7343218168769663e-12,60
+"cycle axis vs serum progesterone, donor medians",0.8435238056358036,2.7050936948837647e-17,60
+phase separation on cycle axis 1,0.6318892706352712,,736312
+phase separation on cycle axis 2,0.2185347008425881,,736312
+"phase centroids advance in biological order, resultant",0.8022729976463766,0.00175,9
+cycle axis vs cycle day within the periovulatory label,0.6420925639913065,0.004065394756276142,18
+cycle axis vs cycle day within the proliferative label,0.22468954769731822,0.25034511541053317,28
+"secretory arc span, degrees",220.0,,5
+"proliferative arc span, degrees",44.0,,4
+"stromal cycle axis vs the pooled cycle axis, abs cosine",0.5597690607457164,,0
+"epithelial cycle axis vs the pooled cycle axis, abs cosine",0.9095007385679175,,0
+"endothelial cycle axis vs the pooled cycle axis, abs cosine",0.8113222106035912,,0
+"immune cycle axis vs the pooled cycle axis, abs cosine",0.8951368567405871,,0
+"stromal vs epithelial cycle axis, abs cosine",0.4691776841278623,,0
+"stromal vs endothelial cycle axis, abs cosine",0.42689767192890543,,0
+"stromal vs immune cycle axis, abs cosine",0.2825359654443388,,0
+"epithelial vs endothelial cycle axis, abs cosine",0.8054490309539633,,0
+"epithelial vs immune cycle axis, abs cosine",0.7962409359032603,,0
+"endothelial vs immune cycle axis, abs cosine",0.6922406092625191,,0

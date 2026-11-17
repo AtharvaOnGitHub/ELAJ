@@ -98,7 +98,13 @@ def main() -> int:
     study_configs = [{"id": s.id, "name": s.name, "path": str(Path(root) / s.path)}
                      for s in data_cfg.resolve_studies(root)]
     names = {s["id"]: s["name"] for s in study_configs}
-    obs_columns = required_obs_columns()
+    # patient_id AS AN OBS COLUMN, i.e. the study's own raw id, because that
+    # is what the dump's metadata holds (validate_latent requests it the same
+    # way). The corpus's own `patient_id` is the CANONICAL id after donor
+    # aliasing (15 people carry two ids), so comparing it with the dump fails
+    # on aliased donors even when every row lines up: job 62037337 stopped at
+    # garcia_alonso_2021_a 971ceed6 vs 9ba12bc1, one person under two ids.
+    obs_columns = required_obs_columns() + ["patient_id"]
 
     tr = pd.read_csv(Path(root) / args.transferred, usecols=["cell_family_transferred"])
     # LABELS FROM THE DUMP, COUNTS FROM THE CORPUS. The dump carries
@@ -141,18 +147,20 @@ def main() -> int:
         sl = slice(offset, offset + n)
         # the alignment check, row by row
         st_c = np.array([names[int(s)] for s in c.study_id], dtype=object)
-        pid_c = np.asarray(c.patient_id, dtype=str)
+        pid_c = np.asarray(c.patient_id, dtype=str)            # canonical: grouping
+        raw_c = np.asarray(c.meta["patient_id"], dtype=str)    # raw: the check
         st_d = dump["study"].to_numpy()[sl].astype(str)
         pid_d = dump["patient_id"].to_numpy()[sl].astype(str)
-        bad = np.flatnonzero((st_c.astype(str) != st_d) | (pid_c != pid_d))
+        bad = np.flatnonzero((st_c.astype(str) != st_d) | (raw_c != pid_d))
         if len(bad):
             i = int(bad[0])
             logger.error("ALIGNMENT FAILS at %s row %d: corpus %s/%s, dump %s/%s "
-                         "(%d mismatches in this split)", split, i, st_c[i], pid_c[i],
+                         "(%d mismatches in this split)", split, i, st_c[i], raw_c[i],
                          st_d[i], pid_d[i], len(bad))
             return 3
-        logger.info("  %s cells, aligned with dump rows %d-%d", f"{n:,}", offset,
-                    offset + n - 1)
+        logger.info("  %s cells, aligned with dump rows %d-%d (%s of them on an "
+                    "aliased donor, grouped under the canonical id)", f"{n:,}", offset,
+                    offset + n - 1, f"{int((raw_c != pid_c).sum()):,}")
         for sid, m in c.measured.items():
             measured[names[int(sid)]] = np.asarray(m, bool)
 

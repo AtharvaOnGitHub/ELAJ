@@ -143,9 +143,12 @@ def main() -> None:
         want = rows[np.isin(rows, dump_pos)]
         local = np.searchsorted(dump_pos, want)
         ds = loader.dataset; collate = loader.collate_fn
+        # `study_ids` (plural) is a property that rebuilds a list of every
+        # cell on each access, so it is read once per split.
+        sid_of = np.asarray(ds.study_ids, dtype=np.int64)
         by_study = {}
         for r, p in zip(want, local):
-            by_study.setdefault(int(ds.study_id[order[p]]), []).append((r, order[p]))
+            by_study.setdefault(int(sid_of[order[p]]), []).append((r, order[p]))
         for sid, items in by_study.items():
             for i in range(0, len(items), a.batch):
                 chunk = items[i:i + a.batch]
@@ -195,7 +198,7 @@ def main() -> None:
                 flips += int((torch.sign(g_r) != torch.sign(g_b)).sum()); negs += int((g_r < 0).sum())
                 n_seen += len(rr)
         print(f"   {sp}: {len(want)} cells done", flush=True)
-        del loader, ds, order                      # one split's dataset in memory at a time
+        del loader, ds, order, sid_of              # one split's dataset in memory at a time
 
     print(f"3  encoded vs dumped latent, max abs difference {max_diff:.2e} (rounding only; stops above 0.05)")
     print("4  TEST A, real covariates: mean decoded log-expression, lymphoid minus myeloid cells")

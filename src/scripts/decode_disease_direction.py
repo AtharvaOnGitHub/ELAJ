@@ -60,8 +60,23 @@ HECA_GENES = {"GREB1": "up in case", "DKK1": "down in case",
               "IGF1": "up in case", "IGF2": "down in case"}
 
 
-def disease_direction(Z: np.ndarray, m: pd.DataFrame) -> np.ndarray:
-    """Control minus case, on per-donor means, centred within study."""
+CENTRING = ("study", "none", "controls")
+
+
+def disease_direction(Z: np.ndarray, m: pd.DataFrame, centring: str = "study") -> np.ndarray:
+    """Control minus case, on per-donor means.
+
+    centring (AW, 17 Nov, asked to see all three side by side):
+      study     subtract each study's mean donor. The original. Each study's
+                own control-minus-case difference survives exactly; only the
+                gap BETWEEN studies is removed.
+      none      no centring. The between-study gap stays in, and with
+                duempelmann 59% cases against marecko 28% it reads as disease.
+      controls  subtract each study's mean CONTROL donor, i.e. stratified by
+                disease status: studies aligned on controls only, so no case
+                signal enters the subtraction.
+    """
+    assert centring in CENTRING, centring
     codes, uniq = pd.factorize(m["patient_id"])
     M = np.zeros((len(uniq), Z.shape[1]))
     np.add.at(M, codes, Z)
@@ -71,13 +86,16 @@ def disease_direction(Z: np.ndarray, m: pd.DataFrame) -> np.ndarray:
     ok = n >= MIN_CELLS_PER_DONOR
     M, info = M[ok], info[ok]
     study = info["study"].to_numpy()
+    case = (info["disease_status"] == "eutopic").to_numpy()
     for s in np.unique(study):
         k = study == s
-        M[k] -= M[k].mean(0)
-    case = (info["disease_status"] == "eutopic").to_numpy()
+        if centring == "study":
+            M[k] -= M[k].mean(0)
+        elif centring == "controls":
+            M[k] -= M[k & ~case].mean(0)
     w = M[~case].mean(0) - M[case].mean(0)
     print(f"direction from {len(M)} donors "
-          f"({(~case).sum()} control, {case.sum()} case)")
+          f"({(~case).sum()} control, {case.sum()} case), centring={centring}")
     return w / np.linalg.norm(w)
 
 
@@ -85,7 +103,14 @@ def main() -> None:
     import torch
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", required=True)
+    ap.add_argument("--checkpoint", default="auto",
+                    help="'auto' = the run's selected best (purity_report."
+                         "resolve_checkpoint), the rule the latent dump used. The "
+                         "wrapper once passed the NEWEST file (ls -t), which is "
+                         "the last epoch, not the one the dumped latent came from.")
+    ap.add_argument("--run-dir", default="outputs/p_series/p1_dab168_kl1",
+                    help="for --checkpoint auto")
+    ap.add_argument("--centring", nargs="+", default=["study"], choices=CENTRING)
     ap.add_argument("--config", required=True)
     ap.add_argument("--root", default=".",
                     help="repo root holding configs/ and data/")
@@ -114,10 +139,13 @@ def main() -> None:
     # embedding is blanked below, and the gene layout comes from `is_dns`.
     mcfg.n_studies = args.n_studies
 
+    from endo_model.evaluation.purity_report import resolve_checkpoint
+    ckpt = resolve_checkpoint(Path(args.root) / args.run_dir, args.checkpoint)
     model = EndoFoundationModel(vocab, mcfg)
-    CheckpointManager.load(args.checkpoint, model, map_location="cpu")
+    CheckpointManager.load(str(ckpt), model, map_location="cpu")
     model.eval()
-    print(f"loaded {args.checkpoint}")
+    ck_tag = Path(ckpt).stem.split("_step")[0]          # e.g. epoch_0004
+    print(f"loaded {ckpt}")
 
     # The dump directory is "Outputs" on the Mac and "outputs" on the HPC.
     tried = [Path(args.outputs_root) / d / "cells" / ARM
@@ -140,98 +168,107 @@ def main() -> None:
     m, Z = m[keep].reset_index(drop=True), Z[keep]
     print(f"{FAMILY} cells: {len(m):,} from {m['patient_id'].nunique()} donors")
 
-    w = disease_direction(Z, m)
+    out_files = []
+    for centring in args.centring:
+        print(f"\n══ centring = {centring} ══")
+        w = disease_direction(Z, m, centring)
 
-    if args.orthogonalise:
-        # The raw direction has a component along the cell-identity axes, and
-        # identity genes respond far more steeply to those axes than anything
-        # responds to disease, so they dominate the ranking without tracking
-        # disease at all. Project them out: Gram-Schmidt against each
-        # (other family - FAMILY) axis, using the FULL metadata, not the
-        # disease-restricted subset.
-        full = pd.read_csv(data / "metadata.csv.gz", low_memory=False)
-        full["family"] = (pd.read_csv(data / "cell_family_transferred.csv.gz")
-                          ["cell_family_transferred"].to_numpy()
-                          if args.transferred else full["cell family"])
-        Zfull = np.load(data / "latent.npy")
-        here = Zfull[(full["family"] == FAMILY).to_numpy()].mean(0)
-        for other in ("epithelial", "stromal", "endothelial"):
-            k = (full["family"] == other).to_numpy()
-            if not k.any():
-                continue
-            a = Zfull[k].mean(0) - here
-            a /= np.linalg.norm(a)
-            before = float(w @ a)
-            w = w - before * a
-            w /= np.linalg.norm(w)
-            print(f"  removed {FAMILY}->{other:12s} component, cosine was {before:+.4f}")
-        print(f"  residual cosines: " + ", ".join(
-            f"{o} {float(w @ ((Zfull[(full['family'] == o).to_numpy()].mean(0) - here) / np.linalg.norm(Zfull[(full['family'] == o).to_numpy()].mean(0) - here))):+.4f}"
-            for o in ("epithelial", "stromal", "endothelial")))
-    assert Z.shape[1] == model.latent_space.z_proj.in_features, (
-        f"latent is {Z.shape[1]} wide, z_proj expects "
-        f"{model.latent_space.z_proj.in_features}")
+        if args.orthogonalise:
+            # The raw direction has a component along the cell-identity axes, and
+            # identity genes respond far more steeply to those axes than anything
+            # responds to disease, so they dominate the ranking without tracking
+            # disease at all. Project them out: Gram-Schmidt against each
+            # (other family - FAMILY) axis, using the FULL metadata, not the
+            # disease-restricted subset.
+            full = pd.read_csv(data / "metadata.csv.gz", low_memory=False)
+            full["family"] = (pd.read_csv(data / "cell_family_transferred.csv.gz")
+                              ["cell_family_transferred"].to_numpy()
+                              if args.transferred else full["cell family"])
+            Zfull = np.load(data / "latent.npy")
+            here = Zfull[(full["family"] == FAMILY).to_numpy()].mean(0)
+            for other in ("epithelial", "stromal", "endothelial"):
+                k = (full["family"] == other).to_numpy()
+                if not k.any():
+                    continue
+                a = Zfull[k].mean(0) - here
+                a /= np.linalg.norm(a)
+                before = float(w @ a)
+                w = w - before * a
+                w /= np.linalg.norm(w)
+                print(f"  removed {FAMILY}->{other:12s} component, cosine was {before:+.4f}")
+            print(f"  residual cosines: " + ", ".join(
+                f"{o} {float(w @ ((Zfull[(full['family'] == o).to_numpy()].mean(0) - here) / np.linalg.norm(Zfull[(full['family'] == o).to_numpy()].mean(0) - here))):+.4f}"
+                for o in ("epithelial", "stromal", "endothelial")))
+        assert Z.shape[1] == model.latent_space.z_proj.in_features, (
+            f"latent is {Z.shape[1]} wide, z_proj expects "
+            f"{model.latent_space.z_proj.in_features}")
 
-    rng = np.random.default_rng(24)
-    per_eps: dict[float, pd.Series] = {}
+        rng = np.random.default_rng(24)
+        per_eps: dict[float, pd.Series] = {}
 
-    # No dataset is loaded, so `_gene_layouts` is empty and `_build_gene_queries`
-    # falls back to the batch's own `is_dns`. All-False means every gene counts
-    # as measured, which is what an attribution wants: one pass, whole
-    # vocabulary, no per-study gene layout to get wrong.
-    idx_all = np.arange(len(m))
-    if len(idx_all) > args.cells_per_study:
-        idx_all = rng.choice(idx_all, args.cells_per_study, replace=False)
-    z = torch.from_numpy(Z[idx_all]).float()
-    batch = {"study_id": torch.tensor([0]),
-             "is_dns": torch.zeros(1, vocab.vocab_size, dtype=torch.bool)}
+        # No dataset is loaded, so `_gene_layouts` is empty and `_build_gene_queries`
+        # falls back to the batch's own `is_dns`. All-False means every gene counts
+        # as measured, which is what an attribution wants: one pass, whole
+        # vocabulary, no per-study gene layout to get wrong.
+        idx_all = np.arange(len(m))
+        if len(idx_all) > args.cells_per_study:
+            idx_all = rng.choice(idx_all, args.cells_per_study, replace=False)
+        z = torch.from_numpy(Z[idx_all]).float()
+        batch = {"study_id": torch.tensor([0]),
+                 "is_dns": torch.zeros(1, vocab.vocab_size, dtype=torch.bool)}
 
-    with torch.no_grad():
-        gq, gidx = model._build_gene_queries(batch)
-        names = [vocab.index_to_gene(int(i)) for i in gidx.tolist()]
-        print(f"decoding {len(z):,} {FAMILY} cells against {len(names):,} genes")
-        B = z.shape[0]
-        zeros = lambda d: torch.zeros(B, d) if d else None
-        zp = model.latent_space.z_proj(z)
-        base = model.decoder(gq, zp, zeros(mcfg.d_tissue), zeros(mcfg.d_platform),
-                             None, zeros(mcfg.d_study))
-        for eps in EPS:
-            zp_p = model.latent_space.z_proj(
-                z + eps * torch.from_numpy(w).float())
-            pert = model.decoder(gq, zp_p, zeros(mcfg.d_tissue),
-                                 zeros(mcfg.d_platform), None, zeros(mcfg.d_study))
-            per_eps[eps] = pd.Series((pert - base).mean(0).numpy(),
-                                     index=names).sort_values()
+        with torch.no_grad():
+            gq, gidx = model._build_gene_queries(batch)
+            names = [vocab.index_to_gene(int(i)) for i in gidx.tolist()]
+            print(f"decoding {len(z):,} {FAMILY} cells against {len(names):,} genes")
+            B = z.shape[0]
+            zeros = lambda d: torch.zeros(B, d) if d else None
+            zp = model.latent_space.z_proj(z)
+            base = model.decoder(gq, zp, zeros(mcfg.d_tissue), zeros(mcfg.d_platform),
+                                 None, zeros(mcfg.d_study))
+            for eps in EPS:
+                zp_p = model.latent_space.z_proj(
+                    z + eps * torch.from_numpy(w).float())
+                pert = model.decoder(gq, zp_p, zeros(mcfg.d_tissue),
+                                     zeros(mcfg.d_platform), None, zeros(mcfg.d_study))
+                per_eps[eps] = pd.Series((pert - base).mean(0).numpy(),
+                                         index=names).sort_values()
 
-    a, b = per_eps[EPS[0]], per_eps[EPS[1]]
-    shared = a.index.intersection(b.index)
-    rho = float(np.corrcoef(a[shared].rank(), b[shared].rank())[0, 1])
-    print(f"\nrank correlation between eps={EPS[0]} and eps={EPS[1]}: {rho:.4f}")
-    assert rho > 0.95, ("the two step sizes disagree, so the direction is not "
-                        "locally linear and this attribution is meaningless")
+        a, b = per_eps[EPS[0]], per_eps[EPS[1]]
+        shared = a.index.intersection(b.index)
+        rho = float(np.corrcoef(a[shared].rank(), b[shared].rank())[0, 1])
+        print(f"\nrank correlation between eps={EPS[0]} and eps={EPS[1]}: {rho:.4f}")
+        assert rho > 0.95, ("the two step sizes disagree, so the direction is not "
+                            "locally linear and this attribution is meaningless")
 
-    s = b.rename("shift_towards_control")
-    print(f"\ntop 15 genes UP in control relative to case:\n"
-          f"{s.tail(15)[::-1].round(4).to_string()}")
-    print(f"\ntop 15 genes UP in case relative to control:\n"
-          f"{s.head(15).round(4).to_string()}")
+        s = b.rename("shift_towards_control")
+        print(f"\ntop 15 genes UP in control relative to case:\n"
+              f"{s.tail(15)[::-1].round(4).to_string()}")
+        print(f"\ntop 15 genes UP in case relative to control:\n"
+              f"{s.head(15).round(4).to_string()}")
 
-    pct = s.rank(pct=True)
-    print("\nHECA's four named genes (their direction, then ours):")
-    for g, claim in HECA_GENES.items():
-        if g in s.index:
-            ours = "up in case" if s[g] < 0 else "up in control"
-            print(f"  {g:7s} HECA says {claim:16s} | ours {ours:14s} "
-                  f"shift {s[g]:+.4f}, percentile {pct[g]:.3f}")
-        else:
-            print(f"  {g:7s} not in the measured gene set")
+        pct = s.rank(pct=True)
+        print("\nHECA's four named genes (their direction, then ours):")
+        for g, claim in HECA_GENES.items():
+            if g in s.index:
+                ours = "up in case" if s[g] < 0 else "up in control"
+                print(f"  {g:7s} HECA says {claim:16s} | ours {ours:14s} "
+                      f"shift {s[g]:+.4f}, percentile {pct[g]:.3f}")
+            else:
+                print(f"  {g:7s} not in the measured gene set")
 
-    out = Path(args.out_dir) if args.out_dir else (
-        Path(__file__).resolve().parents[2] / "docs" / "paper")
-    out.mkdir(parents=True, exist_ok=True)
-    tag = "_orth" if args.orthogonalise else ""
-    s.to_csv(out / f"x12_gene_shifts{tag}.csv")
-    print(f"\nwrote {out / f'x12_gene_shifts{tag}.csv'}")
+        out = Path(args.out_dir) if args.out_dir else (
+            Path(__file__).resolve().parents[2] / "docs" / "paper")
+        out.mkdir(parents=True, exist_ok=True)
+        tag = "_orth" if args.orthogonalise else ""
+        # A NEW NAME per centring and checkpoint, so the ranking the paper
+        # uses (x12_gene_shifts_orth.csv) is never overwritten by a variant.
+        name = f"x12_gene_shifts{tag}_centre-{centring}_{ck_tag}.csv"
+        s.to_csv(out / name)
+        out_files.append(out / name)
+        print(f"\nwrote {out / name}")
+
+
 
 
 if __name__ == "__main__":

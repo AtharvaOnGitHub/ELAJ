@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --qos=bbdefault
 #SBATCH --constraint=icelake
-#SBATCH --time=00:30:00
+#SBATCH --time=01:30:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -54,13 +54,15 @@ cd "${REPO}"
 # Checkpoints and latent dumps live under the REPO as src/outputs (lowercase),
 # not under the RDS project directory. Corrected 12 November after the first
 # submission looked in ${BASE}/Outputs and found nothing.
-CKPT=$(ls -t "${REPO}"/outputs/p_series/p1_dab168_kl1/checkpoints/*.pt 2>/dev/null | head -1)
-[[ -n "${CKPT}" ]] || { echo "no checkpoint under ${REPO}/outputs/p_series/p1_dab168_kl1/checkpoints" >&2; exit 1; }
-echo "checkpoint: ${CKPT}"
+# THE CHECKPOINT IS THE RUN'S SELECTED BEST, chosen inside the script by
+# purity_report.resolve_checkpoint: the same rule the dumped latent was made
+# with. This line used to be `ls -t checkpoints/*.pt | head -1`, the NEWEST
+# file, which is the last epoch (9), not the selected one (4): it decoded
+# epoch-4 latents with an epoch-9 decoder if the mtimes ran in order. 17 Nov.
 
 export PYTHONUNBUFFERED=1
 python -u -m scripts.decode_disease_direction \
-    --checkpoint "${CKPT}" \
+    --checkpoint auto --run-dir outputs/p_series/p1_dab168_kl1 \
     --config configs/experiment/p1_dab168_kl1.yaml \
     --root . \
     --outputs-root "${REPO}" \

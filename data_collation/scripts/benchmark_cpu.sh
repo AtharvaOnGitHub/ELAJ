@@ -90,6 +90,26 @@ SIBLING="$(dirname "${BASH_SOURCE[0]}")/_benchmark_args.sh"
 [[ -f "${ARGS}" ]] || { echo "cannot find _benchmark_args.sh (looked at ${SIBLING} and ${REPO}/data_collation/scripts/)" >&2; exit 2; }
 source "${ARGS}"
 
+# ── REFUSE TO EMBED ELAJ ON CPU WHEN ITS LATENT IS ALREADY DUMPED ──────────
+# _benchmark_args.sh adds --include-elaj unless --no-elaj is given. With an
+# --external-latent pointing at an elaj__* dump, that means the same model
+# twice, and the native half runs the transformer over the held-out cells on
+# CPU. Job 61932543 (a1_seed42, 17 Nov) did exactly that: it loaded the
+# checkpoint, went silent after the val split at 16:20, and hit the 8 h wall
+# without writing a row. The same pair for a1_clsonly, run with --no-elaj,
+# took 50:51. --no-elaj never shows on the Options line, because the parser
+# consumes it, which is how the flag fell out of the command in PRIORITY.md.
+if [ "${INCLUDE_ELAJ}" -eq 1 ]; then
+    for a in ${EXTRA[@]+"${EXTRA[@]}"}; do
+        if [[ "${a##*/}" == elaj__* ]]; then
+            echo "refusing: --external-latent $a is an ELAJ dump, and without --no-elaj" >&2
+            echo "this job would also embed ELAJ on CPU (job 61932543 timed out doing so)." >&2
+            echo "Add --no-elaj to score the dump alone." >&2
+            exit 2
+        fi
+    done
+fi
+
 module purge
 module load bear-apps/2024a
 module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \

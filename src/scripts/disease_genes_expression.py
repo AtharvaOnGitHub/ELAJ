@@ -115,9 +115,10 @@ def main() -> int:
     tr_lab = tr["cell_family_transferred"].astype(object).to_numpy()
     # THE SPLIT ORDER IS READ, NOT ASSUMED: the first version assumed train,
     # val, test; the dump is val, train, test. Blocks must be contiguous.
-    sp = pd.read_csv(Path(root) / args.dump_meta, usecols=["split"])["split"].astype(str).to_numpy()
-    blocks = list(pd.unique(sp))
-    if sum(1 for i in range(1, len(sp)) if sp[i] != sp[i - 1]) != len(blocks) - 1:
+    # NOT `sp`: that name is scipy.sparse in this function, used below.
+    split_col = pd.read_csv(Path(root) / args.dump_meta, usecols=["split"])["split"].astype(str).to_numpy()
+    blocks = list(pd.unique(split_col))
+    if int((split_col[1:] != split_col[:-1]).sum()) != len(blocks) - 1:
         logger.error("dump splits are not contiguous blocks"); return 2
     if args.splits is None:
         args.splits = blocks

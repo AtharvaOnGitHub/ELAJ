@@ -30,6 +30,8 @@ TWO COHORTS, NEVER POOLED.
   HELD OUT, transferred labels: the same studies with X1's transferred
             immune label. REPORTED BESIDE, NOT DECISIVE.
 
+EXCLUDED: li_2025, follicular fluid labelled endometrium (Note 3).
+
 GENES. The top 15 of x12_gene_shifts_orth.csv (the corrected, epoch-4
 ranking), read from the file at run time and printed.
 
@@ -63,6 +65,9 @@ from scipy import stats
 
 PAPER = Path(__file__).resolve().parents[2] / "docs" / "paper"
 FIT = ("duempelmann_2026", "marecko_2024")
+# li_2025 is follicular fluid labelled as endometrium (Supplementary Note 3),
+# so its "endometrium" donors are not endometrium. Excluded by name.
+EXCLUDE = {"li_2025"}
 MIN_CELLS, MIN_DONORS, NPERM, TOP = 50, 3, 10_000, 15
 
 
@@ -131,7 +136,7 @@ def main() -> None:
     print("top genes tested:", " ".join(top))
 
     rng = np.random.default_rng(24)
-    others = sorted(set(groups.study) - set(FIT))
+    others = sorted(set(groups.study) - set(FIT) - EXCLUDE)
     out, verdict = [], {}
     for name, source, studies in (("FIT", "annotated", FIT),
                                   ("HELD OUT", "ptprc", others),

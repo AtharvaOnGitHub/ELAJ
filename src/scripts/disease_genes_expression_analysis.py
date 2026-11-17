@@ -21,9 +21,14 @@ TWO COHORTS, NEVER POOLED.
   FIT       annotated labels, duempelmann_2026 and marecko_2024: the donors the
             direction was fitted on. Measured counts were not part of that
             fit, but the donors are the same, so this is a consistency check.
-  HELD OUT  transferred labels, every OTHER study with at least 3 eligible
-            control and 3 eligible eutopic donors. Donors the direction never
-            saw. THIS IS THE TEST.
+  HELD OUT  every OTHER study with at least 3 eligible control and 3
+            eligible eutopic donors. Donors the direction never saw.
+            Immune cells chosen by MEASURED PTPRC (CD45) > 0, a label that
+            never touches ELAJ. THIS IS THE TEST. (Changed 17 Nov, before any
+            data existed, on AW's point that transferred labels are made in
+            ELAJ's own latent and would let ELAJ grade itself.)
+  HELD OUT, transferred labels: the same studies with X1's transferred
+            immune label. REPORTED BESIDE, NOT DECISIVE.
 
 GENES. The top 15 of x12_gene_shifts_orth.csv (the corrected, epoch-4
 ranking), read from the file at run time and printed.
@@ -128,7 +133,9 @@ def main() -> None:
     rng = np.random.default_rng(24)
     others = sorted(set(groups.study) - set(FIT))
     out, verdict = [], {}
-    for name, source, studies in (("FIT", "annotated", FIT), ("HELD OUT", "transferred", others)):
+    for name, source, studies in (("FIT", "annotated", FIT),
+                                  ("HELD OUT", "ptprc", others),
+                                  ("HELD OUT, transferred labels", "transferred", others)):
         print(f"\n== {name} ==")
         g, X = cohort_table(groups, counts, genes, measured, source, studies)
         if g.empty:

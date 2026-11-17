@@ -119,7 +119,9 @@ def main() -> None:
 
     # ── 2: which dump rows, and their dataset indices ────────────────────
     split = m.split.astype(str).to_numpy()
-    assert list(pd.unique(split)) == ["train", "val", "test"], pd.unique(split)
+    # The dump's blocks run val, train, test (checked 17 Nov). Nothing here
+    # assumes an order: each split's dump rows are matched to that split's
+    # own sampler order, and step 3 checks every cell's latent.
     rng = np.random.default_rng(24)
     cand = np.flatnonzero(imm & (kind != ""))
     rows = cand if a.n_cells <= 0 else np.sort(rng.choice(cand, min(a.n_cells, len(cand)), replace=False))

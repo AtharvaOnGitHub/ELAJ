@@ -66,8 +66,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--run", required=True)
     p.add_argument("--root", default=None)
     p.add_argument("--config-dir", default="configs/experiment")
-    p.add_argument("--splits", nargs="+", default=["train", "val", "test"],
-                   help="Must match the dump's order, which is train val test.")
+    p.add_argument("--splits", nargs="+", default=None,
+                   help="Default: the dump's own block order, read from its "
+                        "metadata (val, train, test as of 17 Nov).")
     p.add_argument("--transferred", required=True,
                    help="cell_family_transferred.csv.gz, row-aligned to the dump.")
     p.add_argument("--dump-meta", required=True,
@@ -112,6 +113,18 @@ def main() -> int:
         logger.error("transferred labels have %d rows, the dump %d", len(tr), len(dump))
         return 2
     tr_lab = tr["cell_family_transferred"].astype(object).to_numpy()
+    # THE SPLIT ORDER IS READ, NOT ASSUMED: the first version assumed train,
+    # val, test; the dump is val, train, test. Blocks must be contiguous.
+    sp = pd.read_csv(Path(root) / args.dump_meta, usecols=["split"])["split"].astype(str).to_numpy()
+    blocks = list(pd.unique(sp))
+    if sum(1 for i in range(1, len(sp)) if sp[i] != sp[i - 1]) != len(blocks) - 1:
+        logger.error("dump splits are not contiguous blocks"); return 2
+    if args.splits is None:
+        args.splits = blocks
+    if args.splits != blocks:
+        logger.error("--splits %s does not match the dump's order %s", args.splits, blocks); return 2
+    logger.info("dump split order: %s", blocks)
+    ptprc = gene_names.index("PTPRC")
     logger.info("dump: %s cells; transferred labels aligned to it", f"{len(dump):,}")
 
     acc: dict[tuple, np.ndarray] = {}         # group key -> summed counts (n_genes,)
@@ -149,7 +162,11 @@ def main() -> int:
         libsize = np.asarray(c.counts.sum(axis=1)).ravel()
         keep = np.isin(status, STATUSES)
 
-        for source, fam in (("annotated", own), ("transferred", trl)):
+        # PTPRC: a label that never touches ELAJ. A cell is immune if its
+        # MEASURED PTPRC (CD45) count is above zero. It misses immune cells
+        # where PTPRC dropped out, at no rate that depends on disease.
+        pt = np.where(np.asarray(c.counts[:, ptprc].todense()).ravel() > 0, "immune", "None")
+        for source, fam in (("annotated", own), ("transferred", trl), ("ptprc", pt)):
             ok = keep & ~np.isin(fam, ("None", "nan", ""))
             keys = pd.MultiIndex.from_arrays(
                 [st_c[ok], pid_c[ok], status[ok], tissue[ok], fam[ok]])

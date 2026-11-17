@@ -1,3 +1,3 @@
-end,n_top,external_list,external_n,hits,genes,p_hypergeometric,fold_INHBA,fold_LRRC15,fold_MMP27,fold_SERPINB2
-disease side,15,upregulated,66,4,INHBA;LRRC15;MMP27;SERPINB2,3.954456305786034e-07,15.33,25.2,40.93,72.95
-control side,15,upregulated,66,0,,1.0,,,,
+end,n_top,external_list,external_n,hits,genes,p_hypergeometric,fold_LRRC15
+disease side,15,upregulated,66,0,,1.0,
+control side,15,upregulated,66,1,LRRC15,0.062044617151941824,25.2

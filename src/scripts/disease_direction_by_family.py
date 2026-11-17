@@ -75,7 +75,7 @@ def assess(M: np.ndarray, study: np.ndarray, y: np.ndarray, rng) -> dict:
         null.append(auc(sn[~yp[~tr]], sn[yp[~tr]]))
 
     obs, null = np.array(obs), np.array(null)
-    return {"auc": obs.mean(), "auc_lo": np.percentile(obs, 5),
+    return {"_obs": obs, "_null": null, "auc": obs.mean(), "auc_lo": np.percentile(obs, 5),
             "auc_hi": np.percentile(obs, 95), "null": null.mean(),
             "p": float((null >= obs.mean()).mean()), "n_donors": len(y),
             "n_control": int((~y).sum()), "n_case": int(y.sum())}
@@ -100,7 +100,7 @@ def main(use_transferred: bool = False) -> None:
     print(f"labels: {label_source}\ncells: {len(m):,}   "
           f"donors: {m['patient_id'].nunique()}\n")
 
-    rows = []
+    rows, splits = [], []
     for fam in ["ALL FAMILIES"] + FAMILIES:
         sel = (np.ones(len(m), bool) if fam == "ALL FAMILIES"
                else (m["family"] == fam).to_numpy())
@@ -120,6 +120,14 @@ def main(use_transferred: bool = False) -> None:
         r = assess(M[ok], info["study"].to_numpy()[ok],
                    (info["disease_status"] == "eutopic").to_numpy()[ok], rng)
         r["family"] = fam
+        # THE DISTRIBUTIONS, not only their summaries (AW, 17 Nov: violins
+        # for Figure 2d). auc_lo and auc_hi are the 5th and 95th percentile
+        # of exactly these held-out AUCs, so the violin draws the interval
+        # the table already reports. Same RNG stream, so the summary row
+        # is unchanged by writing them.
+        obs, null = r.pop("_obs"), r.pop("_null")
+        splits.append(pd.DataFrame({"family": fam, "kind": "held-out", "auc": obs}))
+        splits.append(pd.DataFrame({"family": fam, "kind": "null", "auc": null}))
         rows.append(r)
         print(f"{fam:14s} donors {r['n_donors']:3d} "
               f"({r['n_control']:3d} ctl / {r['n_case']:3d} case)  "
@@ -129,6 +137,7 @@ def main(use_transferred: bool = False) -> None:
     out = Path(__file__).resolve().parents[2] / "docs" / "paper"
     tag = "transferred" if use_transferred else "annotated"
     pd.DataFrame(rows).to_csv(out / f"x12_by_family_{tag}.csv", index=False)
+    pd.concat(splits).to_csv(out / f"x12_by_family_{tag}_splits.csv", index=False)
     print(f"\nwrote {out / f'x12_by_family_{tag}.csv'}")
 
 

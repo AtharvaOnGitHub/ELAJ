@@ -20,7 +20,9 @@ OWN tissue, platform, study and library size, and uses the model's own probe
 everything else as the model saw it. Steps, each printed:
 
   1  checkpoint = the run's selected best (resolve_checkpoint), epoch 4.
-  2  immune cells (control/eutopic, labelled lymphoid or myeloid), val+test.
+  2  every immune cell (control/eutopic, labelled lymphoid or myeloid), all
+     splits: cell family and disease are not model inputs, so no split is
+     privileged (29,355 cells, duempelmann + marecko).
   3  each cell's encoded mu_gauss is compared with its row of the dumped
      latent: confirms the epoch and the row mapping. Stops if they disagree.
   4  TEST A with real covariates: lymphoid markers higher in lymphoid cells,
@@ -76,7 +78,10 @@ def main() -> None:
     ap.add_argument("--root", default=".")
     ap.add_argument("--runs-dir", default="outputs/p_series")
     ap.add_argument("--outputs-root", default=".")
-    ap.add_argument("--n-cells", type=int, default=4000)
+    ap.add_argument("--n-cells", type=int, default=0,
+                    help="0 = every labelled immune cell, all splits (the default). "
+                         "Cell family and disease status are never model inputs, so "
+                         "held-out cells buy nothing here (AW, standing rule).")
     ap.add_argument("--batch", type=int, default=128)
     a = ap.parse_args()
     torch.set_grad_enabled(False)
@@ -116,9 +121,9 @@ def main() -> None:
     split = m.split.astype(str).to_numpy()
     assert list(pd.unique(split)) == ["train", "val", "test"], pd.unique(split)
     rng = np.random.default_rng(24)
-    cand = np.flatnonzero(imm & (kind != "") & np.isin(split, ["val", "test"]))
-    rows = np.sort(rng.choice(cand, min(a.n_cells, len(cand)), replace=False))
-    print(f"2  {len(rows)} immune cells from val+test ({(kind[rows] == 'LYM').sum()} lymphoid, "
+    cand = np.flatnonzero(imm & (kind != ""))
+    rows = cand if a.n_cells <= 0 else np.sort(rng.choice(cand, min(a.n_cells, len(cand)), replace=False))
+    print(f"2  {len(rows)} immune cells, all splits ({(kind[rows] == 'LYM').sum()} lymphoid, "
           f"{(kind[rows] == 'MYE').sum()} myeloid)")
 
     acc = {key: [np.zeros(vocab.vocab_size), np.zeros(vocab.vocab_size)] for key in W}
@@ -127,7 +132,7 @@ def main() -> None:
     gidx_of = {g: vocab.gene_to_index(g) for g in LYM + MYE if g in vocab}
     max_diff, flips, negs, n_seen = 0.0, 0, 0, 0
 
-    for sp in ("val", "test"):
+    for sp in ("train", "val", "test"):
         loader = build_loader(a.root, exp, tcfg, dcfg, vocab, study_configs, split=sp)
         order = sampler_order(loader)
         dump_pos = np.flatnonzero(split == sp)
@@ -187,6 +192,7 @@ def main() -> None:
                 flips += int((torch.sign(g_r) != torch.sign(g_b)).sum()); negs += int((g_r < 0).sum())
                 n_seen += len(rr)
         print(f"   {sp}: {len(want)} cells done", flush=True)
+        del loader, ds, order                      # one split's dataset in memory at a time
 
     print(f"3  encoded vs dumped latent, max abs difference {max_diff:.2e} (rounding only; stops above 0.05)")
     print("4  TEST A, real covariates: mean decoded log-expression, lymphoid minus myeloid cells")

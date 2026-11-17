@@ -1,18 +1,20 @@
 #!/bin/bash
 #SBATCH --qos=bbdefault
 #SBATCH --constraint=icelake
-#SBATCH --time=04:00:00
+#SBATCH --time=12:00:00
 #SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=200G
+#SBATCH --mem=240G
 #SBATCH --job-name=elaj_decode_real
 #SBATCH --output=logs/decode_real_%j.log
 
 # X12 step B with REAL covariates: encode held-out immune cells, shift the
 # latent, decode with the model's own decode_once. See scripts/decode_real.py.
-# 200G: val+test datasets are built (X13 peaked at 58 GB for the same two).
+# 240G: one split's dataset at a time; train (1.16M cells) is the peak, ~2.8x
+# X13's 58 GB for val+test. 12 h: CPU encoding of 29,355 cells, ~0.15 s each
+# as measured on job 61932543, is ~75 min; the rest is headroom.
 #
 #   sbatch data_collation/scripts/decode_disease_direction.sh
 #

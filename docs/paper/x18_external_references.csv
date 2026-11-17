@@ -1,0 +1,27 @@
+quantity,value,p,n,note
+open targets: associated targets,3619.0,,,
+open targets: score >= 0.1,270.0,,,
+open targets >= 0.1: in our vocabulary,244.0,,,
+open targets >= 0.1: in our top 1%,5.0,,244.0,expected 2.4 if spread evenly
+open targets >= 0.1: in our top 5%,25.0,,244.0,expected 12.2 if spread evenly
+open targets >= 0.1: in our top 50%,137.0,,244.0,expected 122.0 if spread evenly
+"open targets >= 0.1: ranks lower than uniform, one-sided MWU",,0.04739113108471268,244.0,
+endometdb main: up in patients at FDR<0.05,0.0,,,
+endometdb main: down in patients at FDR<0.05,0.0,,,
+endometdb main: smallest q,0.0652599376539966,,,
+"endometdb main (all WG-6 PE vs CE, phase-adjusted; PE 62, CE 38): our ranking vs patient-control t, spearman",-0.10978915975326659,6.427736648444175e-39,14044.0,
+"endometdb main (all WG-6 PE vs CE, phase-adjusted; PE 62, CE 38): mean t of our top 15",-0.6794571690969751,,15.0,
+"endometdb main (all WG-6 PE vs CE, phase-adjusted; PE 62, CE 38): mean t of our top 100",-0.5906998351076312,,97.0,
+"endometdb sensitivity (untreated, known phase; PE 33, CE 20): our ranking vs patient-control t, spearman",-0.3559304080448148,0.0,14044.0,
+"endometdb sensitivity (untreated, known phase; PE 33, CE 20): mean t of our top 15",-1.3579487813694917,,15.0,
+"endometdb sensitivity (untreated, known phase; PE 33, CE 20): mean t of our top 100",-1.213920646138374,,97.0,
+"endometdb untreated: immune marker score, patients minus controls (SD)",-0.3166369083239328,0.15992491759115618,9.0,
+"endometdb untreated: epithelial marker score, patients minus controls (SD)",0.22678262977037617,0.19374781254876877,6.0,
+"endometdb untreated: stromal marker score, patients minus controls (SD)",-0.24719161530816164,0.10194726170922162,5.0,
+"endometdb untreated: endothelial marker score, patients minus controls (SD)",-0.4398645829073693,0.07660697024104456,3.0,
+"endometdb sensitivity (secretory only; PE 19, CE 13): our ranking vs patient-control t, spearman",-0.25566578898766285,1.985562976357721e-208,14044.0,
+"endometdb sensitivity (secretory only; PE 19, CE 13): mean t of our top 15",-0.8469833875840437,,15.0,
+"endometdb sensitivity (secretory only; PE 19, CE 13): mean t of our top 100",-0.6868971077846331,,97.0,
+"endometdb sensitivity (proliferative only; PE 14, CE 7): our ranking vs patient-control t, spearman",-0.3244060143276893,0.0,14044.0,
+"endometdb sensitivity (proliferative only; PE 14, CE 7): mean t of our top 15",-1.2290267765423892,,15.0,
+"endometdb sensitivity (proliferative only; PE 14, CE 7): mean t of our top 100",-1.1491754251214203,,97.0,

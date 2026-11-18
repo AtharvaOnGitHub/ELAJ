@@ -26,8 +26,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 PAPER = (ROOT.parents[1] / "Atharva Papers" / "Validation" / "PMC5449958.txt")
-SHIFTS = ROOT / "docs" / "paper" / "x12_gene_shifts_orth.csv"
-N_VOCAB, TOP_N = 15496, 15
+SHIFTS = ROOT / "docs" / "paper" / "x12_gene_ranking.csv"
+TOP_N = 15
 
 
 def external_lists(path: Path):
@@ -55,10 +55,8 @@ def main() -> None:
     if not PAPER.exists():
         sys.exit(f"external cohort text not found: {PAPER}")
     if not SHIFTS.exists():
-        sys.exit(f"gene shifts not found: {SHIFTS}\n"
-                 "Copy it from the HPC:\n  scp axw1008@bluebear.bham.ac.uk:"
-                 "/rds/homes/a/axw1008/axw1008/src/docs/paper/"
-                 "x12_gene_shifts_orth.csv " + str(SHIFTS))
+        sys.exit(f"gene ranking not found: {SHIFTS}\n"
+                 "Build it with src/scripts/gene_ranking.py --x17 <x17_pseudobulk dir>")
 
     up, dn, fold = external_lists(PAPER)
     s = pd.read_csv(SHIFTS, index_col=0).iloc[:, 0].sort_values()
@@ -69,7 +67,9 @@ def main() -> None:
     for name, genes, target, tname in (("disease side", case, up, "upregulated"),
                                        ("control side", ctrl, up, "upregulated")):
         hits = sorted(set(genes) & target)
-        p = hypergeom_at_least(len(hits), TOP_N, len(target), N_VOCAB)
+        # The universe is the ranked genes (the expression floor removes
+        # some), and only listed genes inside it can be drawn.
+        p = hypergeom_at_least(len(hits), TOP_N, len(target & set(s.index)), len(s))
         rows.append({"end": name, "n_top": TOP_N, "external_list": tname,
                      "external_n": len(target), "hits": len(hits),
                      "genes": ";".join(hits), "p_hypergeometric": p,

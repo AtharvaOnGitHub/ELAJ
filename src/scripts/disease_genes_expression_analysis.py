@@ -32,8 +32,17 @@ TWO COHORTS, NEVER POOLED.
 
 EXCLUDED: li_2025, follicular fluid labelled endometrium (Note 3).
 
-GENES. The top 15 of x12_gene_shifts_orth.csv (the corrected, epoch-4
-ranking), read from the file at run time and printed.
+GENES. The top 15 of x12_gene_ranking.csv, read from the file at run time
+and printed.
+
+AMENDED 18 Nov, BEFORE THIS ANALYSIS WAS FIRST RUN. The plan above named
+"the top 15 of x12_gene_shifts_orth.csv". That file held the zero-covariate
+decode, which decode_sanity (job 62036623) showed inverts cell identity; it
+is retired as x12_gene_shifts_orth_INVALID_zero_covariates_epoch4.csv. The
+ranking is now decode_real's (job 62043452, real covariates), study-centred
+and NOT orthogonalised, restricted to genes at or above 0.1 per 10,000
+reads in the measured immune counts, both choices recorded with their
+reasons in gene_ranking.py. Everything else in this rule is unchanged.
 
 STATISTIC, per gene and cohort. Within each study, mean(case) - mean(control)
 of the donors' log values; averaged over studies weighted by the study's
@@ -128,7 +137,7 @@ def main() -> None:
     measured = pd.read_csv(d / "measured_by_study.csv", index_col=0).astype(bool)
     assert counts.shape == (len(groups), len(genes)), (counts.shape, len(groups), len(genes))
 
-    rk = pd.read_csv(PAPER / "x12_gene_shifts_orth.csv")
+    rk = pd.read_csv(PAPER / "x12_gene_ranking.csv")
     rk = rk.rename(columns={rk.columns[0]: "gene"})
     rk["disease"] = -rk.shift_towards_control
     rk = rk.sort_values("disease", ascending=False)
@@ -152,8 +161,9 @@ def main() -> None:
         print(f"    higher in case: {n_up} of {len(r)}; sign-test P = {sign_p:.4f}")
         case = (g.disease_status == "eutopic").to_numpy()
         full = weighted_diff(X.to_numpy(), case, g.study.to_numpy())
-        ok = ~np.isnan(full)
-        rho = stats.spearmanr(rk.set_index("gene").disease.reindex(np.array(genes)[ok]), full[ok])
+        dec = rk.set_index("gene").disease.reindex(np.array(genes)).to_numpy()
+        ok = ~np.isnan(full) & ~np.isnan(dec)     # ranked AND measured in every held-out study
+        rho = stats.spearmanr(dec[ok], full[ok])
         print(f"    secondary: decoded shift vs measured difference, {ok.sum()} genes, "
               f"Spearman {rho.statistic:+.4f} (P {rho.pvalue:.1e})")
         r["n_up"] = n_up; r["sign_p"] = sign_p; r["spearman_all_genes"] = rho.statistic

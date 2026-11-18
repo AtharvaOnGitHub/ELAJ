@@ -52,7 +52,7 @@ MARKERS = {"immune": ["PTPRC", "CD68", "CD14", "CD163", "LYZ", "TYROBP", "FCER1G
 
 
 def ranking() -> pd.DataFrame:
-    g = pd.read_csv(PAPER / "x12_gene_shifts_orth.csv")
+    g = pd.read_csv(PAPER / "x12_gene_ranking.csv")
     g = g.rename(columns={g.columns[0]: "gene"})
     g["disease"] = -g.shift_towards_control
     g = g.sort_values("disease", ascending=False).reset_index(drop=True)

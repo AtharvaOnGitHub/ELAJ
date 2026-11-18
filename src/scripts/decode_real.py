@@ -35,6 +35,18 @@ everything else as the model saw it. Steps, each printed:
 
 Writes x12_gene_shifts{_orth}_realcov_centre-<c>_epoch_0004.csv into
 docs/paper (relative to --root), column shift_towards_control, as before.
+
+--within (AW, 18 Nov: the cell-state question, B). The immune direction is
+almost the line between lymphoid and myeloid cells, so decoding along it
+mostly names which cells are more common in patients. With --within, step 5
+instead computes one direction INSIDE each lineage, from the studies' own
+labels (donor means of that lineage's cells, at least 50 per donor,
+study-centred, control minus case: the rules of
+disease_direction_within_type.py, which found myeloid held-out AUC 0.7594,
+P 0.0425, and lymphoid 0.7054, P 0.080), and moves each lineage's cells
+along their OWN lineage's direction only. Steps 1-4 and 6 are unchanged and
+still run on every labelled immune cell, so Test A still guards the decode.
+Writes x12_gene_shifts_within-{myeloid,lymphoid}_realcov_epoch_0004.csv.
 """
 from __future__ import annotations
 
@@ -84,6 +96,8 @@ def main() -> None:
                          "Cell family and disease status are never model inputs, so "
                          "held-out cells buy nothing here (AW, standing rule).")
     ap.add_argument("--batch", type=int, default=128)
+    ap.add_argument("--within", action="store_true",
+                    help="directions inside each lineage, each lineage moved along its own")
     a = ap.parse_args()
     torch.set_grad_enabled(False)
 
@@ -109,12 +123,22 @@ def main() -> None:
                     np.where(np.isin(lab, ["Immune_Myeloid", "myeloid"]), "MYE", ""))
     imm = (fam == "immune") & m.disease_status.isin(["control", "eutopic"]).to_numpy()
     mi = m[imm].reset_index(drop=True)
+    # W: key -> (direction, lineage whose cells it moves; None = every cell)
     W = {}
     for c in CENTRINGS:
         w = disease_direction(Z[imm], mi, c)
-        W[(c, False)] = w
-        W[(c, True)] = orthogonalised(w.copy(), Z, fam)
-    wl = W[("study", True)]
+        if not a.within:
+            W[(c, False)] = (w, None)
+            W[(c, True)] = (orthogonalised(w.copy(), Z, fam), None)
+    w_imm = disease_direction(Z[imm], mi, "study")
+    if a.within:
+        for k_ in ("MYE", "LYM"):
+            sel = imm & (kind == k_)
+            w = disease_direction(Z[sel], m[sel].reset_index(drop=True), "study")
+            W[("within", k_)] = (w, k_)
+            print(f"   within-{k_} direction: cosine with the immune direction {float(w @ w_imm):+.3f}")
+    half_keys = [("within", "MYE"), ("within", "LYM")] if a.within else [("study", True)]
+    wl = w_imm if a.within else W[("study", True)][0]
     print(f"   position along w (study, orth; towards CONTROL): LYM {(Z[imm & (kind == 'LYM')] @ wl).mean():+.3f}, "
           f"MYE {(Z[imm & (kind == 'MYE')] @ wl).mean():+.3f}")
 
@@ -130,7 +154,7 @@ def main() -> None:
           f"{(kind[rows] == 'MYE').sum()} myeloid)")
 
     acc = {key: [np.zeros(vocab.vocab_size), np.zeros(vocab.vocab_size)] for key in W}
-    acc_half = [np.zeros(vocab.vocab_size), np.zeros(vocab.vocab_size)]
+    acc_half = {key: [np.zeros(vocab.vocab_size), np.zeros(vocab.vocab_size)] for key in half_keys}
     marker = {g: {"LYM": [], "MYE": []} for g in LYM + MYE}
     gidx_of = {g: vocab.gene_to_index(g) for g in LYM + MYE if g in vocab}
     max_diff, flips, negs, n_seen = 0.0, 0, 0, 0
@@ -177,14 +201,18 @@ def main() -> None:
                             sel = torch.from_numpy(kind[rr] == k_)
                             if bool(sel.any()):
                                 marker[g][k_].extend(lb[sel, int(cpos[0])].tolist())
-                # 5: the six directions
-                for key, w in W.items():
+                # 5: the directions; each moves only the cells it is for
+                for key, (w, only) in W.items():
+                    rows_k = np.ones(len(rr), bool) if only is None else (kind[rr] == only)
+                    if not rows_k.any():
+                        continue
+                    sk = torch.from_numpy(rows_k)
                     wt = torch.from_numpy(w).float()
                     lp = torch.log(model.decode_once(batch, lat, gq, z_proj=zp(mu + wt)).clamp_min(1e-12))
-                    acc[key][0][gidx] += (lp - lb).sum(0).numpy(); acc[key][1][gidx] += len(rr)
-                    if key == ("study", True):
+                    acc[key][0][gidx] += (lp - lb)[sk].sum(0).numpy(); acc[key][1][gidx] += int(rows_k.sum())
+                    if key in acc_half:
                         lh = torch.log(model.decode_once(batch, lat, gq, z_proj=zp(mu + .5 * wt)).clamp_min(1e-12))
-                        acc_half[0][gidx] += (lh - lb).sum(0).numpy(); acc_half[1][gidx] += len(rr)
+                        acc_half[key][0][gidx] += (lh - lb)[sk].sum(0).numpy(); acc_half[key][1][gidx] += int(rows_k.sum())
                 # 6: gain with real and with zeroed covariates
                 dec = model.decoder
                 tis = model.decoder_tissue(batch["tissue_levels"])
@@ -221,14 +249,20 @@ def main() -> None:
 
     out = Path(a.root) / "docs" / "paper"
     names = np.array([vocab.index_to_gene(i) for i in range(vocab.vocab_size)])
-    for (c, orth), (s, n) in acc.items():
+    lineage = {"MYE": "myeloid", "LYM": "lymphoid"}
+    for key, (s, n) in acc.items():
         keep = n > 0
         ser = pd.Series(s[keep] / n[keep], index=names[keep], name="shift_towards_control").sort_values()
-        f = out / f"x12_gene_shifts{'_orth' if orth else ''}_realcov_centre-{c}_{ck_tag}.csv"
+        if key[0] == "within":
+            f = out / f"x12_gene_shifts_within-{lineage[key[1]]}_realcov_{ck_tag}.csv"
+        else:
+            c, orth = key
+            f = out / f"x12_gene_shifts{'_orth' if orth else ''}_realcov_centre-{c}_{ck_tag}.csv"
         ser.to_csv(f); print(f"   wrote {f.name}  (top towards disease: {' '.join(ser.index[:8])})")
-    s1 = acc[("study", True)]; keep = (s1[1] > 0) & (acc_half[1] > 0)
-    rho = pd.Series(s1[0][keep] / s1[1][keep]).rank().corr(pd.Series(acc_half[0][keep] / acc_half[1][keep]).rank())
-    print(f"5  step-size check, study/orth, eps 1 vs 0.5: rank correlation {rho:.4f}")
+    for key in half_keys:
+        s1, h = acc[key], acc_half[key]; keep = (s1[1] > 0) & (h[1] > 0)
+        rho = pd.Series(s1[0][keep] / s1[1][keep]).rank().corr(pd.Series(h[0][keep] / h[1][keep]).rank())
+        print(f"5  step-size check, {key}, eps 1 vs 0.5: rank correlation {rho:.4f}")
 
 
 if __name__ == "__main__":

@@ -68,6 +68,17 @@ def main() -> None:
     kept = out[out.passes_floor].drop(columns="passes_floor")
     kept.to_csv(PAPER / "x12_gene_ranking.csv")
 
+    # The same decode with no study centring (AW: the method should not care
+    # about study). Kept as a comparison, not swapped in: X17's rule was
+    # fixed on this ranking before X17 ran.
+    alt = pd.read_csv(PAPER / SOURCE.replace("centre-study", "centre-none"), index_col=0)["shift_towards_control"]
+    a, b = kept.shift_towards_control, alt.reindex(kept.index)
+    pd.DataFrame([
+        {"quantity": "genes_ranked", "value": len(kept)},
+        {"quantity": "rank_corr_study_vs_none", "value": a.rank().corr(b.rank())},
+        {"quantity": "top15_shared_study_vs_none",
+         "value": len(set(a.sort_values().index[:15]) & set(b.sort_values().index[:15]))},
+    ]).to_csv(PAPER / "x12_gene_ranking_meta.csv", index=False)
     print(f"source {SOURCE}: {len(out):,} genes; {len(kept):,} at or above "
           f"{FLOOR} per 10,000 reads in {int(k.sum())} immune pseudobulks")
     print("top 15 towards disease:", " ".join(kept.index[:15]))

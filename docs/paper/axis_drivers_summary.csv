@@ -2,6 +2,7 @@ family,quantity,value
 immune,auc_no_study_step,0.7631036157375602
 immune,p_no_study_step,0.015
 immune,donors,94.0
+immune,cos_disease_lineage_axis,0.8822622508604052
 immune,phase_kruskal_p,0.0013567814221770282
 immune,rho_lym,0.9572913242533443
 immune,rho_lib,-0.11785572372936459

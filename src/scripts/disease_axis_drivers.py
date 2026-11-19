@@ -87,6 +87,14 @@ def main() -> None:
                          np.random.default_rng(SEED))
         put(fam, "auc_no_study_step", rr["auc"]); put(fam, "p_no_study_step", rr["p"])
         put(fam, "donors", rr["n_donors"])
+        if fam == "immune":
+            # Figure 2e: the raw disease direction (no study step) against the
+            # axis from lymphoid to myeloid cells (the studies' own labels).
+            yr = (iraw["disease_status"] == "eutopic").to_numpy()[okr]
+            wr = Mraw[okr][~yr].mean(0) - Mraw[okr][yr].mean(0); wr = -wr / np.linalg.norm(wr)
+            la = lin[k]
+            ax_ = Zk[la == "myeloid"].mean(0) - Zk[la == "lymphoid"].mean(0); ax_ /= np.linalg.norm(ax_)
+            put(fam, "cos_disease_lineage_axis", float(wr @ ax_))
         B = np.linalg.lstsq(np.column_stack([np.ones(len(sk)), sk]), Zk, rcond=None)[0]
         Zr = Zk - np.outer(sk - sk.mean(), B[1])
         mk = m[k].reset_index(drop=True)

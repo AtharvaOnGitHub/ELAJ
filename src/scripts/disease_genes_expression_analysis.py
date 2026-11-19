@@ -167,7 +167,7 @@ def main() -> None:
         print(f"    secondary: decoded shift vs measured difference, {ok.sum()} genes, "
               f"Spearman {rho.statistic:+.4f} (P {rho.pvalue:.1e})")
         r["n_up"] = n_up; r["sign_p"] = sign_p; r["spearman_all_genes"] = rho.statistic
-        r["n_control"] = int((~case).sum()); r["n_case"] = int(case.sum())
+        r["n_control"] = int((~case).sum()); r["n_case"] = int(case.sum()); r["n_donors"] = len(case)
         out.append(r); verdict[name] = (n_up, sign_p)
     pd.concat(out).to_csv(PAPER / "x17_measured_expression.csv", index=False)
     if "HELD OUT" in verdict:

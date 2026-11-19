@@ -64,7 +64,7 @@ def heldout_auc(M: np.ndarray, y: np.ndarray, rng) -> dict:
         sn = M[~tr] @ direction(tr, yp)
         null.append(auc(sn[~yp[~tr]], sn[yp[~tr]]))
     obs, null = np.array(obs), np.array(null)
-    return {"auc": obs.mean(), "auc_lo": np.percentile(obs, 5), "auc_hi": np.percentile(obs, 95),
+    return {"_obs": obs, "_null": null, "auc": obs.mean(), "auc_lo": np.percentile(obs, 5), "auc_hi": np.percentile(obs, 95),
             "null": null.mean(), "p": float((null >= obs.mean()).mean()),
             "n_donors": len(y), "n_control": int((~y).sum()), "n_case": int(y.sum())}
 
@@ -84,12 +84,38 @@ def latent_part() -> pd.DataFrame:
         ok = n >= MIN_CELLS
         r = heldout_auc(M[ok], (info["disease_status"] == "eutopic").to_numpy()[ok],
                         np.random.default_rng(SEED))
+        r.pop("_obs"); r.pop("_null")
         r["cells"] = name
         rows.append(r)
         print(f"  {name:9s} donors {r['n_donors']:3d} ({r['n_control']} ctl / {r['n_case']} case)"
               f"  held-out AUC {r['auc']:.4f} [{r['auc_lo']:.3f}, {r['auc_hi']:.3f}]"
               f"  null {r['null']:.4f}  P {r['p']:.4f}")
     return pd.DataFrame(rows)
+
+
+def family_part() -> None:
+    """The four families, no study step, in the layout Figure 2d reads:
+    x12_by_family_nostudy.csv (one row per family) and
+    x12_by_family_nostudy_splits.csv (every held-out and null AUC)."""
+    Z = np.load(ROOT / f"Outputs/cells/{ARM}/latent.npy")
+    m = pd.read_csv(ROOT / f"Outputs/cells/{ARM}/metadata.csv.gz", low_memory=False,
+                    usecols=["study", "patient_id", "disease_status", "cell family"])
+    cc = m["disease_status"].isin(["control", "eutopic"]).to_numpy()
+    rows, splits = [], []
+    for fam in ("stromal", "epithelial", "immune", "endothelial"):
+        k = cc & (m["cell family"] == fam).to_numpy()
+        M, n, info = donor_means(Z[k], m[k].reset_index(drop=True))
+        ok = n >= MIN_CELLS
+        r = heldout_auc(M[ok], (info["disease_status"] == "eutopic").to_numpy()[ok],
+                        np.random.default_rng(SEED))
+        obs, null = r.pop("_obs"), r.pop("_null")
+        r["family"] = fam
+        rows.append(r)
+        splits += [pd.DataFrame({"family": fam, "kind": "held-out", "auc": obs}),
+                   pd.DataFrame({"family": fam, "kind": "null", "auc": null})]
+        print(f"  {fam:11s} donors {r['n_donors']:3d}  AUC {r['auc']:.4f}  P {r['p']:.4f}")
+    pd.DataFrame(rows).to_csv(PAPER / "x12_by_family_nostudy.csv", index=False)
+    pd.concat(splits).to_csv(PAPER / "x12_by_family_nostudy_splits.csv", index=False)
 
 
 def x17_part(d: Path) -> pd.DataFrame:
@@ -140,6 +166,8 @@ def main() -> None:
     d = Path(ap.parse_args().x17)
     print("1. LATENT, no study step")
     latent_part().to_csv(PAPER / "study_agnostic_latent.csv", index=False)
+    print("\n1b. FAMILIES, no study step")
+    family_part()
     print("\n2. MEASURED COUNTS, no study step")
     x17_part(d).to_csv(PAPER / "study_agnostic_x17.csv", index=False)
     print(f"\nwrote {PAPER / 'study_agnostic_latent.csv'} and {PAPER / 'study_agnostic_x17.csv'}")

@@ -16,7 +16,12 @@ Per family (immune, stromal), labelled cells, control or eutopic:
      that family's pseudobulk (X17, annotated labels) with the position;
      genes >= 0.1 per 10,000 reads in the family.
 Writes docs/paper/axis_drivers_<family>.csv (gene correlations) and prints
-the rest.
+the rest. Also writes docs/paper/axis_drivers_summary.csv, one row per
+(family, quantity), for every number the prose quotes: the held-out AUC
+with no study step, with the stromal score removed, with phase also
+removed; the position's correlation with lymphoid share and library; the
+phase test; and the stromal-RNA excess in that family's measured counts,
+all donors together.
 """
 from __future__ import annotations
 
@@ -68,9 +73,20 @@ def main() -> None:
     z = np.load(Path(a.x17) / "pseudobulk.npz", allow_pickle=False)
     C, genes = z["counts"], [str(x) for x in z["genes"]]
 
-    for fam in ("immune", "stromal"):
+    summary = []
+
+    def put(fam, q, v):
+        summary.append({"family": fam, "quantity": q, "value": float(v)})
+
+    for fam in ("immune", "stromal", "endothelial", "epithelial"):
         k = cc & lab & (m["cell family"] == fam).to_numpy()
         Zk, sk = Z[k], s[k]
+        Mraw, nraw, iraw = donor_means(Zk, m[k].reset_index(drop=True))
+        okr = nraw >= MIN_CELLS
+        rr = heldout_auc(Mraw[okr], (iraw["disease_status"] == "eutopic").to_numpy()[okr],
+                         np.random.default_rng(SEED))
+        put(fam, "auc_no_study_step", rr["auc"]); put(fam, "p_no_study_step", rr["p"])
+        put(fam, "donors", rr["n_donors"])
         B = np.linalg.lstsq(np.column_stack([np.ones(len(sk)), sk]), Zk, rcond=None)[0]
         Zr = Zk - np.outer(sk - sk.mean(), B[1])
         mk = m[k].reset_index(drop=True)
@@ -89,18 +105,31 @@ def main() -> None:
         print("    donors by phase:", don.groupby([don.phase, y]).size().unstack(fill_value=0).rename(columns={False: "control", True: "patient"}).to_dict("index"))
         kp = don.phase != ""
         groups = [pos[kp & (don.phase == p)] for p in sorted(set(don.phase[kp]))]
+        put(fam, "phase_kruskal_p", stats.kruskal(*groups).pvalue)
         print(f"    position vs phase: Kruskal-Wallis P {stats.kruskal(*groups).pvalue:.1e};",
               " ".join(f"{p} {pos[kp & (don.phase == p)].median():+.2f}" for p in sorted(set(don.phase[kp]))))
         for v, nm in [("lym", "lymphoid share")] * (fam == "immune") + [("lib", "log library"), ("ng", "genes detected")]:
             r = stats.spearmanr(pos, don[v])
+            put(fam, f"rho_{v}", r.statistic)
             print(f"    position vs {nm:15s} Spearman {r.statistic:+.2f} (P {r.pvalue:.1e})")
         r0 = heldout_auc(M, y, np.random.default_rng(SEED))
         P = pd.get_dummies(don.phase[kp]).to_numpy(float)
         Mp = M[kp.to_numpy()] - P @ np.linalg.lstsq(P, M[kp.to_numpy()], rcond=None)[0]
         r1 = heldout_auc(Mp, y[kp.to_numpy()], np.random.default_rng(SEED))
+        put(fam, "auc_stromal_removed", r0["auc"]); put(fam, "p_stromal_removed", r0["p"])
+        put(fam, "auc_phase_removed", r1["auc"]); put(fam, "p_phase_removed", r1["p"])
         print(f"    held-out AUC {r0['auc']:.3f} (P {r0['p']:.3f}); phase also removed ({kp.sum()} donors)"
               f" {r1['auc']:.3f} (P {r1['p']:.3f})")
 
+        # the stromal-RNA excess in this family's MEASURED counts, all donors together
+        ek = ((g.source == "annotated") & (g.family == fam) & g.disease_status.isin(["control", "eutopic"])
+              & (g.n_cells >= MIN_CELLS)).to_numpy()
+        ev = 1e4 * C[ek][:, [genes.index(x) for x in STROMAL]].sum(1) / g.library[ek].to_numpy()
+        ec = (g.disease_status[ek] == "eutopic").to_numpy()
+        put(fam, "stromal_rna_ratio", np.median(ev[ec]) / np.median(ev[~ec]))
+        put(fam, "stromal_rna_p", stats.mannwhitneyu(ev[ec], ev[~ec]).pvalue)
+        if fam not in ("immune", "stromal"):
+            continue
         gk = ((g.source == "annotated") & (g.family == fam)).to_numpy()
         gg = g[gk].set_index("patient_id")
         X = C[gk]
@@ -116,6 +145,7 @@ def main() -> None:
         print(f"    measured genes vs position ({len(common)} donors, {keep.sum()} genes):")
         print("      patient side:", " ".join(f"{x}({v:+.2f})" for x, v in zip(res.gene[:20], res.rho_with_control_side[:20])))
         print("      control side:", " ".join(f"{x}({v:+.2f})" for x, v in zip(res.gene[::-1][:20], res.rho_with_control_side[::-1][:20])))
+    pd.DataFrame(summary).to_csv(PAPER / "axis_drivers_summary.csv", index=False)
 
 
 if __name__ == "__main__":

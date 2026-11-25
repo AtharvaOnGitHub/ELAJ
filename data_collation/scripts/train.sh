@@ -6,13 +6,15 @@
 # the GPU is only 70% busy.
 #SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=2-00:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=100G
 #SBATCH --job-name=elaj_train
 #SBATCH --output=logs/train_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Trains ELAJ from an experiment YAML.
 #
@@ -96,12 +98,12 @@ module load Pillow/10.4.0-GCCcore-13.3.0
 module load R/4.5.0-gfbf-2024a
 module load matplotlib/3.9.2-gfbf-2024a
 
-export R_LIBS_USER=/rds/projects/a/acharjea-multi-omics/Atharva/R_libs
+export R_LIBS_USER=${ELAJ_BASE}/R_libs
 export R_MAX_VSIZE=180Gb
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 # Resolve the config against src, accepting an arm name, a src-relative
 # path, or a repo-root path. Checked here, after the cd, so the error names

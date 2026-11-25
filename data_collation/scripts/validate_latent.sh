@@ -2,13 +2,15 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=12:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=180G
 #SBATCH --job-name=elaj_validate
 #SBATCH --output=logs/validate_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # THIS SCRIPT HOLDS AN A100 FOR UP TO TWELVE HOURS AND NEEDS IT FOR ABOUT ONE.
 # Only the forward pass touches CUDA. Stages 3, 4 and 4b are neighbour
@@ -49,7 +51,7 @@
 #
 # ripser is optional and only figure 23 (persistent homology) needs it. Install
 # it from a LOGIN node, where there is internet:
-#     source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+#     source ${ELAJ_BASE}/envs/elaj/bin/activate
 #     pip install ripser
 # Without it that one figure reports the library as missing and the other
 # fifteen are unaffected.
@@ -92,9 +94,9 @@ module load h5py/3.12.1-foss-2024a
 module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 python -u -c "import sklearn; print('sklearn', sklearn.__version__)"
 

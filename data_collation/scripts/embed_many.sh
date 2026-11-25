@@ -2,13 +2,15 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=10:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=240G
 #SBATCH --job-name=elaj_embed_many
 #SBATCH --output=logs/embed_many_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Embeds our val+test cells with SEVERAL pretrained models in one job.
 #
@@ -42,10 +44,10 @@ set -uo pipefail
 MODELS_WANTED=("${@:-scimilarity}")
 RUN="${RUN:-m6_drain}"
 
-PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
-MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
-ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
-SCRATCH=/rds/projects/a/acharjea-multi-omics/Atharva/scratch
+PROCESSED=${ELAJ_BASE}/data/processed
+MODELS=${ELAJ_BASE}/models
+ENVS=${ELAJ_BASE}/envs
+SCRATCH=${ELAJ_BASE}/scratch
 
 repo_for() {
     case "$1" in
@@ -99,7 +101,7 @@ for MODEL in "${MODELS_WANTED[@]}"; do
     (
         set -e
         source "${VENV}/bin/activate"
-        cd /rds/homes/a/axw1008/axw1008/src
+        cd "$ELAJ_REPO/src"
         python -u -m scripts.embed_pretrained \
             --run "${RUN}" \
             --model "${MODEL}" \

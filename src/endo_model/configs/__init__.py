@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Tuple
 
+import os
+
 import yaml
 
 from endo_model.configs.data_config import DataConfig
@@ -27,9 +29,20 @@ __all__ = [
 ]
 
 
+def _expand_env(value: Any) -> Any:
+    """Expand ${VAR} in every string, so site paths live in site.env, not in configs."""
+    if isinstance(value, str):
+        return os.path.expandvars(value)
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    return value
+
+
 def _load_yaml(path: Path) -> dict:
     with open(path, "r") as f:
-        return yaml.safe_load(f) or {}
+        return _expand_env(yaml.safe_load(f) or {})
 
 
 def apply_override(d: dict, dotpath: str, value: Any) -> None:

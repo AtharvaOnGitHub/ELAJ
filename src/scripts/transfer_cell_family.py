@@ -25,7 +25,7 @@ import numpy as np, pandas as pd
 from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
-ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+ROOT = Path(__file__).resolve().parents[3]  # the folder holding this repo and Outputs/
 ARM, K, SEED = "p1_dab168_kl1", 25, 24
 FAMILIES = ["endothelial", "epithelial", "immune", "stromal"]
 LI_IMMUNE = ["Neutrophils", "Macro/Mono", "T/NKT", "DC", "B"]

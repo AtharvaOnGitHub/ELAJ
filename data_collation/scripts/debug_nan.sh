@@ -2,13 +2,15 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100:1
 #SBATCH --time=1:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=180G
 #SBATCH --job-name=elaj_debug_nan
 #SBATCH --output=logs/debug_nan_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Locates the module that first emits a non-finite value, across the whole
 # corpus.
@@ -34,9 +36,9 @@ module load h5py/3.12.1-foss-2024a
 module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 # With no arguments: reproduce the exact batches the failing run saw
 # (--match-training with no subsampling).  With arguments: use them verbatim, so

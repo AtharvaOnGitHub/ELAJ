@@ -2,13 +2,15 @@
 #SBATCH --qos=bbdefault
 #SBATCH --constraint=icelake
 #SBATCH --time=08:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=240G
 #SBATCH --job-name=elaj_continuity
 #SBATCH --output=logs/continuity_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Does clustering destroy label information the neighbourhoods hold?
 #
@@ -60,7 +62,7 @@ module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
   || { echo "no bare Python module found; try: module avail Python" >&2; exit 1; }
 
 export PYTHONNOUSERSITE=1
-VENV=/rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj_cpu
+VENV=${ELAJ_BASE}/envs/elaj_cpu
 if [[ ! -f "${VENV}/bin/activate" ]]; then
     echo "no CPU venv at ${VENV}." >&2
     echo "Run: bash data_collation/scripts/install_benchmark_cpu.sh" >&2
@@ -68,7 +70,7 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 source "${VENV}/bin/activate"
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 echo "Arm:     ${ARM}"
 echo "Options: $*"

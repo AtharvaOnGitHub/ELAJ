@@ -8,6 +8,9 @@
 #SBATCH --mem=180G
 #SBATCH --job-name=reprocess_study
 #SBATCH --output=logs/reprocess_%x_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Re-runs the processing pipeline for a single study, overwriting its processed
 # h5ad.  Use after changing that study's block in configs/datasets.yaml.
@@ -51,9 +54,9 @@ module load R/4.5.0-gfbf-2024a
 module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/data_collation
+cd "$ELAJ_REPO/data_collation"
 
 python -c "import anndata, pandas, numpy, scipy, yaml; print('imports ok')"
 command -v Rscript >/dev/null && echo "Rscript ok" || echo "WARNING: no Rscript — RDS studies will fail"
@@ -72,7 +75,7 @@ from pathlib import Path
 import anndata as ad
 
 path = Path(
-    "/rds/projects/a/acharjea-multi-omics/Atharva/data/processed"
+    os.environ["ELAJ_BASE"], "data", "processed"
 ) / f"{os.environ['STUDY']}.h5ad"
 
 adata = ad.read_h5ad(path, backed="r")

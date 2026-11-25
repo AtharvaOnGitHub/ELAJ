@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-ELAJ = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+ELAJ = Path(__file__).resolve().parents[3]  # the folder holding this repo and Outputs/
 VAL = ELAJ.parent / "Atharva Papers" / "Validation"
 PAPER = Path(__file__).resolve().parents[2] / "docs" / "paper"
 OT_MIN = 0.1

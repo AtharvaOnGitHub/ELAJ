@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # Do two studies hold the same donors, samples or cells?
 #
 #   bash data_collation/scripts/check_donor_overlap.sh configs/experiment/m4_tight16.yaml
@@ -19,9 +22,9 @@ module load anndata/0.10.9-foss-2024a
 module load h5py/3.12.1-foss-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 export PYTHONUNBUFFERED=1
 python -u -m scripts.check_donor_overlap --config "${CONFIG}" --root . \
     --out outputs/qc/donor_overlap.md "$@"

@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+ROOT = Path(__file__).resolve().parents[3]  # the folder holding this repo and Outputs/
 PAPER = Path(__file__).resolve().parents[2] / "docs" / "paper"
 
 d = pd.read_csv(ROOT / "Outputs/supplementary/data/D3_per_donor_cell_family_composition.csv", low_memory=False)

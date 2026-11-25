@@ -2,13 +2,15 @@
 #SBATCH --qos=bbdefault
 #SBATCH --constraint=icelake
 #SBATCH --time=12:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=240G
 #SBATCH --job-name=elaj_decode_real
 #SBATCH --output=logs/decode_real_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # X12 step B with REAL covariates: encode held-out immune cells, shift the
 # latent, decode with the model's own decode_once. See scripts/decode_real.py.
@@ -39,7 +41,7 @@ module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
   || { echo "no bare Python module found; try: module avail Python" >&2; exit 1; }
 
 export PYTHONNOUSERSITE=1
-BASE=/rds/projects/a/acharjea-multi-omics/Atharva
+BASE=${ELAJ_BASE}
 for V in "${BASE}/envs/elaj_cpu" "${BASE}/envs/elaj"; do
     if [[ -f "${V}/bin/activate" ]]; then VENV="${V}"; break; fi
 done
@@ -52,7 +54,7 @@ python -u -c "import torch, yaml; print('torch', torch.__version__)" || {
     exit 1
 }
 
-REPO=/rds/homes/a/axw1008/axw1008/src
+REPO=${ELAJ_REPO}/src
 cd "${REPO}"
 
 # Checkpoints and latent dumps live under the REPO as src/outputs (lowercase),

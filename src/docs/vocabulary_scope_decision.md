@@ -170,6 +170,6 @@ else if($0~/^(SNOR|SNHG|SCARNA|RNU|RN7|RNA5)/)c["small RNA"]++;
 else if($0~/P[0-9]+$/)c["pseudogene"]++;
 else c["named gene"]++}
 END{for(k in c)printf "%-20s %6d\n",k,c[k]}' \
-  /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/gene_list.txt \
+  $ELAJ_BASE/data/processed/gene_list.txt \
   | sort -k2 -rn
 ```

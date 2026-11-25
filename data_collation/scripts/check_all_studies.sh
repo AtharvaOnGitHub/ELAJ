@@ -6,6 +6,9 @@
 #SBATCH --mem=128G
 #SBATCH --job-name=check_all_studies
 #SBATCH --output=logs/check_all_studies_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 module purge
 module load bear-apps/2024a
@@ -14,18 +17,19 @@ module load h5py/3.12.1-foss-2024a
 module load SciPy-bundle/2024.05-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/data_collation
+cd "$ELAJ_REPO/data_collation"
 
 python - <<'PYEOF'
 import sys
+import os
 from pathlib import Path
 
 import anndata as ad
 import numpy as np
 
-PROCESSED = Path("/rds/projects/a/acharjea-multi-omics/Atharva/data/processed")
+PROCESSED = Path(os.environ["ELAJ_BASE"]) / "data" / "processed"
 REQUIRED_COLS = [
     "patient_id",
     "source_sample_id",

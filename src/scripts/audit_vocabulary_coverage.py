@@ -1,8 +1,8 @@
 """Which studies the vocabulary was built from, and which ones train on it.
 
     python -m scripts.audit_vocabulary_coverage \
-        --processed /rds/projects/a/acharjea-multi-omics/Atharva/data/processed \
-        --vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary.json \
+        --processed $ELAJ_BASE/data/processed \
+        --vocabulary $ELAJ_BASE/data/processed/vocabulary.json \
         --corpus configs/data/corpus_c1.yaml --root .
 
 THE QUESTION. `build_vocabulary.sh` takes the union of `var_names` over the

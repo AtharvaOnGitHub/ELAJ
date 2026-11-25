@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # Push a locally downloaded model checkpoint to the HPC. Runs on YOUR MAC.
 #
 #   bash data_collation/scripts/push_weights.sh scfoundation ~/Downloads/models.ckpt
@@ -20,8 +23,8 @@ set -euo pipefail
 
 MODEL="${1:?usage: push_weights.sh <scfoundation|scgpt|geneformer|scimilarity> <local path>}"
 SOURCE="${2:?second argument: the local file or directory to push}"
-REMOTE=axw1008@bear-pg-login06.bear.cluster
-MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
+REMOTE="${ELAJ_REMOTE:?set ELAJ_REMOTE (user@host) in site.env}"
+MODELS=${ELAJ_BASE}/models
 
 case "${MODEL}" in
     scfoundation) DEST="${MODELS}/scFoundation/model/models/" ;;

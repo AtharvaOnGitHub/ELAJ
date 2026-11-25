@@ -332,7 +332,7 @@ the others can reuse as usual.
 Then, on CPU, outside the GPU cap:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && sbatch data_collation/scripts/continuity_test.sh p1_dab168_kl1 --latents outputs/latents --out outputs/continuity
+cd <repo> && sbatch data_collation/scripts/continuity_test.sh p1_dab168_kl1 --latents outputs/latents --out outputs/continuity
 ```
 
 - [ ] wave-3 scoring carries `--dump-latent`

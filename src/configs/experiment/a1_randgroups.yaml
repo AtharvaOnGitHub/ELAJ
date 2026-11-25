@@ -203,7 +203,7 @@ overrides:
   model.tokens.count_scale: log
   model.tokens.target_sum: 1.0e4
   model.tokens.value_part: gene_direction
-  data.vocabulary_path: /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_v1_shuffled.json
+  data.vocabulary_path: ${ELAJ_BASE}/data/processed/vocabulary_v1_shuffled.json
   model.group_encoder.readout: cls+pool8
   model.aggregation_encoder.readout: cls+pool8
 

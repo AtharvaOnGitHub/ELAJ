@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # One-time: a clean venv per foundation model, with NO BEAR Python modules.
 #
 #   bash data_collation/scripts/install_foundation.sh geneformer
@@ -21,8 +24,8 @@
 set -euo pipefail
 
 MODEL="${1:?usage: install_foundation.sh <geneformer|scgpt|scimilarity|scfoundation>}"
-MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
-ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
+MODELS=${ELAJ_BASE}/models
+ENVS=${ELAJ_BASE}/envs
 VENV="${ENVS}/fm_${MODEL}"
 
 module purge

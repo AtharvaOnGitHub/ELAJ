@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # One-time: stage Geneformer and its own venv on the HPC.
 #
 #   bash data_collation/scripts/install_geneformer.sh
@@ -65,8 +68,8 @@
 
 set -euo pipefail
 
-MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
-ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
+MODELS=${ELAJ_BASE}/models
+ENVS=${ELAJ_BASE}/envs
 REPO="${MODELS}/Geneformer"
 VENV="${ENVS}/geneformer"
 

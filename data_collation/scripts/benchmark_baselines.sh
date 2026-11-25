@@ -2,13 +2,15 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=05:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
 #SBATCH --job-name=elaj_bench
 #SBATCH --output=logs/bench_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Scores scVI, scANVI, Harmony, Scanorama and PCA on the cells ELAJ is scored
 # on, with ELAJ's own checkpoint in the same table.
@@ -77,7 +79,7 @@
 #   sbatch --mem=360G --time=20:00:00 \
 #       data_collation/scripts/benchmark_baselines.sh m6_drain --no-elaj \
 #       --fit-split train --methods pca scvi scanvi \
-#       --baseline-vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_axis.json \
+#       --baseline-vocabulary ${ELAJ_BASE}/data/processed/vocabulary_axis.json \
 #       --out outputs/benchmarks/axis_m6_drain
 #
 # If the QoS refuses 20 hours, drop scanvi: it cost 6,554 s of the measured
@@ -142,7 +144,7 @@ set -euo pipefail
 #
 # The sibling is still preferred when it exists, so a second checkout or a
 # local run uses its own copy rather than this one.
-REPO=/rds/homes/a/axw1008/axw1008
+REPO=${ELAJ_REPO}
 ARGS="${REPO}/data_collation/scripts/_benchmark_args.sh"
 SIBLING="$(dirname "${BASH_SOURCE[0]}")/_benchmark_args.sh"
 [[ -f "${SIBLING}" ]] && ARGS="${SIBLING}"
@@ -160,9 +162,9 @@ module load h5py/3.12.1-foss-2024a
 module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 python -u - <<'PY'
 # importlib.util, NOT importlib: util is a submodule and is only an

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -44,6 +45,10 @@ class PipelineConfig:
     def from_yaml(cls, path: str) -> "PipelineConfig":
         with open(path, "r") as f:
             raw = yaml.safe_load(f)
+        # Expand ${VAR} in path values, so site paths live in site.env.
+        if isinstance(raw, dict) and isinstance(raw.get("paths"), dict):
+            raw["paths"] = {k: os.path.expandvars(v) if isinstance(v, str) else v
+                            for k, v in raw["paths"].items()}
         return cls(
             paths=PathsConfig(**raw.get("paths", {})),
             qc=QCConfig(**raw.get("qc", {})),

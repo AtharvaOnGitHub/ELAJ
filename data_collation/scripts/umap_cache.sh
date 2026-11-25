@@ -2,7 +2,6 @@
 #SBATCH --qos=bbdefault
 #SBATCH --constraint=icelake
 #SBATCH --time=03:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -10,6 +9,9 @@
 #SBATCH --job-name=elaj_umap
 #SBATCH --array=0-8
 #SBATCH --output=logs/umap_%A_%a.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Whole-corpus UMAP coordinates for the nine arms that do not have them.
 #
@@ -68,7 +70,7 @@ module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
   || { echo "no bare Python module found; try: module avail Python" >&2; exit 1; }
 
 export PYTHONNOUSERSITE=1
-VENV=/rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj_cpu
+VENV=${ELAJ_BASE}/envs/elaj_cpu
 if [[ ! -f "${VENV}/bin/activate" ]]; then
     echo "no CPU venv at ${VENV}." >&2
     echo "Run: bash data_collation/scripts/install_benchmark_cpu.sh" >&2
@@ -76,7 +78,7 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 source "${VENV}/bin/activate"
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 # PREFLIGHT. umap-learn is imported lazily inside embed(), so without this
 # check a missing package would fail an hour in, after the metadata load.

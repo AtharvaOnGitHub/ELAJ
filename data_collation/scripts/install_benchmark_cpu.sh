@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # One-time: a CPU-only benchmarking venv that needs no GPU node, so scoring
 # stops competing with training for the two-GPU cap.
 #
@@ -45,7 +48,7 @@
 
 set -euo pipefail
 
-ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
+ENVS=${ELAJ_BASE}/envs
 GPU_VENV="${ENVS}/elaj"
 CPU_VENV="${ENVS}/elaj_cpu"
 PINS="${ENVS}/elaj_cpu_pins.txt"

@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+ROOT = Path(__file__).resolve().parents[3]  # the folder holding this repo and Outputs/
 ARM, SEED, NSPLIT = "p1_dab168_kl1", 24, 200
 
 

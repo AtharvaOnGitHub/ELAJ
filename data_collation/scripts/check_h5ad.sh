@@ -6,19 +6,22 @@
 #SBATCH --mem=64G
 #SBATCH --job-name=check_h5ad
 #SBATCH --output=logs/check_h5ad_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Usage: sbatch scripts/check_h5ad.sh <study_name>
 # Example: sbatch scripts/check_h5ad.sh duempelmann_2026
 
 STUDY="${1:?Usage: sbatch scripts/check_h5ad.sh <study_name>}"
-H5AD="/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/${STUDY}.h5ad"
+H5AD="${ELAJ_BASE}/data/processed/${STUDY}.h5ad"
 
 module purge
 module load bear-apps/2024a
 module load anndata/0.10.9-foss-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
 python - <<EOF
 import anndata as ad

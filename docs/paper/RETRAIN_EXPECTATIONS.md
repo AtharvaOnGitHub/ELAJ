@@ -328,17 +328,17 @@ Five runs, two cards. At the measured 58 min/epoch, the expected 15 epochs is
 ends are what the tiers need:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl1 && sbatch data_collation/scripts/train.sh p1_dab336_kl30
+cd <repo> && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl1 && sbatch data_collation/scripts/train.sh p1_dab336_kl30
 ```
 
 Then, as cards free, the two interior cells and finally the reproduction:
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl30 && sbatch data_collation/scripts/train.sh p1_dab168_kl1
+cd <repo> && git pull && sbatch data_collation/scripts/train.sh p1_dab7_kl30 && sbatch data_collation/scripts/train.sh p1_dab168_kl1
 ```
 
 ```bash
-cd /rds/homes/a/axw1008/axw1008 && git pull && sbatch data_collation/scripts/train.sh p1_dab168_kl30
+cd <repo> && git pull && sbatch data_collation/scripts/train.sh p1_dab168_kl30
 ```
 
 `train.sh` asks for one `a100_80`, 16 cores, 100 G and a two-day wall — sized

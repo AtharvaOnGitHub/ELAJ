@@ -6,6 +6,9 @@
 #SBATCH --mem=8G
 #SBATCH --job-name=build_vocab_hier
 #SBATCH --output=logs/build_vocab_hier_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Builds vocabulary.json by HIERARCHICAL roll-up: Reactome pathways rolled up to
 # a target group size, then GO Biological Process on whatever Reactome did not
@@ -24,9 +27,9 @@ module load h5py/3.12.1-foss-2024a
 module load SciPy-bundle/2024.05-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-export PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
+export PROCESSED=${ELAJ_BASE}/data/processed
 export GENE_LIST=${PROCESSED}/gene_list.txt
 export VOCAB_OUT=${PROCESSED}/vocabulary.json
 
@@ -57,7 +60,7 @@ PYEOF
 # --target-group-size is the direct G knob (median group size ≈ this).
 echo ""
 echo "Building vocabulary by Reactome + GO hierarchical roll-up ..."
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 python scripts/build_vocabulary.py \
     --grouping hierarchical \
     --gene-list "${GENE_LIST}" \

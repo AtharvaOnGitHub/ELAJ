@@ -6,6 +6,9 @@
 #SBATCH --mem=8G
 #SBATCH --job-name=build_vocabulary
 #SBATCH --output=logs/build_vocabulary_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Builds data/processed/vocabulary.json from the union of all genes across
 # the processed h5ad studies.  Using the union (not intersection) is correct
@@ -42,13 +45,13 @@ module load anndata/0.10.9-foss-2024a
 module load h5py/3.12.1-foss-2024a
 module load Pillow/10.4.0-GCCcore-13.3.0
 module load matplotlib/3.9.2-gfbf-2024a
-export R_LIBS_USER=/rds/projects/a/acharjea-multi-omics/Atharva/R_libs
+export R_LIBS_USER=${ELAJ_BASE}/R_libs
 export R_MAX_VSIZE=180Gb
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-export PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
+export PROCESSED=${ELAJ_BASE}/data/processed
 export GENE_LIST=${GENE_LIST:-${PROCESSED}/gene_list.txt}
 export VOCAB_OUT=${VOCAB_OUT:-${PROCESSED}/vocabulary.json}
 
@@ -62,7 +65,7 @@ if [[ -e "${VOCAB_OUT}" && "${OVERWRITE:-0}" != "1" ]]; then
 fi
 # Which corpus this vocabulary is for. Its exclude_studies is the one that
 # counts, so point this at the config the runs actually load.
-export CORPUS=${CORPUS:-/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_c1.yaml}
+export CORPUS=${CORPUS:-${ELAJ_REPO}/src/configs/data/corpus_c1.yaml}
 
 # Derived, never typed, and derived so that a FAILURE STOPS THE BUILD.
 #
@@ -73,7 +76,7 @@ export CORPUS=${CORPUS:-/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_c1.
 # corpus that excludes nothing must never look the same.
 EXCLUDE_FILE=$(mktemp)
 trap 'rm -f "${EXCLUDE_FILE}"' EXIT
-if ! python /rds/homes/a/axw1008/axw1008/src/scripts/corpus_exclusions.py \
+if ! python ${ELAJ_REPO}/src/scripts/corpus_exclusions.py \
         "${CORPUS}" > "${EXCLUDE_FILE}"; then
   echo "FATAL: could not read exclude_studies from ${CORPUS}." >&2
   echo "Refusing to build a vocabulary from an unknown study set." >&2
@@ -146,7 +149,7 @@ fi
 echo ""
 echo "Building vocabulary by Reactome -> GO hierarchical roll-up ..."
 echo "  drop-unassigned: ${DROP_UNASSIGNED}"
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 python scripts/build_vocabulary.py \
     --gene-list "${GENE_LIST}" \
     --gene-sets-file data/gene_sets.json \

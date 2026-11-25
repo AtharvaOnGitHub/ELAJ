@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np, pandas as pd
 from sklearn.neighbors import NearestNeighbors
 
-ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+ROOT = Path(__file__).resolve().parents[3]  # the folder holding this repo and Outputs/
 import sys
 ARM, K, NPERM, SEED = "p1_dab168_kl1", 100, 2000, 24
 SPLITS = ["train", "val", "test"] if "--all-splits" in sys.argv else ["val", "test"]

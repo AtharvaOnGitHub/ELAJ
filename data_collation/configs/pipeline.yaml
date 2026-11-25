@@ -1,12 +1,12 @@
 paths:
-  raw_dir: data/raw
-  processed_dir: data/processed
+  raw_dir: ${ELAJ_BASE}/data/raw
+  processed_dir: ${ELAJ_BASE}/data/processed
   gene_aliases: configs/gene_aliases.yaml
-  hgnc_table: data/hgnc_complete_set.txt
-  patient_id_map: data/processed/patient_id_map.csv
-  gene_mapping_issues: data/processed/gene_mapping_issues.csv
-  studies_csv: data/processed/studies.csv
-  pipeline_log: data/processed/pipeline.log
+  hgnc_table: ${ELAJ_BASE}/data/hgnc_complete_set.txt
+  patient_id_map: ${ELAJ_BASE}/data/processed/patient_id_map.csv
+  gene_mapping_issues: ${ELAJ_BASE}/data/processed/gene_mapping_issues.csv
+  studies_csv: ${ELAJ_BASE}/data/processed/studies.csv
+  pipeline_log: ${ELAJ_BASE}/data/processed/pipeline.log
 
 qc:
   min_umi: 200

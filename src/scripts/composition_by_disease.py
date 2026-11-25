@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path("/Users/atharvawaghmare/Endo research/ELAJ")
+ROOT = Path(__file__).resolve().parents[3]  # the folder holding this repo and Outputs/
 ARM, NPERM, SEED, MIN_CELLS = "p1_dab168_kl1", 5000, 24, 200
 FAMILIES = ["immune", "stromal", "epithelial", "endothelial"]
 EPS = 1e-3

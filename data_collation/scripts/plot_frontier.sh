@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # Draws the donor-against-biology frontier from the benchmark CSVs.
 #
 #   bash data_collation/scripts/plot_frontier.sh
@@ -34,9 +37,9 @@ module load Pillow/10.4.0-GCCcore-13.3.0
 module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 python -u -m scripts.plot_frontier --benchmarks "${BENCHMARKS}" --out "${OUT}"
 

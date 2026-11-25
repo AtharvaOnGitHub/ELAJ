@@ -6,6 +6,9 @@
 #SBATCH --mem=4G
 #SBATCH --job-name=plot_vocab_tradeoff
 #SBATCH --output=logs/plot_vocab_tradeoff_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Renders the analytic parameter-space figures: total model parameters against
 # gene-space dimension (D), group size (G) and token dimension (d), each with
@@ -20,11 +23,11 @@ module load matplotlib/3.9.2-gfbf-2024a
 module load SciPy-bundle/2024.05-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-FIG_DIR=/rds/projects/a/acharjea-multi-omics/Atharva/figures/vocab_tradeoff
+FIG_DIR=${ELAJ_BASE}/figures/vocab_tradeoff
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 python scripts/plot_vocab_tradeoff.py \
     --gene-space-range 4000 20000 5 \
     --group-size-range 20 300 6 \

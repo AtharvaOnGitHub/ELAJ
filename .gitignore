@@ -58,3 +58,6 @@ htmlcov/
 
 # Claude Code local settings
 .claude/
+
+# Site-specific paths (see site.env.example)
+site.env

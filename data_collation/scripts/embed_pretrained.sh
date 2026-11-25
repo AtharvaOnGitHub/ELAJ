@@ -2,13 +2,15 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=06:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=120G
 #SBATCH --job-name=elaj_embed_pre
 #SBATCH --output=logs/embed_pretrained_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Embeds our val+test cells with a pretrained foundation model, zero-shot, and
 # writes an ExternalLatent for benchmark_baselines.sh to score.
@@ -47,9 +49,9 @@ set -euo pipefail
 
 MODEL="${1:-geneformer}"
 RUN="${2:-m6_drain}"
-PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
-MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
-ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
+PROCESSED=${ELAJ_BASE}/data/processed
+MODELS=${ELAJ_BASE}/models
+ENVS=${ELAJ_BASE}/envs
 
 case "${MODEL}" in
     geneformer) REPO="${MODELS}/Geneformer"  ;;
@@ -64,7 +66,7 @@ OUT="outputs/benchmarks/latents/${MODEL}"
 # On the project filesystem, not /scratch, which this script has never
 # verified exists on BlueBEAR. The tokenised dataset for 416,256 cells at
 # input size 2048 is several GB, so it does not belong in the repository.
-WORK="/rds/projects/a/acharjea-multi-omics/Atharva/scratch/${MODEL}_${SLURM_JOB_ID:-manual}"
+WORK="${ELAJ_BASE}/scratch/${MODEL}_${SLURM_JOB_ID:-manual}"
 
 # NO BEAR PYTHON MODULES. The venv built by install_foundation.sh carries its
 # own torch and everything else, precisely so nothing on the module path can
@@ -78,7 +80,7 @@ module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
 export PYTHONNOUSERSITE=1
 source "${VENV}/bin/activate"
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 nvidia-smi
 echo ""

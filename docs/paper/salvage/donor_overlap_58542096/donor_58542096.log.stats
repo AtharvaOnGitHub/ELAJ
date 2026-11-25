@@ -1,23 +1,23 @@
 +--------------------------------------------------------------------------+
 | Job on the BlueBEAR cluster:
-| Starting at Thu Oct 22 15:51:48 2026 for axw1008(946392)
+| Starting at Thu Oct 22 15:51:48 2026 for <user>
 | Identity jobid 58542096 jobname donor_overlap
-| Running against project acharjea-multi-omics and in partition icelake-shared
+| Running against project <project> and in partition icelake-shared
 | Requested cpu=4,mem=128G,node=1,billing=4 - 02:00:00 walltime
 | Allocated cpu=4,mem=128G,node=1,billing=4
 | Assigned to nodes bear-pg0105u05a
 | Command (null)
-| WorkDir /rds/homes/a/axw1008/axw1008
+| WorkDir <repo>
 +--------------------------------------------------------------------------+
 +--------------------------------------------------------------------------+
-| Finished at Thu Oct 22 15:52:09 2026 for axw1008(946392) on the BlueBEAR Cluster
+| Finished at Thu Oct 22 15:52:09 2026 for <user> on the BlueBEAR Cluster
 | Required (00:12.185 cputime, 938K memory used) - 00:00:21 walltime
 | JobState COMPLETING - Reason None
 | Exitcode 0:0
 +--------------------------------------------------------------------------+
 Job efficiency stats from seff for Job ID: 58542096
 Cluster: paddington
-User/Group: axw1008/users
+User/Group: <user>/users
 State: COMPLETED (exit code 0)
 Nodes: 1
 Cores per node: 4

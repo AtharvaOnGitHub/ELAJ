@@ -6,6 +6,9 @@
 #SBATCH --mem=128G
 #SBATCH --job-name=check_endo_cells
 #SBATCH --output=logs/check_endo_cells_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 module purge
 module load bear-apps/2024a
@@ -14,13 +17,14 @@ module load h5py/3.12.1-foss-2024a
 module load SciPy-bundle/2024.05-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
 python - <<'PYEOF'
+import os
 from pathlib import Path
 import anndata as ad
 
-PROCESSED = Path("/rds/projects/a/acharjea-multi-omics/Atharva/data/processed")
+PROCESSED = Path(os.environ["ELAJ_BASE"]) / "data" / "processed"
 
 totals = {}
 for path in sorted(PROCESSED.glob("*.h5ad")):

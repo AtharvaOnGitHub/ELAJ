@@ -5,9 +5,11 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --time=0:15:0
 #SBATCH --mem=8G
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --qos=bbdefault
 #SBATCH --output=logs/shuffle_vocabulary_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Builds the shuffled vocabulary the C-1 ablation (a1_randgroups) reads.
 #
@@ -33,8 +35,8 @@
 
 set -euo pipefail
 
-VOCAB_IN=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_v1.json
-VOCAB_OUT=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_v1_shuffled.json
+VOCAB_IN=${ELAJ_BASE}/data/processed/vocabulary_v1.json
+VOCAB_OUT=${ELAJ_BASE}/data/processed/vocabulary_v1_shuffled.json
 SEED=24
 
 module purge
@@ -43,7 +45,7 @@ module load Python/3.12.3-GCCcore-13.3.0
 module load SciPy-bundle/2024.05-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 if [ ! -f "${VOCAB_IN}" ]; then
     echo "source vocabulary missing: ${VOCAB_IN}" >&2

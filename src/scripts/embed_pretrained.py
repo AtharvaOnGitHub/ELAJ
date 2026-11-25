@@ -1,8 +1,8 @@
 """Embed our cells with a pretrained foundation model, in that model's own venv.
 
     python -m scripts.embed_pretrained --run m6_drain --model geneformer \
-        --repo /rds/projects/.../models/Geneformer \
-        --vocabulary /rds/projects/.../data/processed/vocabulary_wide.json \
+        --repo $ELAJ_BASE/models/Geneformer \
+        --vocabulary $ELAJ_BASE/data/processed/vocabulary_wide.json \
         --work /tmp/geneformer_work \
         --out outputs/benchmarks/latents/geneformer
 

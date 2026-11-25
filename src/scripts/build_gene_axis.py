@@ -1,8 +1,8 @@
 """Build a vocabulary that is ONLY a gene axis, dropping nothing.
 
     python -m scripts.build_gene_axis \
-        --gene-list /rds/.../data/processed/gene_list.txt \
-        --out /rds/.../data/processed/vocabulary_axis.json
+        --gene-list $ELAJ_BASE/data/processed/gene_list.txt \
+        --out $ELAJ_BASE/data/processed/vocabulary_axis.json
 
 WHY THIS EXISTS, AND WHY build_vocabulary.py CANNOT DO IT. On 12 October 2026
 a wide vocabulary was built with `--drop-unassigned` off and still came out at

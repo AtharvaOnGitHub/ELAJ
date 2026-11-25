@@ -48,8 +48,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# No absolute default anywhere: the repo is /rds/homes/a/axw1008/axw1008/src
-# on the HPC and .../ELAJ/axw1008/src on the Mac, and the dumps sit beside the
+# No absolute default anywhere: the repo is <repo>/src
+# on the HPC and .../ELAJ/<repo>/src on the Mac, and the dumps sit beside the
 # repo on one and two levels up on the other. Every sbatch wrapper in this
 # repo cds into the repo and passes `--root .`; this follows that.
 ARM = "p1_dab168_kl1"

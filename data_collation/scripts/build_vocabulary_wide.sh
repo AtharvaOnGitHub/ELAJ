@@ -6,6 +6,9 @@
 #SBATCH --mem=16G
 #SBATCH --job-name=elaj_vocab_wide
 #SBATCH --output=logs/build_vocabulary_wide_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # The WIDE vocabulary: every measured gene, not the pathway-annotated half.
 #
@@ -28,12 +31,12 @@
 # differ in exactly one thing: whether the unassigned half was kept. Keep it
 # that way, or the comparison acquires a second variable.
 
-export CORPUS=/rds/homes/a/axw1008/axw1008/src/configs/data/corpus_c1.yaml
-export GENE_LIST=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/gene_list.txt
-export VOCAB_OUT=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary_wide.json
+export CORPUS=${ELAJ_REPO}/src/configs/data/corpus_c1.yaml
+export GENE_LIST=${ELAJ_BASE}/data/processed/gene_list.txt
+export VOCAB_OUT=${ELAJ_BASE}/data/processed/vocabulary_wide.json
 export DROP_UNASSIGNED=0
 
 # Through `bash`, not `exec` on the path: sbatch READS a job script rather
 # than executing it, so nothing in this directory has ever needed the
 # executable bit. Invoking the interpreter explicitly makes the mode irrelevant.
-exec bash /rds/homes/a/axw1008/axw1008/data_collation/scripts/build_vocabulary.sh
+exec bash ${ELAJ_REPO}/data_collation/scripts/build_vocabulary.sh

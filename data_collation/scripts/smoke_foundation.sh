@@ -2,13 +2,15 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:1
 #SBATCH --time=00:15:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --job-name=elaj_fm_smoke
 #SBATCH --output=logs/fm_smoke_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Validates a foundation-model environment END TO END on 200 cells.
 #
@@ -58,9 +60,9 @@ RUN="${2:-m6_drain}"
 # cells is four chunks and still minutes.
 CELLS="${3:-2000}"
 
-PROCESSED=/rds/projects/a/acharjea-multi-omics/Atharva/data/processed
-MODELS=/rds/projects/a/acharjea-multi-omics/Atharva/models
-ENVS=/rds/projects/a/acharjea-multi-omics/Atharva/envs
+PROCESSED=${ELAJ_BASE}/data/processed
+MODELS=${ELAJ_BASE}/models
+ENVS=${ELAJ_BASE}/envs
 
 case "${MODEL}" in
     geneformer) REPO="${MODELS}/Geneformer" ;;
@@ -71,7 +73,7 @@ case "${MODEL}" in
 esac
 VENV="${ENVS}/fm_${MODEL}"
 OUT="outputs/benchmarks/latents/${MODEL}_smoke"
-WORK="/rds/projects/a/acharjea-multi-omics/Atharva/scratch/${MODEL}_smoke_${SLURM_JOB_ID:-manual}"
+WORK="${ELAJ_BASE}/scratch/${MODEL}_smoke_${SLURM_JOB_ID:-manual}"
 
 module purge
 module load bear-apps/2024a
@@ -82,7 +84,7 @@ module load Python/3.11.5-GCCcore-13.2.0 2>/dev/null \
 export PYTHONNOUSERSITE=1
 source "${VENV}/bin/activate"
 mkdir -p "${WORK}"
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 echo "── 1. the GPU, before anything expensive ──"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader

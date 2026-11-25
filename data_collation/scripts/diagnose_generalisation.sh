@@ -2,7 +2,6 @@
 #SBATCH --qos=bbgpu
 #SBATCH --gres=gpu:a100_80:1
 #SBATCH --time=02:00:00
-#SBATCH --account=acharjea-multi-omics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -13,6 +12,9 @@
 #SBATCH --mem=100G
 #SBATCH --job-name=elaj_diag_gen
 #SBATCH --output=logs/diag_gen_%j.log
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 
 # Where does the val_nb gap come from? No training, one checkpoint.
 #
@@ -69,9 +71,9 @@ module load h5py/3.12.1-foss-2024a
 module load matplotlib/3.9.2-gfbf-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 export PYTHONUNBUFFERED=1
 
 OUT="outputs/diagnostics/${RUN}"

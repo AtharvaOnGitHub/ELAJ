@@ -5,7 +5,7 @@ here and in each config's `description`. **Do not edit a prediction after its
 run has started** — a prediction rewritten to match a result is not one.
 
 ```bash
-cd ~/axw1008 && git pull && data_collation/scripts/launch_a1.sh
+cd <repo> && git pull && data_collation/scripts/launch_a1.sh
 ```
 
 Two GPUs run, three queue, SLURM starts the next as each finishes. Everything

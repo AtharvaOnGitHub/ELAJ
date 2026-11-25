@@ -1,4 +1,7 @@
 #!/bin/bash
+# Site-specific paths: copy site.env.example to site.env at the repo root.
+ELAJ_REPO="${ELAJ_REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$PWD}")}"
+source "$ELAJ_REPO/site.env"
 # What the validation label columns actually contain, per study.
 #
 #   bash data_collation/scripts/describe_labels.sh
@@ -23,9 +26,9 @@ module load h5py/3.12.1-foss-2024a
 module load anndata/0.10.9-foss-2024a
 
 export PYTHONNOUSERSITE=1
-source /rds/projects/a/acharjea-multi-omics/Atharva/envs/elaj/bin/activate
+source ${ELAJ_BASE}/envs/elaj/bin/activate
 
-cd /rds/homes/a/axw1008/axw1008/src
+cd "$ELAJ_REPO/src"
 
 export PYTHONUNBUFFERED=1
 python -u -m scripts.describe_labels --config "${CONFIG}" --root .

@@ -1,8 +1,8 @@
 """What a corrected vocabulary build would actually change. Writes nothing.
 
     python -m scripts.dry_run_vocabulary \
-        --processed /rds/projects/a/acharjea-multi-omics/Atharva/data/processed \
-        --vocabulary /rds/projects/a/acharjea-multi-omics/Atharva/data/processed/vocabulary.json \
+        --processed $ELAJ_BASE/data/processed \
+        --vocabulary $ELAJ_BASE/data/processed/vocabulary.json \
         --gene-sets-file data/gene_sets.json --hierarchy-dir data/hierarchy \
         --corpus configs/data/corpus_c1.yaml --root .
 

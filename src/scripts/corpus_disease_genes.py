@@ -32,8 +32,8 @@ Writes docs/paper/x19_corpus_disease_genes.csv.
 import re, sys
 from pathlib import Path
 import pandas as pd
-T = Path("/Users/atharvawaghmare/Endo research/My paper/Final 10/_txt")
-P = Path("/Users/atharvawaghmare/Endo research/ELAJ/axw1008/docs/paper")
+T = Path(__file__).resolve().parents[4] / "My paper" / "Final 10" / "_txt"
+P = Path(__file__).resolve().parents[2] / "docs" / "paper"
 vocab = set(pd.read_csv(P / "x12_gene_ranking.csv").iloc[:, 0].astype(str))
 FILES = {"duempelmann_2026": ["duempelmann_2026.txt"], "ferrero_2024": ["ferrero_2024_sarsenova.txt"],
          "fonseca_2023": ["fonseca_2023.txt", "fonseca_2023_frontiers.txt"], "garcia_alonso_2021": ["garcia_alonso_2021.txt"],

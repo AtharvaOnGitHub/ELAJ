@@ -55,3 +55,6 @@ htmlcov/
 # Doc files
 *.docx
 .preview/
+
+# Claude Code local settings
+.claude/
